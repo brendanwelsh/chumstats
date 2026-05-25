@@ -1,0 +1,11 @@
+﻿[
+  {
+    "antipattern": "single-font",
+    "name": "Single font for everything",
+    "description": "Only one font family is used for the entire page. Pair a distinctive display font with a refined body font to create typographic hierarchy.",
+    "severity": "warning",
+    "file": "http://127.0.0.1:5050/about",
+    "line": 0,
+    "snippet": "only font used is bricolage grotesque"
+  }
+]

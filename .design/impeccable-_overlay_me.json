@@ -1,0 +1,11 @@
+﻿[
+  {
+    "antipattern": "tiny-text",
+    "name": "Tiny body text",
+    "description": "Body text below 12px is hard to read, especially on high-DPI screens. Use at least 14px for body content, 16px is ideal.",
+    "severity": "warning",
+    "file": "http://127.0.0.1:5050/overlay/me",
+    "line": 0,
+    "snippet": "11px body text"
+  }
+]
