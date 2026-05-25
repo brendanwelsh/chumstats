@@ -26,3 +26,6 @@ data/
 Thumbs.db
 .vscode/
 .idea/
+
+# Screenshots dropped at root
+Screenshot*.png

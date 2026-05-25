@@ -329,7 +329,11 @@ class Dashboard:
 
 
 def build_dashboard(store, *, primary_id: str | None = None,
-                    name: str | None = None) -> Dashboard:
+                    name: str | None = None,
+                    include_bots: bool = True,
+                    mode_filter: int | None = None,
+                    platform_filter: str | None = None,
+                    window_days: int | None = None) -> Dashboard:
     """Aggregate everything we know about one player from all stored matches."""
     d = Dashboard()
     d.player_label = primary_id or name or "(unknown player)"
@@ -338,6 +342,38 @@ def build_dashboard(store, *, primary_id: str | None = None,
 
     where = "primary_id = ?" if primary_id else "name = ?"
     arg = primary_id or name
+    bot_filter = "" if include_bots else (
+        " AND NOT EXISTS (SELECT 1 FROM match_player_stats x "
+        "WHERE x.match_id = m.id AND x.is_bot = 1)"
+    )
+    # Mode filter: count team rosters and require team_size matches
+    mode_filter_sql = ""
+    if mode_filter is not None:
+        mode_filter_sql = """
+            AND (SELECT MAX(c) FROM (
+                SELECT team_num, COUNT(*) AS c
+                FROM match_player_stats
+                WHERE match_id = m.id
+                GROUP BY team_num
+            )) = """ + str(int(mode_filter))
+    # Platform filter targets the OPPONENT team (matches where the other
+    # team had a player on that platform). Filtering by the user's own
+    # platform isn't useful since they're always on the same one.
+    platform_sql = ""
+    if platform_filter:
+        platform_sql = (
+            " AND EXISTS (SELECT 1 FROM match_player_stats opp_p "
+            "WHERE opp_p.match_id = m.id AND opp_p.team_num != mps.team_num "
+            "AND opp_p.platform LIKE '%' || " + repr(platform_filter) + " || '%')"
+        )
+    # Window filter (last N days)
+    window_sql = ""
+    if window_days and window_days > 0:
+        import time as _time
+        cutoff = _time.time() - window_days * 86400
+        window_sql = f" AND m.started_at >= {cutoff}"
+    # Concatenate all filters
+    bot_filter = bot_filter + mode_filter_sql + platform_sql + window_sql
 
     with store._conn() as con:
         # ---- overview ----
@@ -365,7 +401,7 @@ def build_dashboard(store, *, primary_id: str | None = None,
                 SUM(boost_used)                                 AS boost_used
             FROM match_player_stats mps
             JOIN matches m ON m.id = mps.match_id
-            WHERE mps.{where}
+            WHERE mps.{where}{bot_filter}
         """, (arg,)).fetchone()
         if not row or not row["matches"]:
             return d
@@ -416,6 +452,10 @@ def build_dashboard(store, *, primary_id: str | None = None,
             ])
 
         # ---- records ----
+        records_filter = "" if include_bots else (
+            " AND match_id IN (SELECT m.id FROM matches m WHERE NOT EXISTS "
+            "(SELECT 1 FROM match_player_stats x WHERE x.match_id = m.id AND x.is_bot = 1))"
+        )
         rec = con.execute(f"""
             SELECT
                 MAX(goals)   AS max_g,
@@ -425,7 +465,7 @@ def build_dashboard(store, *, primary_id: str | None = None,
                 MAX(demos)   AS max_d,
                 MAX(score)   AS max_score
             FROM match_player_stats
-            WHERE {where}
+            WHERE {where}{records_filter}
         """, (arg,)).fetchone()
         if rec:
             d.records.lines.extend([
@@ -444,7 +484,7 @@ def build_dashboard(store, *, primary_id: str | None = None,
                    SUM(CASE WHEN mps.team_num = m.winner_team_num THEN 1 ELSE 0 END) AS w
             FROM match_player_stats mps
             JOIN matches m ON m.id = mps.match_id
-            WHERE mps.{where}
+            WHERE mps.{where}{bot_filter}
             GROUP BY m.arena
             ORDER BY n DESC
         """, (arg,)).fetchall()
@@ -463,7 +503,7 @@ def build_dashboard(store, *, primary_id: str | None = None,
                    SUM(CASE WHEN mps.team_num = m.winner_team_num THEN 1 ELSE 0 END) AS w
             FROM match_player_stats mps
             JOIN matches m ON m.id = mps.match_id
-            WHERE mps.{where}
+            WHERE mps.{where}{bot_filter}
             GROUP BY m.is_online
         """, (arg,)).fetchall()
         for r in mode_rows:
@@ -477,7 +517,7 @@ def build_dashboard(store, *, primary_id: str | None = None,
                    mps.goals, mps.assists, mps.saves
             FROM match_player_stats mps
             JOIN matches m ON m.id = mps.match_id
-            WHERE mps.{where}
+            WHERE mps.{where}{bot_filter}
             ORDER BY m.started_at DESC
             LIMIT 10
         """, (arg,)).fetchall()
@@ -580,14 +620,29 @@ class ComparisonResult:
     rows: list[CompareRow] = field(default_factory=list)
 
 
-def _lifetime_row(con, primary_id: str | None, name: str | None) -> dict:
-    """Aggregate stats for either primary_id (preferred) or name."""
+def _lifetime_row(con, primary_id: str | None, name: str | None,
+                  *, mode_filter: int | None = None,
+                  window_days: int | None = None) -> dict:
+    """Aggregate stats for either primary_id (preferred) or name. Optional
+    filters narrow the result to matches that match playlist size / recency."""
     if primary_id and primary_id != "Unknown|0|0":
         where, arg = "primary_id = ?", primary_id
     elif name:
         where, arg = "name = ?", name
     else:
         return {}
+    extras = ""
+    if mode_filter is not None:
+        extras += f"""
+            AND (SELECT MAX(c) FROM (
+                SELECT team_num, COUNT(*) AS c FROM match_player_stats
+                WHERE match_id = m.id GROUP BY team_num
+            )) = {int(mode_filter)}
+        """
+    if window_days and window_days > 0:
+        import time as _time
+        cutoff = _time.time() - window_days * 86400
+        extras += f" AND m.started_at >= {cutoff}"
     row = con.execute(f"""
         SELECT
             COUNT(*) AS matches,
@@ -612,7 +667,7 @@ def _lifetime_row(con, primary_id: str | None, name: str | None) -> dict:
             SUM(boost_used)        AS boost_used
         FROM match_player_stats mps
         JOIN matches m ON m.id = mps.match_id
-        WHERE mps.{where}
+        WHERE mps.{where}{extras}
     """, (arg,)).fetchone()
     return dict(row) if row else {}
 

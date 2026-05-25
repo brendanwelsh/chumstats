@@ -35,38 +35,19 @@ ICON_LOSS    = "💀"
 
 
 def _arena_pretty(arena: str) -> str:
-    """Map known arena codes to friendly names. Falls back to the raw string."""
-    table = {
-        "stadium_p": "DFH Stadium",
-        "stadium_day_p": "DFH Stadium (Day)",
-        "TrainStation_Night_P": "Urban Central (Night)",
-        "TrainStation_P": "Urban Central",
-        "EuroStadium_P": "Mannfield",
-        "EuroStadium_Night_P": "Mannfield (Night)",
-        "EuroStadium_Rainy_P": "Mannfield (Stormy)",
-        "Park_P": "Beckwith Park",
-        "Park_Night_P": "Beckwith Park (Night)",
-        "Park_Rainy_P": "Beckwith Park (Stormy)",
-        "TrainStation_Dawn_P": "Urban Central (Dawn)",
-        "HoopsStadium_P": "Dunk House (Hoops)",
-        "ShatterShot_P": "Core 707 (Dropshot)",
-        "Stadium_Winter_P": "Snowy Stadium (Snow Day)",
-        "ChinaStadium_P": "Forbidden Temple",
-        "Wasteland_P": "Wasteland",
-    }
-    if not arena:
-        return "Unknown arena"
-    return table.get(arena, table.get(arena.lower(), arena))
+    """Map RL arena codes to friendly names. Delegates to the canonical map
+    in server.py so the dashboard and bot stay in sync."""
+    from .server import _arena_nice
+    return _arena_nice(arena)
 
 
 def _team_block(team_num: int, team_name: str, team_score: int,
                 players: list, me, is_mvp_map: dict[str, bool]) -> str:
     """One team's roster as a fixed-width code block. Sorted by score desc.
 
-    For each player: NAME, Score, Goals, Assists, Saves, Shots, Demos.
-    For teammates (where we have spectator-visible advanced fields), an
-    indented second line shows: air%, wall%, supersonic%, avg speed, boost
-    used. Opponents get just the basic row.
+    Layout is tuned to fit within Discord's code-block width (~52 chars on
+    desktop, ~38 on mobile). We use shortened-but-readable column labels
+    and a single-line advanced row for teammates with spectator data.
 
     Row prefix:
        > = you  (so you can spot yourself at a glance)
@@ -76,11 +57,14 @@ def _team_block(team_num: int, team_name: str, team_score: int,
     """
     sorted_players = sorted(players, key=lambda p: p.score, reverse=True)
 
+    # Column widths chosen so a typical row is ~46 chars. Targets:
+    #   prefix(2) + name(15) + space + score(5) + sp + G(3) + sp + A(3)
+    #   + sp + Sv(3) + sp + Sh(3) + sp + D(2) = 45
+    name_w = 15
     rows: list[str] = []
-    # Header - full words instead of cryptic G/A/Sv/Sh/D.
     rows.append(
-        f"  {'PLAYER':<18} {'Score':>5}  {'Goals':>5}  {'Asts':>4}  "
-        f"{'Saves':>5}  {'Shots':>5}  {'Demos':>5}"
+        f"  {'PLAYER':<{name_w}} {'Score':>5} {'G':>3} {'A':>3} "
+        f"{'Sv':>3} {'Sh':>3} {'D':>2}"
     )
 
     for p in sorted_players:
@@ -91,27 +75,39 @@ def _team_block(team_num: int, team_name: str, team_score: int,
 
         prefix = "> " if is_me else "  "
 
+        # Compact (MVP)/(BOT) markers - we tag MVPs with an asterisk to save
+        # 4 chars in the name field; (BOT) still spelled out so opponents are
+        # clearly identifiable.
         suffix_bits: list[str] = []
-        if mvp:      suffix_bits.append("(MVP)")
+        if mvp:      suffix_bits.append("*")
         if p.is_bot: suffix_bits.append("(BOT)")
-        suffix = (" " + " ".join(suffix_bits)) if suffix_bits else ""
+        suffix = "".join(suffix_bits) if suffix_bits else ""
 
-        name_with_suffix = f"{p.name}{suffix}"[:18]
+        name_with_suffix = f"{p.name}{suffix}"[:name_w]
         rows.append(
-            f"{prefix}{name_with_suffix:<18} {p.score:>5}  {p.goals:>5}  "
-            f"{p.assists:>4}  {p.saves:>5}  {p.shots:>5}  {p.demos:>5}"
+            f"{prefix}{name_with_suffix:<{name_w}} "
+            f"{p.score:>5} {p.goals:>3} {p.assists:>3} "
+            f"{p.saves:>3} {p.shots:>3} {p.demos:>2}"
         )
         # Indented adv line only for teammates with spectator-visible data.
+        # Compact form, single-space separators - room for 5-digit boost.
         if is_teammate and p.ticks_total >= 200:
             rows.append(
-                f"    air {p.pct_in_air * 100:.0f}% · wall {p.pct_on_wall * 100:.0f}% · "
-                f"sup {p.pct_supersonic * 100:.0f}% · spd {p.avg_speed:.0f} · "
+                f"   air {p.pct_in_air * 100:.0f}% "
+                f"wall {p.pct_on_wall * 100:.0f}% "
+                f"sup {p.pct_supersonic * 100:.0f}% "
+                f"spd {p.avg_speed:.0f} "
                 f"boost {p.boost_used:.0f}"
             )
 
+    # MVP star legend - only if we actually rendered a *
+    legend = "  * = MVP" if any(is_mvp_map.get(p.primary_id) and not p.is_bot
+                                  for p in sorted_players) else ""
+
     icon = _team_emoji(team_num)
     title = f"{icon}  **{team_name}**  —  **{team_score}**"
-    body = "```\n" + "\n".join(rows) + "\n```"
+    body_lines = rows + ([legend] if legend else [])
+    body = "```\n" + "\n".join(body_lines) + "\n```"
     return title + "\n" + body
 
 
@@ -144,6 +140,7 @@ def build_match_embed(
     self_name: str | None = None,
     store=None,
     friends: list[str] | None = None,
+    public_url: str | None = None,
 ) -> discord.Embed:
     me = s.me(self_primary_id, self_name)
     won = bool(me and me.team_num == s.winner_team_num)
@@ -180,8 +177,15 @@ def build_match_embed(
         f"**{s.team1_score}  {s.team1_name}** {_team_emoji(1)}\n\n"
         f"`{arena_label}`  ·  `{mode_tag}`  ·  `{duration_str or '?'}`"
     )
+    # If we have a public URL configured, make the title a clickable link to
+    # the match-detail page.
+    embed_url = None
+    if public_url and s.match_id:
+        embed_url = f"{public_url.rstrip('/')}/match/{s.match_id}"
+
     embed = discord.Embed(
         title=f"{title_icon} {title_text}".strip(),
+        url=embed_url,
         color=color, description=description,
     )
 
@@ -234,13 +238,15 @@ class MatchPoster:
 
     def __init__(self, token: str, channel_id: int,
                  self_primary_id: str | None = None, self_name: str | None = None,
-                 store=None, friends: list[str] | None = None) -> None:
+                 store=None, friends: list[str] | None = None,
+                 public_url: str | None = None) -> None:
         self.token = token
         self.channel_id = channel_id
         self.self_primary_id = self_primary_id
         self.self_name = self_name
         self.store = store
         self.friends = friends or []
+        self.public_url = (public_url or "").rstrip("/")
         self.queue: asyncio.Queue[tuple[MatchSummary, SessionTotals]] = asyncio.Queue()
 
         intents = discord.Intents.default()
@@ -312,6 +318,7 @@ class MatchPoster:
                     self_name=self.self_name,
                     store=self.store,
                     friends=self.friends,
+                    public_url=self.public_url,
                 )
                 await channel.send(embed=embed)
             except discord.Forbidden:

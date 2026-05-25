@@ -38,6 +38,30 @@ def cmd_run(args: argparse.Namespace) -> int:
         self_name=args.me or settings.player_name,
     )
 
+    # Recover any matches whose live aggregation got dropped (e.g., we were
+    # restarted mid-match). Cheap to run — only inserts NEW matches.
+    try:
+        recovered = store.backfill_from_raw_events()
+        if recovered:
+            print(f"[startup] backfilled {recovered} missing match(es) from raw_events")
+    except Exception as e:
+        print(f"[startup] backfill skipped: {e}")
+
+    # Prune the high-rate tick events (UpdateState/BallHit/ClockUpdatedSeconds)
+    # for any match that's already been aggregated. Lifecycle / scoring events
+    # are kept forever so re-aggregation stays possible.
+    if not getattr(args, "no_prune", False):
+        try:
+            result = store.prune_raw_events(keep_days=7)
+            n = result.get("deleted") or 0
+            if n:
+                before = result.get("bytes_before") or 0
+                after = result.get("bytes_after") or 0
+                reclaimed = (before - after) / 1024 / 1024 if before and after else 0
+                print(f"[startup] pruned {n:,} tick rows ({reclaimed:.0f} MB reclaimed)")
+        except Exception as e:
+            print(f"[startup] prune skipped: {e}")
+
     enable_bot = not args.no_bot and bool(settings.discord_token and settings.discord_channel_id)
     enable_server = not args.no_server
 
@@ -75,6 +99,7 @@ def cmd_run(args: argparse.Namespace) -> int:
                 self_name=session.self_name,
                 store=store,
                 friends=settings.friends or [],
+                public_url=settings.public_url,
             )
             bot_task = asyncio.create_task(poster.run())
             print(f"[bot] posting to channel {settings.discord_channel_id}")
@@ -111,6 +136,7 @@ def cmd_run(args: argparse.Namespace) -> int:
                 last_arena = game.get("Arena") or last_arena
                 last_t0_name = t0.get("Name") or last_t0_name or "Blue"
                 last_t1_name = t1.get("Name") or last_t1_name or "Orange"
+                ball = game.get("Ball") or {}
                 payload = {
                     "team0_name":  last_t0_name,
                     "team1_name":  last_t1_name,
@@ -119,18 +145,31 @@ def cmd_run(args: argparse.Namespace) -> int:
                     "time_seconds": game.get("TimeSeconds", 0),
                     "is_overtime":  game.get("bOvertime", False),
                     "arena":        last_arena,
+                    "ball_speed":   ball.get("Speed", 0),
+                    "ball_team":    ball.get("TeamNum"),
+                    "has_winner":   game.get("bHasWinner", False),
+                    "winner":       game.get("Winner") or "",
                     "players": [
                         {
-                            "name":      p.get("Name", ""),
-                            "primary_id":p.get("PrimaryId", ""),
-                            "team_num":  p.get("TeamNum", 0),
-                            "boost":     p.get("Boost"),
-                            "is_bot":    (p.get("PrimaryId") == "Unknown|0|0"),
-                            "goals":     p.get("Goals", 0),
-                            "assists":   p.get("Assists", 0),
-                            "saves":     p.get("Saves", 0),
-                            "shots":     p.get("Shots", 0),
-                            "demos":     p.get("Demos", 0),
+                            "name":       p.get("Name", ""),
+                            "primary_id": p.get("PrimaryId", ""),
+                            "team_num":   p.get("TeamNum", 0),
+                            "is_bot":     (p.get("PrimaryId") == "Unknown|0|0"),
+                            "goals":      p.get("Goals", 0),
+                            "assists":    p.get("Assists", 0),
+                            "saves":      p.get("Saves", 0),
+                            "shots":      p.get("Shots", 0),
+                            "demos":      p.get("Demos", 0),
+                            "score":      p.get("Score", 0),
+                            "touches":    p.get("Touches", 0),
+                            "car_touches":p.get("CarTouches", 0),
+                            "boost":      p.get("Boost"),
+                            "speed":      p.get("Speed"),
+                            "on_ground":  p.get("bOnGround", False),
+                            "on_wall":    p.get("bOnWall", False),
+                            "has_car":    p.get("bHasCar", False),
+                            "boosting":   p.get("bBoosting", False),
+                            "supersonic": (p.get("Speed") or 0) >= 2200,
                         }
                         for p in (raw.get("Players") or [])
                     ],
@@ -448,6 +487,7 @@ def main(argv: list[str] | None = None) -> int:
     p_run.add_argument("--primary-id", default=None, help="Your primary_id (e.g. Steam|765...|0)")
     p_run.add_argument("--no-bot", action="store_true", help="Disable Discord bot")
     p_run.add_argument("--no-server", action="store_true", help="Disable overlay server")
+    p_run.add_argument("--no-prune", action="store_true", help="Skip startup prune of old tick events")
     p_run.set_defaults(func=cmd_run)
 
     p_replay = sub.add_parser("replay", help="Replay one or more .jsonl captures")

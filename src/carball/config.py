@@ -69,9 +69,16 @@ class Settings:
     # be restored by setting CARBALL_SERVER_HOST=127.0.0.1.
     server_host: str = "0.0.0.0"
     server_port: int = 5050
+    # Public URL used when generating links to share (e.g., Discord "View
+    # match" link). Defaults to http://carball.local:<port> — add a hosts
+    # file entry mapping carball.local -> 127.0.0.1 to make the alias
+    # resolve. Override with CARBALL_PUBLIC_URL when hosting on a real
+    # domain.
+    public_url: str = "http://carball.local:5050"
 
     @classmethod
     def from_env(cls) -> "Settings":
+        port = int(os.environ.get("CARBALL_SERVER_PORT", "5050"))
         return cls(
             db_path=os.environ.get("CARBALL_DB", str(Path.home() / ".carball" / "carball.db")),
             rl_host=os.environ.get("RL_HOST", "127.0.0.1"),
@@ -83,5 +90,6 @@ class Settings:
             player_primary_id=os.environ.get("RL_PLAYER_PRIMARY_ID") or None,
             friends=[s.strip() for s in (os.environ.get("RL_FRIENDS") or "").split(",") if s.strip()],
             server_host=os.environ.get("CARBALL_SERVER_HOST", "0.0.0.0"),
-            server_port=int(os.environ.get("CARBALL_SERVER_PORT", "5050")),
+            server_port=port,
+            public_url=(os.environ.get("CARBALL_PUBLIC_URL") or f"http://carball.local:{port}").rstrip("/"),
         )

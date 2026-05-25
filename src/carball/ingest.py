@@ -122,11 +122,41 @@ def run_live(
     on_event: Callable[[str, dict[str, Any]], None] | None = None,
     reconnect_delay: float = 2.0,
 ) -> None:
-    """Connect to RL, ingest forever. Reconnects on socket close."""
+    """Connect to RL, ingest forever. Reconnects on socket close.
+
+    Finalization happens on three triggers so we never lose a completed match
+    even when the user leaves early:
+      1. Next MatchCreated arrives (most common - between matches in a session).
+      2. MatchDestroyed arrives (clean exit through the post-game screen).
+      3. Socket closes with an ended agg (user quit RL without going through
+         the full post-game screen). Most common for the "leave matches a lot
+         when done" workflow.
+    """
+    # Shared helper used by all three finalization paths.
+    def _commit(agg: MatchAggregator, reason: str) -> None:
+        if not agg or not agg.ended:
+            return
+        s = agg.finalize()
+        if not s:
+            return
+        try:
+            store.save_match(s)
+        except Exception as e:
+            print(f"[ingest] save_match failed ({reason}): {e}")
+            return
+        session.add(s)
+        print(f"[ingest] finalized match ({reason}): "
+              f"{s.team0_name} {s.team0_score} - {s.team1_score} {s.team1_name}")
+        if on_match:
+            try:
+                on_match(s)
+            except Exception as e:
+                print(f"[ingest] on_match callback failed: {e}")
+
     while True:
+        agg: MatchAggregator | None = None
         try:
             print(f"[ingest] connecting to {host}:{port}...")
-            agg: MatchAggregator | None = None
             for env, _outer in iter_socket_envelopes(host, port):
                 received_at = time.time()
                 try:
@@ -134,21 +164,28 @@ def run_live(
                 except Exception:
                     continue
 
-                # Lifecycle: open/close MatchAggregator around match boundaries.
                 if event_name == "MatchCreated":
-                    if agg is not None and agg.ended:
-                        s = agg.finalize()
-                        if s:
-                            store.save_match(s)
-                            session.add(s)
-                            if on_match:
-                                on_match(s)
+                    if agg is not None:
+                        _commit(agg, "next match started")
                     agg = MatchAggregator()
+
+                # If we missed MatchCreated (server restarted mid-match), spawn
+                # an aggregator on demand the first time we see an event with a
+                # MatchGuid. This used to silently drop the whole match.
+                if agg is None and event_name in ("MatchInitialized", "UpdateState",
+                                                   "RoundStarted", "CountdownBegin",
+                                                   "GoalScored", "BallHit",
+                                                   "ClockUpdatedSeconds"):
+                    payload_guid = raw.get("MatchGuid") if isinstance(raw, dict) else None
+                    if payload_guid:
+                        agg = MatchAggregator()
+                        agg.match_guid = payload_guid
+                        print(f"[ingest] adopted in-progress match {payload_guid} "
+                              f"(MatchCreated was missed)")
 
                 if agg is not None:
                     agg.handle(event_name, parsed, raw=raw)
 
-                # Persist raw event (with match_id if we know it).
                 match_id = agg.match_guid if agg else ""
                 store.save_raw_event(
                     received_at,
@@ -161,22 +198,26 @@ def run_live(
                     on_event(event_name, raw)
 
                 if event_name == "MatchDestroyed" and agg is not None:
-                    if agg.ended:
-                        s = agg.finalize()
-                        if s:
-                            store.save_match(s)
-                            session.add(s)
-                            if on_match:
-                                on_match(s)
+                    _commit(agg, "MatchDestroyed")
                     agg = None
 
             print("[ingest] socket closed - reconnecting")
         except ConnectionRefusedError:
             print(f"[ingest] connection refused; is RL running with PacketSendRate > 0?")
         except KeyboardInterrupt:
+            # User Ctrl-C: try to salvage anything ended-but-not-destroyed.
+            if agg is not None:
+                _commit(agg, "shutdown")
             print("[ingest] interrupted")
             return
         except Exception as e:
             print(f"[ingest] error: {e}")
+        finally:
+            # Socket dropped (RL closed / network blip): salvage the agg if
+            # MatchEnded fired but MatchDestroyed never did. This is the
+            # "user left immediately at the end-screen" recovery path.
+            if agg is not None:
+                _commit(agg, "socket closed")
+            agg = None
 
         time.sleep(reconnect_delay)

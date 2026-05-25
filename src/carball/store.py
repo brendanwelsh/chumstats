@@ -195,6 +195,127 @@ class Store:
                 rows,
             )
 
+    # --- maintenance --------------------------------------------------------
+
+    def backfill_from_raw_events(self, since_ts: float | None = None) -> int:
+        """Replay raw_events through MatchAggregator and save any matches that
+        aren't already in `matches`. Returns the number of new matches saved.
+
+        If the live ingest is restarted mid-match (or misses MatchCreated for a
+        match that's already in progress), the events still land in raw_events
+        but no `matches` row is produced. This method recovers them.
+        """
+        from .models import EVENT_MODEL
+        from .session import run_aggregation
+
+        with self._conn() as c:
+            existing_ids = {r[0] for r in c.execute("SELECT id FROM matches")}
+            sql = "SELECT event, payload FROM raw_events"
+            params: tuple = ()
+            if since_ts is not None:
+                sql += " WHERE received_at >= ?"
+                params = (since_ts,)
+            sql += " ORDER BY received_at ASC, id ASC"
+            cur = c.execute(sql, params)
+
+            def _iter():
+                for event_name, payload_str in cur:
+                    if not event_name:
+                        continue
+                    try:
+                        raw = json.loads(payload_str) if payload_str else {}
+                    except Exception:
+                        continue
+                    model = EVENT_MODEL.get(event_name)
+                    parsed = None
+                    if model is not None:
+                        try:
+                            parsed = model.model_validate(raw)
+                        except Exception:
+                            parsed = None
+                    yield event_name, raw, parsed
+
+            summaries = run_aggregation(_iter())
+
+        saved = 0
+        for s in summaries:
+            if not s.match_id or s.match_id in existing_ids:
+                continue
+            try:
+                self.save_match(s)
+                saved += 1
+            except Exception:
+                pass
+        return saved
+
+    def prune_raw_events(self, keep_days: int = 7, vacuum: bool = True) -> dict:
+        """Drop the bulk high-rate event types (UpdateState, BallHit,
+        ClockUpdatedSeconds) for matches that have already been aggregated
+        into `matches`. Once a match has a summary row, the 30 Hz tick data
+        is redundant: we keep MatchCreated/Initialized/Ended/Destroyed/
+        GoalScored/CrossbarHit/StatfeedEvent so the match can still be
+        replayed/re-aggregated, but the ticks are dropped immediately.
+
+        For events with NULL match_id (orphans from missed-MatchCreated
+        before the fix), prune by `keep_days` since they're not recoverable.
+
+        Returns {'deleted': N, 'bytes_before': X, 'bytes_after': Y}.
+        """
+        import os as _os
+        import time as _time
+
+        path = self.db_path
+        bytes_before = _os.path.getsize(path) if path and _os.path.exists(path) else None
+
+        # Keep BallHit events forever - they're sparse (a few per second, not
+        # 30/sec like UpdateState) and we need them for kickoff tracking and
+        # touch heatmaps on historical matches.
+        bulk_events = ("UpdateState", "ClockUpdatedSeconds")
+        placeholders = ",".join(["?"] * len(bulk_events))
+        cutoff = _time.time() - keep_days * 86400
+
+        with self._conn() as c:
+            # 1) Aggregated matches: drop ticks regardless of age.
+            cur = c.execute(
+                f"""
+                DELETE FROM raw_events
+                WHERE event IN ({placeholders})
+                  AND match_id IN (SELECT id FROM matches)
+                """,
+                bulk_events,
+            )
+            deleted_aggregated = cur.rowcount or 0
+
+            # 2) NULL-match-id orphans older than the cutoff (likely never
+            #    going to become matches). Recent NULL events stay because the
+            #    backfill on next startup may still associate them.
+            cur = c.execute(
+                f"""
+                DELETE FROM raw_events
+                WHERE event IN ({placeholders})
+                  AND match_id IS NULL
+                  AND received_at < ?
+                """,
+                (*bulk_events, cutoff),
+            )
+            deleted_orphan = cur.rowcount or 0
+
+        deleted = deleted_aggregated + deleted_orphan
+        if deleted and vacuum:
+            try:
+                with self._conn() as c:
+                    c.execute("VACUUM")
+            except Exception:
+                pass
+        bytes_after = _os.path.getsize(path) if path and _os.path.exists(path) else None
+        return {
+            "deleted": deleted,
+            "deleted_aggregated": deleted_aggregated,
+            "deleted_orphan": deleted_orphan,
+            "bytes_before": bytes_before,
+            "bytes_after": bytes_after,
+        }
+
     # --- reads --------------------------------------------------------------
 
     def lifetime_for(self, primary_id: str | None = None, name: str | None = None) -> dict:
