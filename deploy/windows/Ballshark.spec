@@ -45,10 +45,14 @@ a = Analysis(
         "websockets", "websockets.legacy", "websockets.legacy.server",
         # FastAPI internals
         "fastapi",
-        # The lazily-imported ballshark submodules the subprocess uses.
+        # The lazily-imported ballshark submodules the subprocess + tray use.
+        # (Several are imported inside functions, which PyInstaller's static
+        # graph can miss — list them so the frozen build doesn't crash.)
         "ballshark.cli", "ballshark.server", "ballshark.ingest", "ballshark.session",
         "ballshark.store", "ballshark.analytics", "ballshark.models",
-        "ballshark.bot", "ballshark.sync",
+        "ballshark.bot", "ballshark.sync", "ballshark.replay",
+        "ballshark.identity", "ballshark.autostart", "ballshark.config_wizard",
+        "ballshark.tray_config", "ballshark.tray_wizard",
     ],
     hookspath=[],
     runtime_hooks=[],
