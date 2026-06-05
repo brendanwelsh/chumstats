@@ -1,6 +1,6 @@
 import sqlite3, json
 from collections import Counter
-c = sqlite3.connect("data/carball.db")
+c = sqlite3.connect("data/ballshark.db")
 ctr = Counter()
 for (p,) in c.execute("SELECT payload FROM raw_events WHERE event = 'StatfeedEvent'"):
     try:

@@ -1,4 +1,4 @@
-# carball
+# ballshark
 
 A self-contained Rocket League stats tracker. Lives on your machine, reads from the local Stats API that Rocket League itself opens, persists everything to a local SQLite DB, posts to your own Discord channel, and serves a local browser overlay.
 
@@ -29,7 +29,7 @@ After every match:
 
 ## What's out of scope (by design)
 
-These exist in other tools but require external services or replay-file parsing — neither of which carball does.
+These exist in other tools but require external services or replay-file parsing — neither of which ballshark does.
 
 - MMR / rank / season standings (Psyonix doesn't emit them on this socket)
 - Per-tick player XYZ positions (the API gives booleans and speed but not coordinates per player, so no positioning heatmaps from this data source)
@@ -49,7 +49,7 @@ python -m venv .venv
 ### 2. Enable the Stats API
 
 ```powershell
-.\.venv\Scripts\python.exe -m carball.cli setup
+.\.venv\Scripts\python.exe -m ballshark.cli setup
 ```
 
 Detects your RL install (Steam via registry + `libraryfolders.vdf`, or Epic via `Manifests\*.item`), backs up `DefaultStatsAPI.ini`, writes `PacketSendRate=30`. Idempotent — re-runs are no-ops if it's already enabled. Restart Rocket League afterward — the ini is only read on launch.
@@ -68,12 +68,12 @@ RL_PLAYER_PRIMARY_ID=Steam|7656...|0
 Setup pointers:
 - **Discord bot**: create at https://discord.com/developers/applications → New Application → Bot → Reset Token. Invite to your server with `bot` scope and `Send Messages` + `Embed Links` permission.
 - **Channel ID**: enable Developer Mode in Discord (User Settings → Advanced), right-click the channel → Copy Channel ID.
-- **Your primary_id**: easiest path — play one match with `carball run`, look at `data/carball.db` → `match_player_stats`, find your name, copy the `primary_id` field. Or pull it from any `UpdateState` row in a `.jsonl` capture.
+- **Your primary_id**: easiest path — play one match with `ballshark run`, look at `data/ballshark.db` → `match_player_stats`, find your name, copy the `primary_id` field. Or pull it from any `UpdateState` row in a `.jsonl` capture.
 
 ### 4. Run
 
 ```powershell
-.\.venv\Scripts\python.exe -m carball.cli run
+.\.venv\Scripts\python.exe -m ballshark.cli run
 ```
 
 Three things start:
@@ -86,17 +86,17 @@ Three things start:
 ## CLI
 
 ```
-carball setup [--rate 30 | --disable] [--rl-path C:\...\rocketleague]
-carball run [--no-bot] [--no-server] [--host ...] [--port 49123]
-carball replay <file...>                # backfill captures into the DB
-carball post-test <file...>             # one-shot Discord embed sanity check
-carball stats --primary-id "Steam|...|0"   # lifetime aggregates from the DB
+ballshark setup [--rate 30 | --disable] [--rl-path C:\...\rocketleague]
+ballshark run [--no-bot] [--no-server] [--host ...] [--port 49123]
+ballshark replay <file...>                # backfill captures into the DB
+ballshark post-test <file...>             # one-shot Discord embed sanity check
+ballshark stats --primary-id "Steam|...|0"   # lifetime aggregates from the DB
 ```
 
 ## Project layout
 
 ```
-src/carball/
+src/ballshark/
   models.py           pydantic types for every observed Stats API event
   ingest.py           TCP client + brace-aware JSON splitter + reconnect
   session.py          MatchAggregator + SessionTracker (W/L, streak, derived metrics)
@@ -106,7 +106,7 @@ src/carball/
   bot.py              discord.py poster + embed builder
   server.py           FastAPI + WS overlay backend
   overlay/            HTML / CSS / JS for the browser overlay
-  cli.py              `carball` entry point
+  cli.py              `ballshark` entry point
 captures/             .jsonl + .bin raw socket dumps from capture.ps1
 data/                 SQLite DB - gitignored
 tests/                pytest suite against the real captures
@@ -125,7 +125,7 @@ Four tables. Everything stays — we can re-derive new metrics from `raw_events`
 
 ## Capturing raw data without the pipeline
 
-If you want to record a session without `carball run` (to share fixture data or develop offline):
+If you want to record a session without `ballshark run` (to share fixture data or develop offline):
 
 ```powershell
 .\capture.ps1

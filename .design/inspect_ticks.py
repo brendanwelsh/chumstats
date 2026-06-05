@@ -1,5 +1,5 @@
 import sqlite3
-con = sqlite3.connect("data/carball.db")
+con = sqlite3.connect("data/ballshark.db")
 con.row_factory = sqlite3.Row
 ms = con.execute(
     "SELECT id, team0_name, team1_name, team0_score, team1_score, started_at, winner_team_num "

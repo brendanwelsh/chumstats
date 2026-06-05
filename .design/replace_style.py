@@ -1,5 +1,5 @@
 ﻿import re, pathlib, sys
-server = pathlib.Path("src/carball/server.py")
+server = pathlib.Path("src/ballshark/server.py")
 src = server.read_text(encoding="utf-8")
 new_css = pathlib.Path(".design/new_style.css").read_text(encoding="utf-8")
 pattern = re.compile(r'_STYLE_TAG\s*=\s*""".*?"""', re.DOTALL)

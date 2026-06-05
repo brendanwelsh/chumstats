@@ -4,7 +4,7 @@ import sqlite3, json, sys
 from collections import Counter, defaultdict
 
 match_id = sys.argv[1] if len(sys.argv) > 1 else "9E21A51A11F1509C07E53D81EC8E432E"
-c = sqlite3.connect("data/carball.db")
+c = sqlite3.connect("data/ballshark.db")
 c.row_factory = sqlite3.Row
 
 m = c.execute("SELECT * FROM matches WHERE id = ?", (match_id,)).fetchone()

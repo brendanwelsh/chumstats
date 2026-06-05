@@ -2715,9 +2715,28 @@ body.boost-exclude-self .boost-hud-card.is-self { display: none; }
 
 .boost-hud-card.tier-full .boost-hud-num { color: #34d399; }
 .boost-hud-card.tier-low  .boost-hud-num { color: #ef4444; }
+/* Blank/placeholder state - use the dim color (not faint) so the "--"
+   is clearly readable even at the giant placeholder size. Add a soft
+   "WAITING" watermark in the meter area so the user knows the card is
+   alive and waiting for data, not broken. */
 .boost-hud-card.no-data .boost-hud-num,
 .boost-hud-card.no-data .boost-hud-percent {
+  color: var(--text-dim);
+  opacity: 0.7;
+}
+.boost-hud-card.no-data::after {
+  content: "WAITING FOR LIVE DATA";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: clamp(11px, 1.4vh, 18px);
+  font-weight: 700;
+  letter-spacing: 0.22em;
   color: var(--text-faint);
+  pointer-events: none;
+  z-index: 1;
 }
 
 /* Flag chips — absolute, top-right corner of the card */
@@ -2800,14 +2819,29 @@ body.live-mode-boost .app-shell {
   flex-direction: column;
   min-height: 0;
 }
-/* In BOOST mode the sidebar collapses so the HUD owns the viewport */
+/* In BOOST mode the sidebar collapses so the HUD owns the viewport.
+   The whole vertical chain (wrapper → page-layout → page-main → live-page →
+   boost-root → boost-hud → boost-hud-grid → slots) must be flex-column with
+   `flex: 1 1 auto; min-height: 0` so the slots can stretch to 100vh.
+   Previously page-layout and page-main were `display: block`, which stopped
+   the flex chain cold and the HUD collapsed to 32px tall. */
 body.live-mode-boost .side-filters { display: none !important; }
 body.live-mode-boost .page-layout {
-  display: block !important;
+  display: flex !important;
+  flex-direction: column !important;
   grid-template-columns: 1fr !important;
   gap: 0 !important;
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  width: 100% !important;
 }
-body.live-mode-boost .page-main { display: block; }
+body.live-mode-boost .page-main {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+}
 /* Topnav is ~58px on default; flex-shrink lets it stay its natural size and
    leaves the rest for .live-page. */
 body.live-mode-boost .topnav { flex: 0 0 auto; }

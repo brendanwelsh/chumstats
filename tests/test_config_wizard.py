@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from carball.config_wizard import read_ini, write_packet_rate
+from ballshark.config_wizard import read_ini, write_packet_rate
 
 
 SAMPLE_INI = """\

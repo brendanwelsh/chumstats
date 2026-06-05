@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from carball.replay import iter_for_aggregator
-from carball.session import SessionTracker, run_aggregation
+from ballshark.replay import iter_for_aggregator
+from ballshark.session import MatchAggregator, SessionTracker, run_aggregation
 
 
 def test_online_match_summary(online_capture):
@@ -60,3 +60,26 @@ def test_session_tracker_aggregates(all_captures):
     assert t.current_streak == 2
     assert t.streak_label == "2W"
     assert t.goals == 11  # 4 + 7
+
+
+def test_force_finalize_infers_winner_without_matchended(exhibition_capture):
+    """If MatchEnded never fires (rage-quit / RL killed), force-finalize must
+    still recover the match by inferring the winner from the final scores —
+    while a normal finalize() correctly drops it."""
+    agg = MatchAggregator()
+    saw_end = False
+    for event_name, raw, parsed in iter_for_aggregator(exhibition_capture):
+        if event_name == "MatchEnded":
+            saw_end = True
+            break  # simulate RL killed at the end screen before MatchEnded fired
+        if event_name == "MatchCreated":
+            agg = MatchAggregator()  # single match in this fixture
+        agg.handle(event_name, parsed, raw=raw)
+
+    assert saw_end, "fixture should contain a MatchEnded that we skipped"
+    assert agg.ended is False
+    assert agg.finalize(force=False) is None          # lost without force
+    s = agg.finalize(force=True)                       # recovered with force
+    assert s is not None
+    assert (s.team0_score, s.team1_score) == (7, 5)
+    assert s.winner_team_num == 0                      # 7 > 5 -> team 0

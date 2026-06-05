@@ -6,5 +6,5 @@ if not exist ".venv\Scripts\python.exe" (
   pause
   exit /b 1
 )
-".venv\Scripts\python.exe" -m carball.cli dashboard
+".venv\Scripts\python.exe" -m ballshark.cli dashboard
 pause

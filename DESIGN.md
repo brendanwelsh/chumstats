@@ -1,7 +1,7 @@
-# Carball Tracker — Design System
+# Ballshark — Design System
 
 This is the working design system as of 2026-05-15, lifted from
-`src/carball/server.py`'s `_STYLE_TAG` and the parallel `.design/new_style.css`
+`src/ballshark/server.py`'s `_STYLE_TAG` and the parallel `.design/new_style.css`
 working copy.
 
 ## Color

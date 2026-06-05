@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>Carball Tracker - Steam|76561197985273611|0</title>
+<html lang="en"><head><meta charset="utf-8"><title>Ballshark - Steam|76561197985273611|0</title>
 
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700;12..96,800&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap');
@@ -2052,7 +2052,7 @@ table.history th .rl-icon,
   <circle cx="20" cy="17.4" r="0.7" fill="#fff" opacity="0.6"/>
 </svg></span>
     <span>
-      <div class="brand-name">Carball Tracker</div>
+      <div class="brand-name">Ballshark</div>
       <div class="brand-sub">v0.3 &middot; self-hosted</div>
     </span>
   </a>
@@ -2352,11 +2352,11 @@ table.history th .rl-icon,
   }
   function set(t) {
     document.documentElement.setAttribute('data-theme', t);
-    try { localStorage.setItem('carball-theme', t); } catch (e) {}
+    try { localStorage.setItem('ballshark-theme', t); } catch (e) {}
     paint(t);
   }
   var saved = null;
-  try { saved = localStorage.getItem('carball-theme'); } catch (e) {}
+  try { saved = localStorage.getItem('ballshark-theme'); } catch (e) {}
   if (!saved) {
     var prefers = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches;
     saved = prefers ? 'light' : 'dark';

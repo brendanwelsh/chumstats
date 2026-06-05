@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.welsh.ballshark</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>@VENV_DIR@/bin/ballshark</string>
+        <string>--db</string>
+        <string>@DATA_DIR@/central.db</string>
+        <string>serve</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>@INSTALL_DIR@</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>@VENV_DIR@/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+        <key>Crashed</key>
+        <true/>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>@INSTALL_DIR@/server.log</string>
+    <key>StandardErrorPath</key>
+    <string>@INSTALL_DIR@/server.log</string>
+
+    <!-- Throttle so a broken config doesn't spin-loop forever. -->
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+</dict>
+</plist>

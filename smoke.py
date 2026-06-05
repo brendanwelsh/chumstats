@@ -9,8 +9,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from carball.replay import iter_for_aggregator
-from carball.session import SessionTracker, run_aggregation
+from ballshark.replay import iter_for_aggregator
+from ballshark.session import SessionTracker, run_aggregation
 
 CAPTURES = Path(__file__).parent / "captures"
 

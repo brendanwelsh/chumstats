@@ -1,12 +1,12 @@
 # Multi-user Stats Network (Spec)
 
-Long-term architecture for syncing every friend's local Carball tracker to a
+Long-term architecture for syncing every friend's local Ballshark tracker to a
 central server hosted on the owner's domain. This is a SPEC — not yet
 implemented. Drop here so we don't forget the design when we get to it.
 
 ## Goal
 
-Every friend who runs `carball` locally automatically uploads their match
+Every friend who runs `ballshark` locally automatically uploads their match
 data to a central server. The central server:
 
 - Dedupes matches when multiple friends played the same game.
@@ -28,11 +28,11 @@ data to a central server. The central server:
 ```
 ┌────────────────┐  ┌────────────────┐  ┌────────────────┐
 │ Friend A laptop │  │ Friend B laptop │  │ Friend C laptop │
-│  carball run    │  │  carball run    │  │  carball run    │
+│  ballshark run    │  │  ballshark run    │  │  ballshark run    │
 └─────────┬───────┘  └─────────┬───────┘  └─────────┬───────┘
           │                    │                    │
           │   HTTPS POST  /api/v1/match-summary    │
-          │   X-Carball-Key: <api_key>             │
+          │   X-Ballshark-Key: <api_key>             │
           └────────────────────┴────────────────────┘
                                 │
                                 ▼
@@ -53,11 +53,11 @@ data to a central server. The central server:
 
 ## Identity & auth
 
-- Owner runs `carball admin create-user <discord_id>` on the server.
+- Owner runs `ballshark admin create-user <discord_id>` on the server.
 - Server returns an **API key** (UUIDv4) and a **user_id**.
-- User adds it to their local `.env` as `CARBALL_API_KEY=...` and
-  `CARBALL_REMOTE_URL=https://stats.yourdomain.com`.
-- Every upload carries `X-Carball-Key: <api_key>`.
+- User adds it to their local `.env` as `BALLSHARK_API_KEY=...` and
+  `BALLSHARK_REMOTE_URL=https://stats.yourdomain.com`.
+- Every upload carries `X-Ballshark-Key: <api_key>`.
 - Server stores `(user_id, primary_id_steam_or_epic)` — so when an upload
   carries a `match_player_stats` row for `primary_id = "Steam|765...|0"`,
   the server checks the API key's owner matches the primary_id.
@@ -149,7 +149,7 @@ CREATE TABLE users (
 1. Buy domain, point at a small VPS (Hetzner / Linode, $5/mo).
 2. Deploy a thin FastAPI server with just the two endpoints
    (`/api/v1/match-summary`, `/api/v1/auth`).
-3. Local client gets a new module `carball/sync.py` that hooks the
+3. Local client gets a new module `ballshark/sync.py` that hooks the
    existing `on_match` callback and POSTs to the remote.
 4. New unified web frontend (likely reuse 90% of the existing templates
    but the data layer is now the central DB).
@@ -160,7 +160,7 @@ CREATE TABLE users (
 
 - **Schema migrations.** If we evolve the local schema, how do clients
   with older versions upload?
-- **Backfill from older laptops.** A friend installing carball today
+- **Backfill from older laptops.** A friend installing ballshark today
   loses their prior matches forever. Worth supporting an
   `import-jsonl-capture` migration tool.
 - **Real-time sync of in-progress matches.** Out of scope for v1 - only

@@ -9,9 +9,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 TOKEN = (os.environ.get("DISCORD_TOKEN") or os.environ.get("DISCORD_BOT_TOKEN")
-         or os.environ.get("CARBALL_DISCORD_TOKEN"))
+         or os.environ.get("BALLSHARK_DISCORD_TOKEN"))
 CHANNEL_ID = int(os.environ.get("DISCORD_CHANNEL_ID")
-                 or os.environ.get("CARBALL_DISCORD_CHANNEL_ID") or 0)
+                 or os.environ.get("BALLSHARK_DISCORD_CHANNEL_ID") or 0)
 SELF_NAME = os.environ.get("RL_PLAYER_NAME") or "@ChumtheWaters"
 SELF_PID = os.environ.get("RL_PLAYER_PRIMARY_ID") or "Steam|76561197985273611|0"
 
@@ -25,11 +25,11 @@ if len(sys.argv) < 2:
 
 match_id = sys.argv[1]
 sys.path.insert(0, "src")
-from carball.session import MatchSummary, PlayerLine, SessionTotals
-from carball.store import Store
-from carball.bot import post_one
+from ballshark.session import MatchSummary, PlayerLine, SessionTotals
+from ballshark.store import Store
+from ballshark.bot import post_one
 
-store = Store("data/carball.db")
+store = Store("data/ballshark.db")
 with store._conn() as con:
     m = con.execute("SELECT * FROM matches WHERE id = ?", (match_id,)).fetchone()
     if not m:

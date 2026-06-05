@@ -1,4 +1,4 @@
-# Carball Tracker — Product Context
+# Ballshark — Product Context
 
 ## Product purpose
 
@@ -14,7 +14,7 @@ sits between the in-game Stats API (a local TCP socket the game opens when
 
 It is explicitly **not** a public leaderboard, not a SaaS product, not multi-tenant.
 No third-party data feeds (no ballchasing.com, no tracker.gg, no Psyonix REST). Everything
-runs from the local TCP socket and a SQLite file at `data/carball.db`.
+runs from the local TCP socket and a SQLite file at `data/ballshark.db`.
 
 ## Register
 

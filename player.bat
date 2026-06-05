@@ -8,5 +8,5 @@ if "%~1"=="" (
   pause
   exit /b 1
 )
-".venv\Scripts\python.exe" -m carball.cli player %*
+".venv\Scripts\python.exe" -m ballshark.cli player %*
 pause

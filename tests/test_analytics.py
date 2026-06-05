@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from carball.analytics import build_analytics, build_dashboard
-from carball.replay import iter_for_aggregator
-from carball.session import run_aggregation
-from carball.store import Store
+from ballshark.analytics import build_analytics, build_dashboard
+from ballshark.replay import iter_for_aggregator
+from ballshark.session import run_aggregation
+from ballshark.store import Store
 
 
 ME_PID = "Steam|76561197985273611|0"

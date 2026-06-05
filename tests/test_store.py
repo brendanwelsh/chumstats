@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from carball.replay import iter_for_aggregator
-from carball.session import run_aggregation
-from carball.store import Store
+from ballshark.replay import iter_for_aggregator
+from ballshark.session import run_aggregation
+from ballshark.store import Store
 
 
 def test_store_roundtrip(tmp_path, online_capture, exhibition_capture):

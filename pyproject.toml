@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "carball"
+name = "ballshark"
 version = "0.0.1"
 description = "Rocket League Stats API ingest, session/lifetime tracker, and overlay backend."
 requires-python = ">=3.11"
@@ -32,10 +32,10 @@ dev = [
 ]
 
 [project.scripts]
-carball = "carball.cli:main"
+ballshark = "ballshark.cli:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/carball"]
+packages = ["src/ballshark"]
 
 [tool.ruff]
 line-length = 110

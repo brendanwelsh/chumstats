@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from carball.models import (
+from ballshark.models import (
     EVENT_MODEL,
     Envelope,
     GoalScored,
