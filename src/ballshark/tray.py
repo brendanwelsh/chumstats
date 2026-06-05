@@ -296,9 +296,43 @@ class StateMonitor(threading.Thread):
             return
         if t in ("tick", "match_start"):
             self._last_tick = time.time()
+        if t == "match_end":
+            self._maybe_persist_identity(obj.get("data") or {})
         # match_end: fall through; tick-freshness window dictates state.
         if t in ("tick", "match_start", "match_end"):
             self._update_state()
+
+    def _maybe_persist_identity(self, summary: dict) -> None:
+        """Keep the stored identity in sync with the real match: lock our account
+        ID the first time we see ourselves (rename-safe from game one — matters
+        for Epic users who typed a name once) and refresh the display name to the
+        current in-game name. All keyed on the stable primary_id once we have it."""
+        players = summary.get("players") or []
+        if not players:
+            return
+        try:
+            from . import tray_config
+            from .identity import resolve_self_in_match
+            cfg = tray_config.load()
+        except Exception:
+            return
+        new_name, new_pid, locked = resolve_self_in_match(
+            players, cfg.rl_player_name, cfg.rl_player_primary_id)
+        if new_name == cfg.rl_player_name and new_pid == cfg.rl_player_primary_id:
+            return
+        cfg.rl_player_name = new_name
+        cfg.rl_player_primary_id = new_pid
+        try:
+            tray_config.save(cfg)
+            log.info("identity synced from match: name=%r primary_id=%r (locked=%s)",
+                     new_name, new_pid, locked)
+        except Exception:
+            log.exception("failed to persist identity")
+            return
+        if locked:
+            # Restart so the tracker self-identifies by the locked account id
+            # (also enables upload for friends who had no id configured before).
+            threading.Thread(target=self._server.restart, daemon=True).start()
 
     def set_paused(self, paused: bool) -> None:
         self._paused = paused

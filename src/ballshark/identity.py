@@ -69,6 +69,42 @@ def _steam_persona(steamid64: int) -> str:
     return ""
 
 
+def resolve_self_in_match(players: list[dict], cur_name: str,
+                          cur_pid: str) -> tuple[str, str, bool]:
+    """Decide the identity to persist after a finished match.
+
+    Returns (name, primary_id, locked):
+      - name: our CURRENT in-game name (auto-corrected from the match).
+      - primary_id: unchanged if already set; otherwise CAPTURED from the match
+        so a later name/clan-tag change never unlinks us again.
+      - locked: True only when we newly captured a primary_id this call.
+
+    We find ourselves by primary_id when we have one, else by the stored name —
+    preferring a name match on our OWN team (a row that has tick telemetry) so we
+    don't grab an opponent who happens to share the name. Inputs are returned
+    unchanged when we can't find ourselves (and we never lock onto a bot).
+    """
+    me = None
+    if cur_pid:
+        me = next((p for p in players if p.get("primary_id") == cur_pid), None)
+    elif cur_name:
+        cands = [p for p in players if p.get("name") == cur_name]
+        me = next((p for p in cands if (p.get("ticks_total") or 0) > 0), None)
+        if me is None and cands:
+            me = cands[0]
+    if not me:
+        return cur_name, cur_pid, False
+
+    new_pid = cur_pid
+    locked = False
+    cand_pid = me.get("primary_id") or ""
+    if not cur_pid and cand_pid and cand_pid != "Unknown|0|0":
+        new_pid = cand_pid
+        locked = True
+    new_name = me.get("name") or cur_name
+    return new_name, new_pid, locked
+
+
 def detect_local_identity() -> dict | None:
     """Return {'primary_id', 'name', 'platform'} for the local player, or None
     if we can't detect it (e.g. Epic, or Steam not logged in)."""
