@@ -1,5 +1,7 @@
 # ballshark
 
+> 🚧 **Work in progress** — a personal project I'm actively building. Expect rough edges and breaking changes.
+
 A self-contained Rocket League stats tracker. Lives on your machine, reads from the local Stats API that Rocket League itself opens, persists everything to a local SQLite DB, posts to your own Discord channel, and serves a local browser overlay.
 
 **Zero third-party data sources.** No ballchasing, no tracker.gg, no Psyonix REST scraping. The only thing on the wire to a remote service is your Discord bot posting to your channel. Everything else is local.
