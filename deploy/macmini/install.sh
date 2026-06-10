@@ -11,7 +11,7 @@
 
 set -euo pipefail
 
-REPO_URL="${BALLSHARK_REPO_URL:-https://github.com/welsh/RLStats.git}"
+REPO_URL="${BALLSHARK_REPO_URL:-https://github.com/brendanwelsh/ballshark.git}"
 INSTALL_DIR="${BALLSHARK_INSTALL_DIR:-$HOME/ballshark}"
 DATA_DIR="${BALLSHARK_DATA_DIR:-$INSTALL_DIR/data}"
 VENV_DIR="$INSTALL_DIR/.venv"
@@ -22,12 +22,21 @@ echo "==> ballshark server install"
 echo "    INSTALL_DIR=$INSTALL_DIR"
 echo "    DATA_DIR=$DATA_DIR"
 
-# 1. Prereqs.
-command -v python3 >/dev/null || { echo "ERROR: python3 not found. Install from python.org or via brew."; exit 1; }
-command -v git     >/dev/null || { echo "ERROR: git not found. Install Xcode CLT: xcode-select --install"; exit 1; }
-PYVER=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
-echo "    python3 = $PYVER"
-[[ "$PYVER" < "3.11" ]] && { echo "ERROR: need Python >= 3.11"; exit 1; }
+# 1. Prereqs: git + a Python >= 3.11.
+# macOS ships an old system python3 (3.9 on current Sequoia) and the Mac mini has
+# no Homebrew, so we use uv — a userspace tool (no sudo) that fetches a
+# standalone CPython and builds the venv. This is exactly how the live server was
+# provisioned; it sidesteps the 3.9 floor without touching system Python.
+command -v git >/dev/null || { echo "ERROR: git not found. Install Xcode CLT: xcode-select --install"; exit 1; }
+UV="$HOME/.local/bin/uv"
+if ! command -v uv >/dev/null && [ ! -x "$UV" ]; then
+    echo "==> installing uv (userspace Python/venv manager)"
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+fi
+[ -x "$UV" ] || UV="$(command -v uv)"
+echo "    uv = $("$UV" --version)"
+echo "==> ensuring CPython 3.12 is available"
+"$UV" python install 3.12
 
 # 2. Clone or pull.
 if [ -d "$INSTALL_DIR/.git" ]; then
@@ -38,14 +47,13 @@ else
     git clone "$REPO_URL" "$INSTALL_DIR"
 fi
 
-# 3. Venv + install.
+# 3. Venv + install (via uv, Python 3.12).
 if [ ! -d "$VENV_DIR" ]; then
-    echo "==> creating venv"
-    python3 -m venv "$VENV_DIR"
+    echo "==> creating venv (python 3.12)"
+    "$UV" venv --python 3.12 "$VENV_DIR"
 fi
 echo "==> installing ballshark + server + bot extras"
-"$VENV_DIR/bin/pip" install --quiet --upgrade pip
-"$VENV_DIR/bin/pip" install --quiet -e "$INSTALL_DIR[server,bot]"
+VIRTUAL_ENV="$VENV_DIR" "$UV" pip install -e "$INSTALL_DIR[server,bot]"
 
 # 4. Data dir + .env stub.
 mkdir -p "$DATA_DIR"

@@ -14,6 +14,75 @@ After every match:
 - **Browser overlay** at `http://127.0.0.1:5050/` — dark glass card with live boost bars + score during a match, last-game card between matches, session strip always at the bottom. Drop into OBS as a browser source or just open on a second monitor.
 - **SQLite DB** with every event, every player line, every ball touch, every goal — keyed so you can run any query you want against your own history.
 
+## Pages and views
+
+Ballshark serves two surfaces: a **live overlay** (OBS-ready) and a full **analytics dashboard**. On a single machine both are served locally at `http://127.0.0.1:5050/`. In a multi-machine setup the analytics pages are served by the central server while each player's machine runs the overlay locally — see [Deployment](#deployment-single-machine-or-central-server).
+
+> Screenshots below are from a live instance with real match data. They are refreshed as the UI changes.
+
+### Live overlay — `/live`
+
+![Live overlay](docs/screenshots/live.png)
+
+*Live overlay: real-time scoreboard with per-player boost, speed and position, updated at the Stats API's 30 Hz during a match.*
+
+- **Shows:** both rosters with live score, goals / assists / saves / shots / demos, touches, boost amount, speed, and ground/air/wall position while you play. Game-mode and hide-bots filters on the left; a dedicated **Boost view** strips it down to boost bars for streaming.
+- **Plan:** richer between-match "last game" card, then a native always-on-top overlay window instead of a browser source.
+
+### Career dashboard — `/dashboard` (and `/player/<name>` for anyone)
+
+![Career dashboard](docs/screenshots/dashboard.png)
+
+*Career dashboard: headline record, form, a ball-touch heatmap, recent matches, derived movement metrics, and splits by mode / arena / opponent.*
+
+- **Shows:** lifetime wins-losses, win rate, recent-form dots, average goals; a touch heatmap built from logged `BallHit` positions; a recent-matches table; movement metrics (average speed, supersonic %, air/wall/ground time, boost used); single-match records; and breakdowns by playlist and by arena. `/player/<name>` renders the same page for any player you have ever shared a match with.
+- **Plan:** date-window comparisons (this week vs last), and per-metric trend sparklines.
+
+### Match history — `/history`
+
+![Match history](docs/screenshots/history.png)
+
+*Match history: every match in reverse-chronological order with result, score, mode, your line, and the opponents' club tags.*
+
+- **Shows:** one row per match — result badge, blue/orange score bar, playlist, your goals/assists/saves, and the opposing club. Filter by mode, platform, date range, and bots; sort by recent, score, goals, saves, or best game. Each row links to its match-detail page.
+- **Plan:** inline expand for the full scoreboard without leaving the list.
+
+### Players directory — `/players`
+
+![Players directory](docs/screenshots/players.png)
+
+*Players directory: everyone you have ever shared a match with — teammates, opponents, randoms — sorted by how often you have played with or against them.*
+
+- **Shows:** name, platform, matches, goals, saves for every tracked player, with relation (all / teammates / opponents) and mode/platform/date filters. Click through to anyone's career page.
+- **Plan:** chemistry indicators (win rate when teamed with each player).
+
+### Compare players — `/compare`
+
+![Compare players](docs/screenshots/compare.png)
+
+*Compare players: up to three players side by side across the full stat sheet, with each player's touch heatmap and the best value in each row highlighted.*
+
+- **Shows:** scoring, defense, positioning, supersonic/air time, per-match rates and totals for you plus two others (defaults to your most-played teammates), lifetime or windowed. Heatmaps per player at the top.
+- **Plan:** save comparison presets; add head-to-head context (record when these players faced each other).
+
+### Opponents — `/opponents`
+
+![Opponents](docs/screenshots/opponents.png)
+
+*Opponents: every player you have faced, with your win-loss record against them, plus an opposing-clubs roll-up.*
+
+- **Shows:** per-opponent matches, your record, win %, and goals for/against, sorted by how often you have met. A second table aggregates the clubs you have played against and the members you have seen in each.
+- **Plan:** "nemesis" / "favourite victim" callouts and recent-form vs each opponent.
+
+### Clubs — `/clan` (and `/club/<name>`)
+
+![Clubs](docs/screenshots/clan.png)
+
+*Clubs: group view for a chosen set of teammates (a "club"), aggregating the friend group's combined record and stats.*
+
+- **Shows:** combined record and stats for a selected roster of teammates; `/club/<name>` drills into a single club tag seen in match data.
+- **Plan:** this is the natural home for the multi-user friend-group leaderboard once more friends are uploading.
+
 ## What's in scope
 
 | | |
@@ -94,6 +163,46 @@ ballshark replay <file...>                # backfill captures into the DB
 ballshark post-test <file...>             # one-shot Discord embed sanity check
 ballshark stats --primary-id "Steam|...|0"   # lifetime aggregates from the DB
 ```
+
+## Deployment: single machine or central server
+
+Ballshark runs in one of two shapes.
+
+**Single machine (default).** `ballshark run` on your gaming PC does everything: ingest from the Stats API, local SQLite, Discord embed, local overlay, and the full dashboard at `http://127.0.0.1:5050/`. Nothing leaves your machine except the Discord post.
+
+**Central server (friend group).** An always-on box (here: a Mac mini, `welsh-macmini`) runs `ballshark serve` — the same FastAPI app with no RL ingest. Each player's machine runs `ballshark run` and uploads finalized match summaries to it; the server dedupes by RL `MatchGuid` and serves one unified dashboard for the whole group.
+
+```
+ your gaming PC                       friends' PCs
+ ballshark run ── upload ─┐          ┌─ ballshark run
+                          ▼          ▼
+                  central server (ballshark serve)
+                  /dashboard /history /players /clan ...
+                          │
+              Tailscale  (welsh-macmini:5050)
+              + optional Cloudflare Tunnel → https://<your-domain>
+```
+
+What works **today** (implemented, not just spec):
+
+- `ballshark serve` — central FastAPI app + match-summary upload endpoint (`src/ballshark/server.py`).
+- `src/ballshark/sync.py` — client uploads each finalized match, auth via `X-Ballshark-Key`; the server rejects rows that claim a primary_id the key doesn't own.
+- `ballshark admin create-user` / `list-users` — provision one API key per friend.
+- `ballshark push-history` — backfill an existing local DB to the central server.
+- Reachable over Tailscale (`http://<host>:5050`) with no public DNS.
+
+To stand up the central server, see [`deploy/macmini/README.md`](deploy/macmini/README.md). To make a client upload, set in its `.env`:
+
+```env
+BALLSHARK_REMOTE_URL=http://<central-host>:5050
+BALLSHARK_API_KEY=<key from `ballshark admin create-user`>
+```
+
+**Public domain (optional).** For access beyond your tailnet, put the server behind a Cloudflare Tunnel and point a domain at it (see [deploy/macmini/README.md](deploy/macmini/README.md#cloudflare-tunnel-public-access)), then set `BALLSHARK_PUBLIC_URL=https://<your-domain>` so shared links (the Discord "view match" link) use it.
+
+### Start on Windows login
+
+The owner's machine launches the tray app (which runs `ballshark run`) from a per-user `Run` registry entry — no admin rights, no Task Scheduler service. The tray's **Start with Windows** toggle writes/removes that entry (`src/ballshark/autostart.py`), and a single-instance lock (a loopback bind on port 5051) stops a second launch from spawning a duplicate server.
 
 ## Project layout
 

@@ -31,18 +31,25 @@ and (optionally) the Discord bot, nothing else. RL → server data flow is
 ## One-time install
 
 ```bash
-ssh welsh-macmini                                  # Tailscale SSH
-git clone https://github.com/<you>/RLStats.git ~/ballshark
+ssh welsh-macmini                                  # Tailscale SSH (key auth)
+git clone https://github.com/brendanwelsh/ballshark.git ~/ballshark
 cd ~/ballshark
 ./deploy/macmini/install.sh
 ```
 
 The installer:
-- Creates a Python 3.11+ venv under `~/ballshark/.venv`
-- `pip install -e .[server,bot]`
-- Drops a starter `.env` from `.env.example` (edit before starting)
+- Installs `uv` (userspace, no sudo) and fetches **CPython 3.12** — macOS ships
+  Python 3.9 and this Mac mini has no Homebrew, so we don't use system Python.
+- Creates `~/ballshark/.venv` and `uv pip install -e .[server,bot]`
+- Drops a starter `.env` from `.env.example` (edit before starting — make sure
+  `BALLSHARK_SERVER_HOST=0.0.0.0` so the tailnet can reach it)
 - Writes `~/Library/LaunchAgents/com.welsh.ballshark.plist` and loads it
 - Launches `ballshark --db ~/ballshark/data/central.db serve` at login + on crash
+
+> **Tailnet-only works today — no domain required.** Once the service is up,
+> reach it from any tailnet device at `http://welsh-macmini:5050/dashboard`.
+> The Cloudflare Tunnel section below is only needed for public access from a
+> real domain.
 
 Edit `~/ballshark/.env` with your real `BALLSHARK_PUBLIC_URL` and Discord vars,
 then reload:
