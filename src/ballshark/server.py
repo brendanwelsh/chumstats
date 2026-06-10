@@ -4190,15 +4190,17 @@ _PLAYBACK_JS = r"""
 
 def _ball_heatmap_svg(playback: dict, player_filter: str | None = None,
                      compact: bool = False, key: str = "") -> str:
-    """Top-down ball-touch heatmap. Each BallHit becomes a soft radial-gradient
-    glow; many glows overlap to produce density. Two layers (one per team)
-    with `mix-blend-mode: screen` so contested zones blend visually rather
-    than overwriting each other.
+    """Top-down ball-touch *density* heatmap.
 
-    `player_filter` restricts to one player's touches (used for per-player
-    mini-heatmaps). `key` must be unique per heatmap on the page so the
-    gradient ids don't collide (per-SVG id resolution isn't strictly scoped
-    across inline SVGs)."""
+    Every BallHit is splatted as a soft point, Gaussian-blurred into a
+    continuous density field, then recoloured through a thermal palette LUT
+    (cool/sparse -> hot/dense) via feComponentTransfer. This reads like a real
+    heatmap — you see where the ball actually lived — instead of a scatter of
+    team-tinted dots. Team is intentionally ignored here: density is the signal.
+
+    `player_filter` restricts to one player's touches. `key` must be unique per
+    heatmap on the page so the <filter>/<gradient> ids don't collide (inline
+    SVG id resolution isn't reliably scoped per-svg across browsers)."""
     ball = playback.get("ball_track") or []
     if player_filter:
         ball = [bh for bh in ball if bh["player"] == player_filter]
@@ -4210,46 +4212,52 @@ def _ball_heatmap_svg(playback: dict, player_filter: str | None = None,
     pad_x, pad_y = svg["pad_x"], svg["pad_y"]
     pitch_w, pitch_h = svg["pitch_w"], svg["pitch_h"]
 
-    # Tight, transparent glows so overlap visibly accumulates into density.
-    # Each individual hit is a small, soft dot - hot zones emerge from many
-    # hits stacking, not from one giant blob.
-    glow_r = 9 if compact else 14
-    glow_opacity = 0.22 if compact else 0.18
+    # Per-point opacity adapts to touch count so a ~40-touch per-player mini and
+    # a ~2000-touch lifetime map both land in a readable density band: fewer
+    # touches -> warmer per hit so isolated touches still register; many touches
+    # -> fainter per hit so genuine hot zones stand out instead of the whole
+    # pitch saturating. The blur then turns the splats into a continuous field.
+    n = len(ball)
+    # Sparse data can't be both smooth AND warm (a single blurred touch either
+    # spreads thin -> cold, or stays tight -> warm). Per-player minis have few
+    # touches, so we keep them tight + a higher opacity ceiling: each touch reads
+    # as a hot mark, overlaps go red. Dense lifetime maps use a wider blur and a
+    # lower opacity so genuine hot zones emerge instead of the pitch saturating.
+    pt_opacity = max(0.06, min(0.60, 2.4 / (n ** 0.5)))
+    pt_r  = 5 if compact else 6
+    blur  = 4 if compact else 13
 
-    suffix = f"-{key}" if key else ""
-    blue_grad = f"hm-blue-grad{suffix}"
-    orng_grad = f"hm-orng-grad{suffix}"
+    sfx = f"-{key}" if key else ""
+    heat_id = f"heat{sfx}"
 
-    blue_circles = []
-    orng_circles = []
-    for bh in ball:
-        c = (f'<circle cx="{bh["sx"]:.1f}" cy="{bh["sy"]:.1f}" '
-             f'r="{glow_r}" />')
-        if bh["team"] == 0:
-            blue_circles.append(c)
-        elif bh["team"] == 1:
-            orng_circles.append(c)
+    pts = "".join(
+        f'<circle cx="{bh["sx"]:.1f}" cy="{bh["sy"]:.1f}" r="{pt_r}" '
+        f'fill="#000" fill-opacity="{pt_opacity:.3f}"/>'
+        for bh in ball
+    )
 
-    # Sharp bullseye: center is hot, falls off fast. Center stop sits at
-    # ~70% opacity of glow_opacity to keep individual dots crisp; outer ring
-    # fades quickly so adjacent dots don't bleed into one smear.
+    # The filter: blur the splats into a density field, copy that density into
+    # every channel (with a gain so mid densities reach the warm colours), then
+    # the LUT recolours it cold->hot and the alpha curve fades empty space out.
+    # 8-sample thermal ramp: indigo -> blue -> teal -> green -> yellow -> red.
     defs = (
         f'<defs>'
-        f'<radialGradient id="{blue_grad}" cx="50%" cy="50%" r="50%">'
-        f'<stop offset="0%"  stop-color="var(--team-blue)" stop-opacity="{glow_opacity:.3f}"/>'
-        f'<stop offset="35%" stop-color="var(--team-blue)" stop-opacity="{glow_opacity * 0.55:.3f}"/>'
-        f'<stop offset="70%" stop-color="var(--team-blue)" stop-opacity="{glow_opacity * 0.18:.3f}"/>'
-        f'<stop offset="100%" stop-color="var(--team-blue)" stop-opacity="0"/>'
-        f'</radialGradient>'
-        f'<radialGradient id="{orng_grad}" cx="50%" cy="50%" r="50%">'
-        f'<stop offset="0%"  stop-color="var(--team-orng)" stop-opacity="{glow_opacity:.3f}"/>'
-        f'<stop offset="35%" stop-color="var(--team-orng)" stop-opacity="{glow_opacity * 0.55:.3f}"/>'
-        f'<stop offset="70%" stop-color="var(--team-orng)" stop-opacity="{glow_opacity * 0.18:.3f}"/>'
-        f'<stop offset="100%" stop-color="var(--team-orng)" stop-opacity="0"/>'
-        f'</radialGradient>'
+        f'<filter id="{heat_id}" x="-15%" y="-15%" width="130%" height="130%" '
+        f'color-interpolation-filters="sRGB">'
+        f'<feGaussianBlur in="SourceGraphic" stdDeviation="{blur}" result="b"/>'
+        f'<feColorMatrix in="b" type="matrix" '
+        f'values="0 0 0 2.6 0  0 0 0 2.6 0  0 0 0 2.6 0  0 0 0 2.6 0" result="d"/>'
+        f'<feComponentTransfer in="d">'
+        f'<feFuncR type="table" tableValues="0.13 0.10 0.12 0.34 0.74 0.97 1 1"/>'
+        f'<feFuncG type="table" tableValues="0.09 0.36 0.66 0.86 0.89 0.70 0.40 0.18"/>'
+        f'<feFuncB type="table" tableValues="0.28 0.69 0.73 0.43 0.17 0.06 0.05 0.12"/>'
+        f'<feFuncA type="table" tableValues="0 0.42 0.66 0.82 0.90 0.95 0.98 1"/>'
+        f'</feComponentTransfer>'
+        f'</filter>'
         f'</defs>'
     )
 
+    legend = "" if compact else _heat_legend_svg(vb_w, vb_h, sfx)
     pitch_cls = "hm-pitch hm-pitch-compact" if compact else "hm-pitch"
     return (
         f'<svg viewBox="0 0 {vb_w} {vb_h}" class="{pitch_cls}" '
@@ -4257,18 +4265,41 @@ def _ball_heatmap_svg(playback: dict, player_filter: str | None = None,
         f'{defs}'
         f'<rect class="pb-field" x="{pad_x:.1f}" y="{pad_y:.1f}" '
         f'width="{pitch_w}" height="{pitch_h}" />'
+        # Heat sits above the field fill but below the orientation lines/nets.
+        f'<g filter="url(#{heat_id})">{pts}</g>'
         f'<line class="pb-midline" x1="{vb_w/2:.1f}" y1="{pad_y:.1f}" '
         f'x2="{vb_w/2:.1f}" y2="{pad_y + pitch_h:.1f}" />'
-        f'<circle class="pb-midcircle" cx="{vb_w/2:.1f}" cy="{vb_h/2:.1f}" r="48" />'
+        f'<circle class="pb-midcircle" cx="{vb_w/2:.1f}" cy="{vb_h/2:.1f}" r="48" fill="none" />'
         f'<rect class="pb-net pb-net-blue" x="{pad_x - 10:.1f}" '
         f'y="{pad_y + pitch_h/2 - 60:.1f}" width="10" height="120" />'
         f'<rect class="pb-net pb-net-orng" x="{pad_x + pitch_w:.1f}" '
         f'y="{pad_y + pitch_h/2 - 60:.1f}" width="10" height="120" />'
-        f'<g class="hm-layer hm-blue" fill="url(#{blue_grad})">'
-        f'{"".join(blue_circles)}</g>'
-        f'<g class="hm-layer hm-orng" fill="url(#{orng_grad})">'
-        f'{"".join(orng_circles)}</g>'
+        f'{legend}'
         f'</svg>'
+    )
+
+
+def _heat_legend_svg(vb_w: float, vb_h: float, sfx: str) -> str:
+    """Small 'fewer -> more touches' thermal key, bottom-right of a heatmap."""
+    lw, lh = 96, 6
+    lx, ly = vb_w - lw - 14, vb_h - 16
+    gid = f"heatleg{sfx}"
+    stops = (
+        '<stop offset="0%" stop-color="rgb(33,26,82)"/>'
+        '<stop offset="26%" stop-color="rgb(26,92,176)"/>'
+        '<stop offset="50%" stop-color="rgb(40,176,150)"/>'
+        '<stop offset="70%" stop-color="rgb(214,209,60)"/>'
+        '<stop offset="86%" stop-color="rgb(240,120,40)"/>'
+        '<stop offset="100%" stop-color="rgb(220,40,40)"/>'
+    )
+    tstyle = "font:600 8px system-ui,sans-serif;fill:currentColor;opacity:.7"
+    return (
+        f'<defs><linearGradient id="{gid}" x1="0" y1="0" x2="1" y2="0">{stops}</linearGradient></defs>'
+        f'<rect x="{lx:.1f}" y="{ly:.1f}" width="{lw}" height="{lh}" rx="3" '
+        f'fill="url(#{gid})"/>'
+        f'<text x="{lx:.1f}" y="{ly - 3:.1f}" style="{tstyle}">fewer</text>'
+        f'<text x="{lx + lw:.1f}" y="{ly - 3:.1f}" style="{tstyle}" '
+        f'text-anchor="end">more touches</text>'
     )
 
 
@@ -6355,6 +6386,7 @@ def _page_wrap(title: str, body_html: str, *, status: int = 200, active: str = "
     main_html = f'<main class="page-main">{body_html}</main>' if sidebar else body_html
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>Ballshark - {title}</title>
+<link rel="icon" type="image/png" href="/static/brand/ballshark-shark.png">
 {_STYLE_TAG}
 </head><body class="{body_cls}">
 <div class="wrapper">
@@ -6440,10 +6472,9 @@ def _nav(active: str = "") -> str:
     return f'''
 <nav class="topnav">
   <a class="brand" href="/dashboard">
-    <span class="brand-logo">{_LOGO_SVG}</span>
+    <span class="brand-logo"><img src="/static/brand/ballshark-shark.png" alt="Ballshark" /></span>
     <span>
       <div class="brand-name">Ballshark</div>
-      <div class="brand-sub">v0.3 &middot; self-hosted</div>
     </span>
   </a>
   <div class="navlinks">{"".join(parts)}</div>
@@ -6725,16 +6756,19 @@ body.with-sidebar .page-layout {
   cursor: pointer;
 }
 .brand-logo {
-  width: 26px; height: 26px;
-  background: var(--accent);
+  width: 34px; height: 34px;
+  background: transparent;
   border-radius: 0;
   display: grid; place-items: center;
-  color: #0a0d14;
-  font-weight: 900;
   position: relative;
   overflow: hidden;
 }
-.brand-logo svg { width: 18px; height: 18px; position: relative; z-index: 1; }
+.brand-logo img {
+  width: 100%; height: 100%;
+  object-fit: contain;
+  position: relative; z-index: 1;
+  filter: drop-shadow(0 1px 2px rgba(0,0,0,.35));
+}
 .brand-name {
   font-weight: 800; font-size: 14px; letter-spacing: -0.02em;
   line-height: 1;

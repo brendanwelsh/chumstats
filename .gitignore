@@ -42,3 +42,6 @@ docs/audit/
 docs/overlap/
 docs/boost_audit/
 docs/screens/
+
+# local UI preview scratch
+.uipreview.py
