@@ -4206,34 +4206,60 @@ def _ball_heatmap_svg(playback: dict, player_filter: str | None = None,
     pad_x, pad_y = svg["pad_x"], svg["pad_y"]
     pitch_w, pitch_h = svg["pitch_w"], svg["pitch_h"]
 
-    # Per-point opacity adapts to touch count so a ~40-touch per-player mini and
-    # a ~2000-touch lifetime map both land in a readable density band: fewer
-    # touches -> warmer per hit so isolated touches still register; many touches
-    # -> fainter per hit so genuine hot zones stand out instead of the whole
-    # pitch saturating. The blur then turns the splats into a continuous field.
+    # Blue and orange render as SEPARATE pitches, never overlapped: with both
+    # teams' heat on one map you can't tell whose attacking pressure is where.
+    # Split, you read each side's concentration toward the goal it presses (blue
+    # attacks the orange net on the right; orange the blue net on the left). A
+    # single-team set (e.g. one player's per-match mini) renders as one pitch.
+    blue = [bh for bh in ball if bh.get("team") == 0]
+    orng = [bh for bh in ball if bh.get("team") == 1]
+    if blue and orng:
+        return (
+            '<div class="hm-split" style="display:grid;'
+            'grid-template-columns:1fr 1fr;gap:12px;align-items:start">'
+            f'<div>{_heat_split_label("Blue", "Orange net", "var(--team-blue)")}'
+            f'{_heat_pitch_svg(blue, svg, compact, key + "-b")}</div>'
+            f'<div>{_heat_split_label("Orange", "Blue net", "var(--team-orng)")}'
+            f'{_heat_pitch_svg(orng, svg, compact, key + "-o")}</div>'
+            '</div>'
+        )
+    return _heat_pitch_svg(ball, svg, compact, key)
+
+
+def _heat_split_label(team: str, target_net: str, color: str) -> str:
+    return (
+        f'<div style="font:700 10.5px system-ui,sans-serif;text-transform:uppercase;'
+        f'letter-spacing:.05em;color:{color};margin-bottom:4px">{team} '
+        f'<span style="opacity:.6">&#8594; attacking {target_net}</span></div>'
+    )
+
+
+def _heat_pitch_svg(ball: list, svg: dict, compact: bool, key: str) -> str:
+    """Render ONE thermal density pitch for a list of touches (one team's, or
+    all of them when only one team is present)."""
+    if not ball:
+        return ""
+    vb_w, vb_h = svg["vb_w"], svg["vb_h"]
+    pad_x, pad_y = svg["pad_x"], svg["pad_y"]
+    pitch_w, pitch_h = svg["pitch_w"], svg["pitch_h"]
+    # Per-point opacity adapts to touch count so a ~40-touch mini and a dense
+    # lifetime map both land in a readable density band. Sparse data can't be
+    # both smooth AND warm, so minis stay tight (warm marks) while dense maps use
+    # a wider blur + lower opacity (hot zones emerge instead of saturating).
     n = len(ball)
-    # Sparse data can't be both smooth AND warm (a single blurred touch either
-    # spreads thin -> cold, or stays tight -> warm). Per-player minis have few
-    # touches, so we keep them tight + a higher opacity ceiling: each touch reads
-    # as a hot mark, overlaps go red. Dense lifetime maps use a wider blur and a
-    # lower opacity so genuine hot zones emerge instead of the pitch saturating.
     pt_opacity = max(0.06, min(0.60, 2.4 / (n ** 0.5)))
     pt_r  = 5 if compact else 6
     blur  = 4 if compact else 13
-
     sfx = f"-{key}" if key else ""
     heat_id = f"heat{sfx}"
-
     pts = "".join(
         f'<circle cx="{bh["sx"]:.1f}" cy="{bh["sy"]:.1f}" r="{pt_r}" '
         f'fill="#000" fill-opacity="{pt_opacity:.3f}"/>'
         for bh in ball
     )
-
-    # The filter: blur the splats into a density field, copy that density into
-    # every channel (with a gain so mid densities reach the warm colours), then
-    # the LUT recolours it cold->hot and the alpha curve fades empty space out.
-    # 8-sample thermal ramp: indigo -> blue -> teal -> green -> yellow -> red.
+    # Blur the splats into a density field, copy density into every channel (gain
+    # so mid densities reach warm), recolour cold->hot via the LUT, fade empties.
+    # Thermal ramp: indigo -> blue -> teal -> green -> yellow -> red.
     defs = (
         f'<defs>'
         f'<filter id="{heat_id}" x="-15%" y="-15%" width="130%" height="130%" '
@@ -4250,7 +4276,6 @@ def _ball_heatmap_svg(playback: dict, player_filter: str | None = None,
         f'</filter>'
         f'</defs>'
     )
-
     legend = "" if compact else _heat_legend_svg(vb_w, vb_h, sfx)
     pitch_cls = "hm-pitch hm-pitch-compact" if compact else "hm-pitch"
     return (
@@ -4259,7 +4284,6 @@ def _ball_heatmap_svg(playback: dict, player_filter: str | None = None,
         f'{defs}'
         f'<rect class="pb-field" x="{pad_x:.1f}" y="{pad_y:.1f}" '
         f'width="{pitch_w}" height="{pitch_h}" />'
-        # Heat sits above the field fill but below the orientation lines/nets.
         f'<g filter="url(#{heat_id})">{pts}</g>'
         f'<line class="pb-midline" x1="{vb_w/2:.1f}" y1="{pad_y:.1f}" '
         f'x2="{vb_w/2:.1f}" y2="{pad_y + pitch_h:.1f}" />'
