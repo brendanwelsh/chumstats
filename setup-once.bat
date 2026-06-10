@@ -48,5 +48,5 @@ if not exist .env (
 )
 
 echo.
-echo Setup done. Double-click run.bat to launch ballshark.
+echo Setup done. Launch the tray (ballshark-tray.pyw), or run:  ballshark.bat run
 pause

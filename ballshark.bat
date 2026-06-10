@@ -4,7 +4,7 @@ REM Examples:
 REM   ballshark run
 REM   ballshark dashboard
 REM   ballshark match <match_id>
-REM   ballshark vs Jenox7
+REM   ballshark vs <player>
 REM   ballshark setup
 cd /d "%~dp0"
 if not exist ".venv\Scripts\python.exe" (

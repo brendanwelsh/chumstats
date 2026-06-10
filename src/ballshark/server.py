@@ -4752,7 +4752,7 @@ PortNumber=49123</pre>
         <h2>Sharing the dashboard</h2>
         <p>The server binds to <code>0.0.0.0:5050</code> by default, so anyone on your LAN can
           hit the dashboard from their phone or laptop. To find your LAN URL, check the
-          startup output of <code>run.bat</code> - it prints something like
+          console output when Ballshark starts - it prints something like
           <code>http://192.168.1.42:5050/dashboard</code>. Lock it back down to loopback by
           setting <code>BALLSHARK_SERVER_HOST=127.0.0.1</code> in <code>.env</code>.</p>
       </section>
@@ -9478,7 +9478,7 @@ def _overlay_picker_html(host: str) -> str:
           <li>Paste the URL into the URL field and set Width/Height to the recommended size.</li>
           <li>Check <b>Shutdown source when not visible</b> and <b>Refresh when scene activates</b>.</li>
           <li>Position the source over your gameplay capture, avoiding RL's own UI corners.</li>
-          <li>Ballshark must be running (<code>run.bat</code>) for the URL to respond.</li>
+          <li>Ballshark must be running for the URL to respond.</li>
         </ol>
       </section>
 
