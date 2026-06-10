@@ -476,7 +476,44 @@ class TrayApp:
         log.info("tray app exiting")
 
 
+# Loopback port used purely as a single-instance lock (not a real service).
+_SINGLETON_LOCK_PORT = 5051
+_SINGLETON_SOCK = None  # keep the bound socket alive for the process lifetime
+
+
+def _acquire_single_instance() -> bool:
+    """Ensure only one tray runs at a time.
+
+    The tray can be launched from more than one place — the HKCU ``Run``
+    autostart entry (which points at the venv's pythonw) and a manual
+    double-click of ``ballshark-tray.pyw`` (which the OS opens with the *system*
+    Python via the .pyw file association). Without a guard you end up with two
+    trays, two ``ballshark run`` subprocesses, and two servers fighting over
+    port 5050.
+
+    We grab an exclusive bind on a fixed loopback port. Without SO_REUSEADDR a
+    second bind to the same address fails (WSAEADDRINUSE / EADDRINUSE) on both
+    Windows and Linux, so the second launch detects us and no-ops. The OS frees
+    the port automatically when this process exits.
+
+    Returns True if we are the only instance, False if another already holds it.
+    """
+    global _SINGLETON_SOCK
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        s.bind(("127.0.0.1", _SINGLETON_LOCK_PORT))
+        s.listen(1)
+    except OSError:
+        s.close()
+        return False
+    _SINGLETON_SOCK = s  # hold the lock until the process dies
+    return True
+
+
 def main() -> int:
+    if not _acquire_single_instance():
+        log.info("another Ballshark tray instance is already running; exiting")
+        return 0
     try:
         # First-run wizard: blocks the main thread until the user closes it.
         # If config already exists, returns immediately. We do this BEFORE

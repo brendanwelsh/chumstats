@@ -81,13 +81,31 @@ class MatchSyncer:
         self._loop: asyncio.AbstractEventLoop | None = None
 
     def enqueue(self, summary: MatchSummary) -> None:
-        """Thread-safe enqueue from the ingest thread."""
+        """Enqueue a match for upload.
+
+        Callable from two places:
+          - the live ingest *thread* (cmd_run) — a different thread than the
+            event loop, so we must hop via call_soon_threadsafe;
+          - directly inside the event loop (cmd_push_history / cmd_replay drain
+            them on the same thread). There we must put_nowait *synchronously*,
+            otherwise the deferred call_soon callback runs after the immediate
+            `await queue.join()` has already seen an empty queue and returned —
+            the drain gets cancelled before anything is processed and every
+            match is silently dropped.
+        """
         loop = self._loop
-        if loop and loop.is_running():
-            loop.call_soon_threadsafe(self.queue.put_nowait, summary)
-        else:
+        if not (loop and loop.is_running()):
             # Pre-loop or post-loop drop: log and discard. Local DB still has it.
             log.warning("syncer queue not ready; dropped match %s", summary.match_id)
+            return
+        try:
+            same_thread = asyncio.get_running_loop() is loop
+        except RuntimeError:
+            same_thread = False  # called from a non-async (ingest) thread
+        if same_thread:
+            self.queue.put_nowait(summary)
+        else:
+            loop.call_soon_threadsafe(self.queue.put_nowait, summary)
 
     async def run(self) -> None:
         self._loop = asyncio.get_running_loop()

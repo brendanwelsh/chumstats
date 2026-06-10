@@ -1,8 +1,8 @@
 # Friend onboarding — joining the ballshark network
 
-## What your friend (the host) does
+## What the host does
 
-1. On the central server (e.g. welsh-macmini), provision them:
+1. On the central server, provision them:
 
    ```bash
    ballshark --db ~/ballshark/data/central.db admin create-user \
@@ -13,7 +13,7 @@
    This prints a 64-char API key.
 
 2. Send the friend two things over Discord DM:
-   - **Server URL** (e.g. `https://stats.welsh.com`)
+   - **Server URL** (e.g. `https://stats.your-domain.com`, or `http://<server-host>:5050` on a VPN/LAN)
    - **API key** (the 64-char string)
 
 3. Send them the **Ballshark.zip** (built via `deploy/windows/build.ps1`).
@@ -55,7 +55,7 @@ matches live in their old DB. To push them into the central server:
 
 ## How identity works
 
-- The API key Brendan provisioned is tied to ONE `primary_id`. The friend's
+- The API key the host provisioned is tied to ONE `primary_id`. The friend's
   uploads are accepted only when their `my_row.primary_id` matches.
 - If they spoof another friend's primary_id, the server returns 403.
 - Opponent player rows from their uploads use first-writer-wins, so they

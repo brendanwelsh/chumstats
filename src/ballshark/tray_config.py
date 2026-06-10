@@ -73,7 +73,7 @@ class TrayConfig:
     """User-set, persisted across launches. Empty = wizard not yet run."""
     rl_player_name: str = ""
     rl_player_primary_id: str = ""      # auto-filled after first match if blank
-    remote_url: str = ""                # e.g. https://stats.brendan.com
+    remote_url: str = ""                # e.g. https://stats.your-domain.com
     api_key: str = ""
     rl_setup_done: bool = False         # have we ever run ballshark setup?
 
