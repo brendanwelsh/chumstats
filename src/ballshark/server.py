@@ -2375,14 +2375,8 @@ def _match_detail_html(store, match_id: str, viewer_pid: str | None, viewer_name
           <div class="radar-card {team_class}">
             <div class="rc-head">
               <div class="rc-head-name">{name_link}{mvp}{bot}{marker}{header_badges}</div>
-              <div class="rc-head-counts">
-                <span class="rc-count">{_stat_icon_html("Goals")}<b>{p['goals']}</b> Goals</span>
-                <span class="rc-count">{_stat_icon_html("Assists")}<b>{p['assists']}</b> Assists</span>
-                <span class="rc-count">{_stat_icon_html("Saves")}<b>{p['saves']}</b> Saves</span>
-                <span class="rc-count">{_stat_icon_html("Shots")}<b>{p['shots']}</b> Shots</span>
-                <span class="rc-count">{_stat_icon_html("Demos")}<b>{p['demos']}</b> Demos</span>
-                <span class="rc-count rc-score-pill"><b>{p['score']}</b> Score</span>
-              </div>
+              <!-- Goals/Assists/Saves/Shots/Demos/Score live in the roster table
+                   above and are visualised by the radar below — not repeated here. -->
             </div>
             <div class="rc-body">
               <div class="rc-radar">{_radar_svg(values, size=280, color=color)}</div>
@@ -9586,7 +9580,8 @@ def _dashboard_html(d, store=None, primary_id: str | None = None,
   {radar}
   {ball_section}
   {history}
-  {''.join(detail_sections)}
+  <style>.detail-grid{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;align-items:start}}@media(max-width:760px){{.detail-grid{{grid-template-columns:1fr}}}}</style>
+  <div class="detail-grid">{''.join(detail_sections)}</div>
 """
     # Use the shared chrome so the global filter sidebar shows up on /dashboard
     # too (was previously bypassed via its own <!doctype> wrapper).
