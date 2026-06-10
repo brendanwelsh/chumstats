@@ -111,14 +111,21 @@ def _team_block(team_num: int, team_name: str, team_score: int,
     return title + "\n" + body
 
 
-def _session_form_dots(store, primary_id: str | None, n: int = 10) -> str:
-    """Last N match results as colored dots from the DB."""
+def _last_n_stats(store, primary_id: str | None, n: int = 10) -> dict | None:
+    """Aggregate the player's last N matches from the DB.
+
+    This replaces the in-memory "session" totals on the embed. A session number
+    drifts with how long the app has been running; "last 10" means the same
+    thing every time you read it — your current form. The just-finished match is
+    already persisted by the time the bot builds the embed, so it is included.
+    """
     if not store or not primary_id:
-        return ""
+        return None
     try:
         with store._conn() as con:
             rows = con.execute("""
-                SELECT m.started_at, mps.team_num, m.winner_team_num
+                SELECT mps.team_num, m.winner_team_num,
+                       mps.goals, mps.assists, mps.saves, mps.shots, mps.demos
                 FROM match_player_stats mps
                 JOIN matches m ON m.id = mps.match_id
                 WHERE mps.primary_id = ?
@@ -126,11 +133,36 @@ def _session_form_dots(store, primary_id: str | None, n: int = 10) -> str:
                 LIMIT ?
             """, (primary_id, n)).fetchall()
     except Exception:
-        return ""
-    return "".join(
-        "🟢" if r["team_num"] == r["winner_team_num"] else "🔴"
-        for r in reversed(rows)
-    )
+        return None
+    if not rows:
+        return None
+
+    def won(r) -> bool:
+        return r["team_num"] == r["winner_team_num"]
+
+    wins = sum(1 for r in rows if won(r))  # rows are newest-first
+    # Streak: walk from the newest match while the result matches.
+    newest_won = won(rows[0])
+    streak = 0
+    for r in rows:
+        if won(r) == newest_won:
+            streak += 1
+        else:
+            break
+    return {
+        "count": len(rows),
+        "wins": wins,
+        "losses": len(rows) - wins,
+        "win_rate": wins / len(rows),
+        "streak_label": f"{'W' if newest_won else 'L'}{streak}",
+        "goals":   sum(r["goals"]   for r in rows),
+        "assists": sum(r["assists"] for r in rows),
+        "saves":   sum(r["saves"]   for r in rows),
+        "shots":   sum(r["shots"]   for r in rows),
+        "demos":   sum(r["demos"]   for r in rows),
+        # Oldest -> newest so the dots read left-to-right like a timeline.
+        "form": "".join("🟢" if won(r) else "🔴" for r in reversed(rows)),
+    }
 
 
 def build_match_embed(
@@ -205,19 +237,29 @@ def build_match_embed(
             inline=False,
         )
 
-    # ----- session -----
+    # ----- last 10 matches (rolling form, DB-backed) -----
+    # Falls back to the in-memory session totals only when there's no DB or we
+    # can't identify the player (e.g. post-test against raw fixtures).
     me_pid = me.primary_id if me else self_primary_id
-    form = _session_form_dots(store, me_pid, n=10)
-    session_lines = [
-        f"**{totals.wins}-{totals.losses}**  ·  {totals.win_rate * 100:.0f}% win rate  ·  streak **{totals.streak_label}**",
-        f"Goals **{totals.goals}**  ·  Assists **{totals.assists}**  ·  Saves **{totals.saves}**  "
-        f"·  Shots **{totals.shots}**  ·  Demos **{totals.demos}**",
-    ]
-    if form:
-        session_lines.append(f"recent {form}")
+    recent = _last_n_stats(store, me_pid, n=10)
+    if recent:
+        field_name = f"Last {recent['count']}" if recent["count"] < 10 else "Last 10"
+        recent_lines = [
+            f"**{recent['wins']}-{recent['losses']}**  ·  {recent['win_rate'] * 100:.0f}% win rate  ·  streak **{recent['streak_label']}**",
+            f"Goals **{recent['goals']}**  ·  Assists **{recent['assists']}**  ·  Saves **{recent['saves']}**  "
+            f"·  Shots **{recent['shots']}**  ·  Demos **{recent['demos']}**",
+            recent["form"],
+        ]
+    else:
+        field_name = "Session"
+        recent_lines = [
+            f"**{totals.wins}-{totals.losses}**  ·  {totals.win_rate * 100:.0f}% win rate  ·  streak **{totals.streak_label}**",
+            f"Goals **{totals.goals}**  ·  Assists **{totals.assists}**  ·  Saves **{totals.saves}**  "
+            f"·  Shots **{totals.shots}**  ·  Demos **{totals.demos}**",
+        ]
     embed.add_field(
-        name="Session",
-        value="\n".join(session_lines),
+        name=field_name,
+        value="\n".join(recent_lines),
         inline=False,
     )
 
