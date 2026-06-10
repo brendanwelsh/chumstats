@@ -29,3 +29,16 @@ Thumbs.db
 
 # Screenshots dropped at root
 Screenshot*.png
+
+# Internal working docs + agent/design scaffolding — kept local, not published
+AGENTS.md
+DESIGN.md
+PRODUCT.md
+.agents/
+.design/
+skills-lock.json
+# Working/scratch screenshot dirs (docs/screenshots/ is the published set)
+docs/audit/
+docs/overlap/
+docs/boost_audit/
+docs/screens/
