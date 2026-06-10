@@ -369,7 +369,7 @@ def cmd_reprocess(args: argparse.Namespace) -> int:
 def cmd_serve(args: argparse.Namespace) -> int:
     """Server-only mode for the central host (no RL Stats API ingest).
 
-    Same as `run` minus the local ingest thread — used on the Mac Mini where
+    Same as `run` minus the local ingest thread — used on the central server where
     Rocket League isn't running but we want to receive friend uploads and
     serve the unified dashboard. Discord bot is opt-in via .env as usual.
     """

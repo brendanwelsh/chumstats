@@ -4,7 +4,7 @@
 Self-hosted Rocket League stats tracker (product name **Ballshark**; package `ballshark`; the dir/repo are historically "carball-tracker" / RLStats). It reads from the local TCP Stats API that Rocket League itself opens (`127.0.0.1:49123` when `PacketSendRate` is set in `DefaultStatsAPI.ini`), persists every event to a local SQLite DB, and fans out to three surfaces: a Discord match-end embed, a browser/OBS overlay, and a local LAN dashboard. **Zero third-party data sources** (no ballchasing, tracker.gg, or Psyonix REST) — the only outbound traffic is your own Discord bot and optional upload to a self-hosted central server. Local-first is the point, not a side feature.
 
 ## Where it fits
-Single-owner + friend-group tool, not a SaaS/public leaderboard/multi-tenant app. Two deployment shapes: (1) the owner runs `ballshark run` on their Windows gaming PC (full pipeline + dashboard); (2) friends run a packaged system-tray app (`ballshark-tray.pyw`, "friend mode": overlay-only, auto-uploads match summaries) that pushes to a central host. The central host is a Mac Mini running `ballshark serve` (no RL ingest, receives uploads, serves the unified dashboard, exposed via cloudflared). See `deploy/macmini/` and `deploy/windows/`.
+Single-owner + friend-group tool, not a SaaS/public leaderboard/multi-tenant app. Two deployment shapes: (1) the owner runs `ballshark run` on their Windows gaming PC (full pipeline + dashboard); (2) friends run a packaged system-tray app (`ballshark-tray.pyw`, "friend mode": overlay-only, auto-uploads match summaries) that pushes to a central host. The central host is an always-on server running `ballshark serve` (no RL ingest, receives uploads, serves the unified dashboard, optionally exposed via cloudflared). See `deploy/server/` and `deploy/windows/`.
 
 ## Run / build / test
 Python >= 3.11. From repo root (PowerShell):
@@ -25,7 +25,7 @@ Python >= 3.11. From repo root (PowerShell):
 - `src/ballshark/server.py` — FastAPI + WebSocket overlay/dashboard backend; `src/ballshark/overlay/` is the HTML/CSS/JS.
 - `src/ballshark/bot.py` — discord.py poster + embed builder. `sync.py` — uploads to central server. `config.py` — env/.env loader.
 - `tray.py`, `tray_config.py`, `tray_wizard.py`, `ballshark-tray.pyw` — friend tray app. `config_wizard.py` — RL-install detection + ini editing.
-- `deploy/` — macmini (plist/cloudflared) + windows (PyInstaller `.spec`, build.ps1) packaging. `tests/` — pytest + `golden/` fixtures. `.design/`, `DESIGN.md`, `PRODUCT.md` — design system + product spec. Root `*.bat` — convenience launchers.
+- `deploy/` — server (plist/cloudflared) + windows (PyInstaller `.spec`, build.ps1) packaging. `tests/` — pytest + `golden/` fixtures. `.design/`, `DESIGN.md`, `PRODUCT.md` — design system + product spec. Root `*.bat` — convenience launchers.
 
 ## Gotchas
 - Stats API ini is read only at RL launch — restart RL after `setup`.

@@ -1,11 +1,11 @@
 #!/bin/bash
-# Ballshark central server installer for welsh-macmini (macOS).
+# Ballshark central server installer (macOS; for Linux, use a systemd unit).
 #
-# Run via Tailscale SSH:
-#     ssh welsh-macmini
-#     curl -fsSL https://raw.githubusercontent.com/<you>/RLStats/main/deploy/macmini/install.sh | bash
+# Run over SSH on your always-on server host:
+#     ssh <your-server>
+#     curl -fsSL https://raw.githubusercontent.com/brendanwelsh/ballshark/main/deploy/server/install.sh | bash
 # or after cloning the repo:
-#     ./deploy/macmini/install.sh
+#     ./deploy/server/install.sh
 #
 # Idempotent — rerun to update.
 
@@ -15,7 +15,7 @@ REPO_URL="${BALLSHARK_REPO_URL:-https://github.com/brendanwelsh/ballshark.git}"
 INSTALL_DIR="${BALLSHARK_INSTALL_DIR:-$HOME/ballshark}"
 DATA_DIR="${BALLSHARK_DATA_DIR:-$INSTALL_DIR/data}"
 VENV_DIR="$INSTALL_DIR/.venv"
-PLIST_NAME="com.welsh.ballshark.plist"
+PLIST_NAME="com.ballshark.server.plist"
 PLIST_DEST="$HOME/Library/LaunchAgents/$PLIST_NAME"
 
 echo "==> ballshark server install"
@@ -23,10 +23,9 @@ echo "    INSTALL_DIR=$INSTALL_DIR"
 echo "    DATA_DIR=$DATA_DIR"
 
 # 1. Prereqs: git + a Python >= 3.11.
-# macOS ships an old system python3 (3.9 on current Sequoia) and the Mac mini has
-# no Homebrew, so we use uv — a userspace tool (no sudo) that fetches a
-# standalone CPython and builds the venv. This is exactly how the live server was
-# provisioned; it sidesteps the 3.9 floor without touching system Python.
+# macOS ships an old system python3 (3.9), so we use uv — a userspace tool (no
+# sudo, no Homebrew required) that fetches a standalone CPython and builds the
+# venv. This sidesteps the 3.9 floor without touching system Python.
 command -v git >/dev/null || { echo "ERROR: git not found. Install Xcode CLT: xcode-select --install"; exit 1; }
 UV="$HOME/.local/bin/uv"
 if ! command -v uv >/dev/null && [ ! -x "$UV" ]; then
@@ -59,7 +58,7 @@ VIRTUAL_ENV="$VENV_DIR" "$UV" pip install -e "$INSTALL_DIR[server,bot]"
 mkdir -p "$DATA_DIR"
 if [ ! -f "$INSTALL_DIR/.env" ]; then
     echo "==> writing starter .env (REVIEW IT BEFORE STARTING)"
-    cp "$INSTALL_DIR/deploy/macmini/.env.example" "$INSTALL_DIR/.env"
+    cp "$INSTALL_DIR/deploy/server/.env.example" "$INSTALL_DIR/.env"
     echo "    -> $INSTALL_DIR/.env"
     echo "    EDIT THIS FILE before loading the launchd service."
 fi
@@ -70,13 +69,13 @@ mkdir -p "$HOME/Library/LaunchAgents"
 sed -e "s|@VENV_DIR@|$VENV_DIR|g" \
     -e "s|@INSTALL_DIR@|$INSTALL_DIR|g" \
     -e "s|@DATA_DIR@|$DATA_DIR|g" \
-    "$INSTALL_DIR/deploy/macmini/$PLIST_NAME.template" > "$PLIST_DEST"
+    "$INSTALL_DIR/deploy/server/$PLIST_NAME.template" > "$PLIST_DEST"
 
 # 6. Stop existing (if any) then load.
-launchctl bootout "gui/$(id -u)/com.welsh.ballshark" 2>/dev/null || true
+launchctl bootout "gui/$(id -u)/com.ballshark.server" 2>/dev/null || true
 launchctl bootstrap "gui/$(id -u)" "$PLIST_DEST"
-launchctl enable "gui/$(id -u)/com.welsh.ballshark"
-echo "==> launchd: loaded com.welsh.ballshark"
+launchctl enable "gui/$(id -u)/com.ballshark.server"
+echo "==> launchd: loaded com.ballshark.server"
 
 cat <<EOF
 
@@ -87,15 +86,15 @@ Next steps:
   1. Edit $INSTALL_DIR/.env (set BALLSHARK_PUBLIC_URL, optional Discord vars).
   2. Provision yourself:
      $VENV_DIR/bin/ballshark --db $DATA_DIR/central.db admin create-user \\
-       --primary-id 'Steam|76561197985273611|0' --name '@ChumtheWaters'
-  3. From your Windows PC, paste the API key into .env on that machine
+       --primary-id 'Steam|7656...|0' --name '@YourName'
+  3. From a client machine, paste the API key into .env on that machine
      as BALLSHARK_API_KEY, set BALLSHARK_REMOTE_URL=https://<your-domain>, then
          ballshark push-history --primary-id 'Steam|...|0'
      to backfill your existing matches.
-  4. Wire up Cloudflare Tunnel (see deploy/macmini/cloudflared-config.yml.example).
+  4. Wire up Cloudflare Tunnel (see deploy/server/cloudflared-config.yml.example).
 
 Logs:    tail -f $INSTALL_DIR/server.log
-Stop:    launchctl bootout gui/\$(id -u)/com.welsh.ballshark
-Restart: launchctl kickstart -k gui/\$(id -u)/com.welsh.ballshark
+Stop:    launchctl bootout gui/\$(id -u)/com.ballshark.server
+Restart: launchctl kickstart -k gui/\$(id -u)/com.ballshark.server
 ================================================================
 EOF

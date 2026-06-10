@@ -126,7 +126,7 @@ class Settings:
         if not db_override:
             # Only migrate the default ~/.ballshark dir when we'll actually use
             # it. Never move data out from under an explicit DB path (e.g. the
-            # Mac mini server pointing at a fixed file).
+            # central server pointing at a fixed file).
             _migrate_legacy_home_dir()
         port = int(_env("BALLSHARK_SERVER_PORT", "CARBALL_SERVER_PORT", default="5050"))
         return cls(

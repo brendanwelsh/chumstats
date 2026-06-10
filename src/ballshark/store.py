@@ -99,7 +99,7 @@ CREATE INDEX IF NOT EXISTS idx_raw_match ON raw_events(match_id);
 CREATE INDEX IF NOT EXISTS idx_raw_event ON raw_events(event);
 
 -- Multi-user sync: one row per friend authorized to upload to this server.
--- Only meaningful on the central server (welsh-macmini); harmless on clients.
+-- Only meaningful on the central server; harmless on clients.
 CREATE TABLE IF NOT EXISTS users (
     user_id      TEXT PRIMARY KEY,           -- UUIDv4
     discord_id   TEXT UNIQUE,
@@ -292,8 +292,9 @@ class Store:
             result["created_match"] = cur.rowcount > 0
 
             # match_extras: first-writer-wins on the heatmap-relevant arrays.
-            # Same dedup rule as opponent rows — if Brendan uploads first and
-            # later Payanangeel uploads the same match, his touches/goals win.
+            # Same dedup rule as opponent rows — if one client uploads first and
+            # a teammate later uploads the same match, the first writer's
+            # touches/goals win.
             c.execute(
                 "INSERT OR IGNORE INTO match_extras (match_id, duration_seconds, ball_touches, goal_events) "
                 "VALUES (?, ?, ?, ?)",

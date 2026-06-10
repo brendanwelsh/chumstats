@@ -170,7 +170,7 @@ Ballshark runs in one of two shapes.
 
 **Single machine (default).** `ballshark run` on your gaming PC does everything: ingest from the Stats API, local SQLite, Discord embed, local overlay, and the full dashboard at `http://127.0.0.1:5050/`. Nothing leaves your machine except the Discord post.
 
-**Central server (friend group).** An always-on box (here: a Mac mini, `welsh-macmini`) runs `ballshark serve` — the same FastAPI app with no RL ingest. Each player's machine runs `ballshark run` and uploads finalized match summaries to it; the server dedupes by RL `MatchGuid` and serves one unified dashboard for the whole group.
+**Central server (friend group).** An always-on host (a spare Mac/Linux box, NAS, or mini PC) runs `ballshark serve` — the same FastAPI app with no RL ingest. Each player's machine runs `ballshark run` and uploads finalized match summaries to it; the server dedupes by RL `MatchGuid` and serves one unified dashboard for the whole group.
 
 ```
  your gaming PC                       friends' PCs
@@ -179,7 +179,7 @@ Ballshark runs in one of two shapes.
                   central server (ballshark serve)
                   /dashboard /history /players /clan ...
                           │
-              Tailscale  (welsh-macmini:5050)
+              VPN / LAN  (<server-host>:5050)
               + optional Cloudflare Tunnel → https://<your-domain>
 ```
 
@@ -191,14 +191,14 @@ What works **today** (implemented, not just spec):
 - `ballshark push-history` — backfill an existing local DB to the central server.
 - Reachable over Tailscale (`http://<host>:5050`) with no public DNS.
 
-To stand up the central server, see [`deploy/macmini/README.md`](deploy/macmini/README.md). To make a client upload, set in its `.env`:
+To stand up the central server, see [`deploy/server/README.md`](deploy/server/README.md). To make a client upload, set in its `.env`:
 
 ```env
 BALLSHARK_REMOTE_URL=http://<central-host>:5050
 BALLSHARK_API_KEY=<key from `ballshark admin create-user`>
 ```
 
-**Public domain (optional).** For access beyond your tailnet, put the server behind a Cloudflare Tunnel and point a domain at it (see [deploy/macmini/README.md](deploy/macmini/README.md#cloudflare-tunnel-public-access)), then set `BALLSHARK_PUBLIC_URL=https://<your-domain>` so shared links (the Discord "view match" link) use it.
+**Public domain (optional).** For access beyond your LAN/VPN, put the server behind a Cloudflare Tunnel and point a domain at it (see [deploy/server/README.md](deploy/server/README.md#cloudflare-tunnel-public-access)), then set `BALLSHARK_PUBLIC_URL=https://<your-domain>` so shared links (the Discord "view match" link) use it.
 
 ### Start on Windows login
 

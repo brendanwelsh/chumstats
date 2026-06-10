@@ -8,14 +8,14 @@ both the design rationale and a status record.
 
 | Piece | Status | Where |
 |---|---|---|
-| Central server (`ballshark serve`) | ✅ done, running on welsh-macmini | `src/ballshark/server.py`, `cmd_serve` |
+| Central server (`ballshark serve`) | ✅ done, runs on an always-on host | `src/ballshark/server.py`, `cmd_serve` |
 | Upload endpoint `POST /api/v1/match-summary` (key-auth, anti-impersonation) | ✅ done | `server.py`, `MatchSummaryUpload` |
 | Client uploader | ✅ done | `src/ballshark/sync.py` (`MatchSyncer`) |
 | Provisioning (`admin create-user` / `list-users`) | ✅ done | `cmd_admin_*` |
 | Backfill (`push-history`) | ✅ done | `cmd_push_history` |
 | Dedup by `MatchGuid` (first-writer-wins matches, per-user stat rows) | ✅ done | `store.py` upsert |
-| Reachability over Tailscale (`welsh-macmini:5050`) | ✅ done | hosts file / MagicDNS |
-| Public domain via Cloudflare Tunnel | ⏳ prepped, not deployed | `deploy/macmini/` |
+| Reachability over LAN/VPN (`<server-host>:5050`) | ✅ done | e.g. Tailscale MagicDNS |
+| Public domain via Cloudflare Tunnel | ⏳ prepped, not deployed | `deploy/server/` |
 | Postgres/Redis (below) | ❌ not done — runs on SQLite, which is plenty for one friend group | — |
 
 The sketch below kept Postgres + Redis as the production target. In practice the

@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.welsh.ballshark</string>
+    <string>com.ballshark.server</string>
 
     <key>ProgramArguments</key>
     <array>
