@@ -125,7 +125,8 @@ def cmd_run(args: argparse.Namespace) -> int:
                 remote_url=settings.remote_url,
                 api_key=settings.api_key,
                 owner_primary_id=args.primary_id or settings.player_primary_id,
-                store=store,   # for lifecycle raw_events attachment
+                store=store,   # for raw_events attachment
+                full_raw=settings.sync_full_raw,
             )
             sync_task = asyncio.create_task(syncer.run())
 
@@ -283,6 +284,7 @@ def cmd_push_history(args: argparse.Namespace) -> int:
         syncer = MatchSyncer(
             remote_url=settings.remote_url, api_key=settings.api_key,
             owner_primary_id=owner_pid, store=store,
+            full_raw=getattr(args, "full_raw", False) or settings.sync_full_raw,
         )
         drain = asyncio.create_task(syncer.run())
         await asyncio.sleep(0.05)
@@ -441,6 +443,7 @@ def cmd_replay(args: argparse.Namespace) -> int:
                 remote_url=settings.remote_url, api_key=settings.api_key,
                 owner_primary_id=args.primary_id or settings.player_primary_id,
                 store=store,
+                full_raw=getattr(args, "full_raw", False) or settings.sync_full_raw,
             )
             sync_task = asyncio.create_task(syncer.run())
             await asyncio.sleep(0.05)  # let the queue bind to the loop
@@ -771,6 +774,8 @@ def main(argv: list[str] | None = None) -> int:
     p_push = sub.add_parser("push-history", help="Backfill: push existing local matches to the central server")
     p_push.add_argument("--primary-id", default=None, help="Your primary_id (or set RL_PLAYER_PRIMARY_ID)")
     p_push.add_argument("--dry-run", action="store_true", help="Count matches but don't upload")
+    p_push.add_argument("--full-raw", action="store_true",
+                        help="Send the full raw stream incl. the 30Hz tick firehose (complete re-derivable archive)")
     p_push.set_defaults(func=cmd_push_history)
 
     p_reprocess = sub.add_parser("reprocess", help="Re-derive matches from raw_events (overwrite) after a parser fix")

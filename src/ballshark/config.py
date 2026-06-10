@@ -115,6 +115,13 @@ class Settings:
     remote_url: str | None = None
     api_key: str | None = None
 
+    # Sync fidelity. False (default, "summary"): push match summaries + lifecycle
+    # events + touches/goals, but NOT the 30 Hz UpdateState tick firehose — keeps
+    # the central DB small. True ("full", BALLSHARK_SYNC_FULL_RAW=1): push the
+    # complete raw stream including ticks, so the central server is a full raw
+    # archive you can re-derive any future stat from (bigger DB + uploads).
+    sync_full_raw: bool = False
+
     # How long to keep the 30 Hz tick firehose (UpdateState) in raw_events after
     # a match is aggregated, before prune drops it. This is the window in which
     # tick-derived stats can still be re-derived from raw if a bug is found.
@@ -145,5 +152,7 @@ class Settings:
                         or f"http://ballshark.local:{port}").rstrip("/"),
             remote_url=_env("BALLSHARK_REMOTE_URL", "CARBALL_REMOTE_URL") or None,
             api_key=_env("BALLSHARK_API_KEY", "CARBALL_API_KEY") or None,
+            sync_full_raw=(_env("BALLSHARK_SYNC_FULL_RAW", "CARBALL_SYNC_FULL_RAW", default="")
+                           or "").strip().lower() in ("1", "true", "yes", "full"),
             tick_keep_days=int(_env("BALLSHARK_TICK_KEEP_DAYS", "CARBALL_TICK_KEEP_DAYS", default="14")),
         )

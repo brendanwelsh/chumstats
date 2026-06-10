@@ -72,11 +72,14 @@ class MatchSyncer:
     """Enqueue MatchSummary → POST to central server. Drained by an async task."""
 
     def __init__(self, remote_url: str, api_key: str, owner_primary_id: str,
-                 store=None) -> None:
+                 store=None, full_raw: bool = False) -> None:
         self.remote_url = remote_url.rstrip("/") + "/api/v1/match-summary"
         self.api_key = api_key
         self.owner_primary_id = owner_primary_id
-        self.store = store      # optional; if set, we attach lifecycle raw_events
+        self.store = store      # optional; if set, we attach raw_events
+        # full_raw: also ship the 30 Hz UpdateState tick firehose so the central
+        # server is a complete raw archive (re-derivable). Default off = summary.
+        self.full_raw = full_raw
         self.queue: asyncio.Queue[MatchSummary] = asyncio.Queue()
         self._loop: asyncio.AbstractEventLoop | None = None
 
@@ -109,7 +112,8 @@ class MatchSyncer:
 
     async def run(self) -> None:
         self._loop = asyncio.get_running_loop()
-        print(f"[sync] enabled -> {self.remote_url}")
+        mode = "FULL raw (ticks included)" if self.full_raw else "summary"
+        print(f"[sync] enabled ({mode}) -> {self.remote_url}")
         while True:
             summary = await self.queue.get()
             try:
@@ -124,10 +128,10 @@ class MatchSyncer:
         if payload is None:
             log.info("skipping sync for %s: owner primary_id not in match", summary.match_id)
             return
-        # Attach lifecycle raw_events from the local DB if we have store access.
-        # Excludes UpdateState (the 30 Hz firehose) — see docstring above.
+        # Attach raw_events from the local DB if we have store access. Summary
+        # mode excludes the UpdateState firehose; full mode sends everything.
         if self.store is not None:
-            payload["raw_events"] = self._fetch_lifecycle_events(summary.match_id)
+            payload["raw_events"] = self._fetch_raw_events(summary.match_id)
         body = json.dumps(payload).encode("utf-8")
         last_err: Exception | None = None
         for attempt, delay in enumerate([0.0, *RETRY_DELAYS]):
@@ -152,19 +156,30 @@ class MatchSyncer:
         log.error("sync gave up on %s after %d attempts: %s",
                   summary.match_id, 1 + len(RETRY_DELAYS), last_err)
 
-    def _fetch_lifecycle_events(self, match_id: str) -> list[dict]:
-        """Read the match's raw events from local DB, skipping the firehose."""
+    def _fetch_raw_events(self, match_id: str) -> list[dict]:
+        """Read the match's raw events from the local DB.
+
+        Summary mode skips the 30 Hz UpdateState firehose to keep uploads and the
+        central DB small. Full mode (full_raw=True) sends EVERYTHING, ticks
+        included, so the central server holds a complete re-derivable archive."""
         try:
             with self.store._conn() as c:
-                rows = c.execute(
-                    "SELECT event, payload FROM raw_events "
-                    "WHERE match_id = ? AND event != 'UpdateState' "
-                    "ORDER BY received_at ASC, id ASC",
-                    (match_id,),
-                ).fetchall()
+                if self.full_raw:
+                    rows = c.execute(
+                        "SELECT event, payload FROM raw_events WHERE match_id = ? "
+                        "ORDER BY received_at ASC, id ASC",
+                        (match_id,),
+                    ).fetchall()
+                else:
+                    rows = c.execute(
+                        "SELECT event, payload FROM raw_events "
+                        "WHERE match_id = ? AND event != 'UpdateState' "
+                        "ORDER BY received_at ASC, id ASC",
+                        (match_id,),
+                    ).fetchall()
             return [{"event": r["event"], "payload": r["payload"]} for r in rows]
         except Exception:
-            log.exception("failed to fetch lifecycle events for %s", match_id)
+            log.exception("failed to fetch raw events for %s", match_id)
             return []
 
     def _do_post(self, body: bytes) -> dict:
@@ -176,7 +191,8 @@ class MatchSyncer:
             },
         )
         try:
-            with urlopen(req, timeout=10) as r:
+            # Full-raw uploads carry the tick firehose (megabytes); give them room.
+            with urlopen(req, timeout=120 if self.full_raw else 10) as r:
                 raw = r.read().decode("utf-8") or "{}"
                 return {"status_code": r.status, "body": json.loads(raw)}
         except HTTPError as e:
