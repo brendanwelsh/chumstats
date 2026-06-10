@@ -4776,7 +4776,7 @@ PortNumber=49123</pre>
           the alias resolve, add one line to your Windows hosts file:</p>
         <pre style="background:var(--bg);border:1px solid var(--border);padding:10px 14px;font-family:'JetBrains Mono',monospace;font-size:12.5px;overflow-x:auto">127.0.0.1   ballshark.local</pre>
         <p>Edit the hosts file at
-          <code>C:\Windows\System32\drivers\etc\hosts</code> as Administrator
+          <code>C:\\Windows\\System32\\drivers\\etc\\hosts</code> as Administrator
           (right-click Notepad &rarr; Run as administrator &rarr; open the file).
           Append the line above and save. Test by opening
           <code>http://ballshark.local:5050/live</code> in a browser.</p>
