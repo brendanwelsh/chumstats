@@ -6404,7 +6404,7 @@ def _page_wrap(title: str, body_html: str, *, status: int = 200, active: str = "
     main_html = f'<main class="page-main">{body_html}</main>' if sidebar else body_html
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>Ballshark - {title}</title>
-<link rel="icon" type="image/png" href="/static/brand/ballshark-shark.png">
+<link rel="icon" type="image/png" href="/static/brand/chum-logo.png">
 {_STYLE_TAG}
 </head><body class="{body_cls}">
 <div class="wrapper">
@@ -6490,7 +6490,7 @@ def _nav(active: str = "") -> str:
     return f'''
 <nav class="topnav">
   <a class="brand" href="/dashboard">
-    <span class="brand-logo"><img src="/static/brand/ballshark-shark.png" alt="Ballshark" /></span>
+    <span class="brand-logo"><img src="/static/brand/chum-logo.png" alt="Ballshark" /></span>
     <span>
       <div class="brand-name">Ballshark</div>
     </span>

@@ -382,7 +382,7 @@ class TrayApp:
             pystray.MenuItem("Open Web UI", self._on_open_live, default=True),
             pystray.MenuItem("Open BOOST VIEW", self._on_open_boost),
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem("Pause tracking (go red)",
+            pystray.MenuItem("Pause tracking",
                              self._on_toggle_pause,
                              checked=lambda item: self._paused),
             pystray.MenuItem("Settings…", self._on_settings),
