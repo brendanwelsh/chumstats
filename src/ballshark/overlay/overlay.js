@@ -58,6 +58,20 @@
       .sort((a, b) => (b.score || 0) - (a.score || 0));
   }
 
+  // Map an RL primary_id ("Steam|...", "Epic|...", "Switch|...", etc.) to its
+  // platform brand icon. Returns "" for bots / unknown.
+  function platformIcon(pid) {
+    const id = (pid || "").toLowerCase();
+    let brand = null;
+    if (id.startsWith("steam")) brand = "steam";
+    else if (id.startsWith("epic")) brand = "epic";
+    else if (id.startsWith("switch") || id.startsWith("nintendo")) brand = "switch";
+    else if (id.startsWith("xbox") || id.startsWith("xbl") || id.startsWith("xbo")) brand = "xbox";
+    else if (id.startsWith("ps") || id.startsWith("playstation") || id.startsWith("psn") || id.startsWith("dingo")) brand = "playstation";
+    if (!brand) return "";
+    return `<img class="plat-ico" src="/static/icons/brands/${brand}.svg" alt="${brand}" title="${brand}">`;
+  }
+
   function renderTeamRow(p, me, mvpMap) {
     const isMe = isMeRow(p, me);
     const mvp = mvpMap && mvpMap[p.primary_id] && !p.is_bot;
@@ -67,7 +81,7 @@
     const bot = p.is_bot ? '<span class="bot-tag">BOT</span>' : "";
     const mvpStar = mvp ? '<span class="mvp-star">★</span>' : "";
     tr.innerHTML = `
-      <td class="bt-name">${safeName}${bot}${mvpStar}</td>
+      <td class="bt-name">${platformIcon(p.primary_id)}${safeName}${bot}${mvpStar}</td>
       <td>${p.score ?? 0}</td>
       <td>${p.goals ?? 0}</td>
       <td>${p.shots ?? 0}</td>

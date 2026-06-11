@@ -163,6 +163,23 @@ body { width: 100%; padding: 8px; }
   vertical-align: 1px;
 }
 
+/* Stat-column header icons (gaming, brand-aligned SVG) */
+.stat-ico {
+  width: 13px; height: 13px;
+  display: inline-block; vertical-align: middle;
+  opacity: 0.9;
+}
+.bt-0 thead th .stat-ico { color: var(--team-0); }
+.bt-1 thead th .stat-ico { color: var(--team-1); }
+
+/* Platform brand icon before a player's name (Steam / Epic / Switch / PS / Xbox) */
+.plat-ico {
+  width: 12px; height: 12px;
+  display: inline-block; vertical-align: -1px;
+  margin-right: 5px;
+  opacity: 0.95;
+}
+
 /* Footer (mode-last only) */
 .bf {
   display: none;

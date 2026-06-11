@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="Rocket League">
+  <circle cx="14" cy="10" r="7" fill="#1F8FFF"/>
+  <path d="M14 5.4l2.2 2.2L14 9.8l-2.2-2.2z" fill="#fff"/>
+  <path d="M2.5 13.5h5M2 16.5h4.5M4 19.5h3.5" stroke="#FF7A00" stroke-width="1.7" stroke-linecap="round"/>
+</svg>

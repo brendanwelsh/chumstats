@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="Nintendo Switch">
+  <rect x="2.5" y="2" width="8" height="20" rx="4" fill="#E60012"/>
+  <circle cx="6.5" cy="7" r="1.7" fill="#fff"/>
+  <rect x="13.5" y="2" width="8" height="20" rx="4" fill="#00C3E3"/>
+  <circle cx="17.5" cy="17" r="1.7" fill="#fff"/>
+</svg>
