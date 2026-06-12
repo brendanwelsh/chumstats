@@ -23,6 +23,16 @@ log = logging.getLogger("ballshark.sync")
 
 RETRY_DELAYS = (1.0, 2.0, 4.0)  # seconds between attempts
 
+# HTTP timeouts for the upload POST. The upload runs on the syncer's own asyncio
+# drain task — never the ingest reader/worker thread — and the ingest worker only
+# ever *enqueues* (a non-blocking put). So from ingest's point of view this is
+# fire-and-forget and can never stall the socket drain that keeps RL from
+# freezing. The short summary timeout is belt-and-suspenders: a slow or
+# unreachable central host (e.g. high Tailscale latency to welsh-macmini) fails
+# fast instead of tying up the drain slot for a couple of minutes.
+SUMMARY_POST_TIMEOUT = 8.0     # summary uploads are small (a few KB)
+FULL_RAW_POST_TIMEOUT = 120.0  # full-raw carries the 30 Hz tick firehose (MBs)
+
 
 def _player_dict(p, is_mvp: bool) -> dict:
     return {
@@ -192,7 +202,8 @@ class MatchSyncer:
         )
         try:
             # Full-raw uploads carry the tick firehose (megabytes); give them room.
-            with urlopen(req, timeout=120 if self.full_raw else 10) as r:
+            timeout = FULL_RAW_POST_TIMEOUT if self.full_raw else SUMMARY_POST_TIMEOUT
+            with urlopen(req, timeout=timeout) as r:
                 raw = r.read().decode("utf-8") or "{}"
                 return {"status_code": r.status, "body": json.loads(raw)}
         except HTTPError as e:

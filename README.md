@@ -264,6 +264,8 @@ PacketSendRate=30
 
 `PacketSendRate=0` disables the API entirely; `1-120` sets the periodic UpdateState frequency. Configuration is read at launch — change the ini, restart RL.
 
+> **If RL ever stutters or freezes while ingesting:** the Stats API streams over a single loopback TCP socket, and if the client stops draining it, RL's game thread can block on `send()` (Windows logs this as `AppHangXProcB1`, a cross-process hang). The ingest client guards against this — a dedicated reader thread keeps the socket drained no matter how slow disk/upload work is (see `src/ballshark/ingest.py`) — plus it requests a large `SO_RCVBUF`. As a further safety margin you can lower `PacketSendRate` (e.g. `15`) to reduce the packet pressure; `30` is plenty for live stats.
+
 The socket emits concatenated UTF-8 JSON envelopes:
 ```
 {"Event":"<name>","Data":"<json-encoded string>"}
