@@ -158,24 +158,28 @@ class MatchSummary:
         """Heuristic match-type detection.
 
         The Stats API doesn't emit playlist/mode, so we infer from what's
-        observable in the stream:
+        observable in the stream. Order matters: bots are the strongest signal
+        because they never appear in matchmaking or tournaments, so they're
+        checked before custom team names.
           - No MatchGuid       -> Exhibition (offline)
-          - Custom team name   -> Private / Tournament (one or both teams
-                                  has a non-default name; matchmaking always
-                                  uses "Blue" / "Orange")
-          - Bots present       -> Casual vs Bots (matchmaking has no bots)
-          - Otherwise          -> Public matchmaking
+          - Bots present       -> vs Bots (matchmaking/tournaments have none)
+          - Custom team name    -> Private Match (one or both teams has a
+                                  non-default name; matchmaking always uses
+                                  "Blue" / "Orange"). We can't detect actual
+                                  tournaments from the stream, so we don't claim
+                                  one.
+          - Otherwise          -> Online Matchmaking
         """
+        has_bot = any(p.is_bot for p in self.players)
         if not self.is_online:
-            return "Exhibition"
+            return "Exhibition vs Bots" if has_bot else "Exhibition"
+        if has_bot:
+            return "Casual vs Bots"
         DEFAULT_TEAM_NAMES = {"blue", "orange", ""}
         custom = (self.team0_name.lower() not in DEFAULT_TEAM_NAMES
                   or self.team1_name.lower() not in DEFAULT_TEAM_NAMES)
-        has_bot = any(p.is_bot for p in self.players)
         if custom:
-            return "Private / Tournament"
-        if has_bot:
-            return "Casual vs Bots"
+            return "Private Match"
         return "Online Matchmaking"
 
     def me(self, self_primary_id: str | None = None, self_name: str | None = None) -> PlayerLine | None:

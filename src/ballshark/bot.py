@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Iterable
+from datetime import datetime, timezone
 
 import discord
 
@@ -23,15 +24,24 @@ from .session import MatchSummary, SessionTotals
 log = logging.getLogger("ballshark.bot")
 
 
-def _team_emoji(team_num: int) -> str:
-    return "🔵" if team_num == 0 else "🟠"
+ICON_WIN  = "🏆"
+ICON_LOSS = "💀"
 
 
-# Minimal icon set. Only kept emoji that *carry information* (team color,
-# MVP, win/loss, form dots). Everything else uses plain labels.
-ICON_MVP     = "⭐"
-ICON_WIN     = "🏆"
-ICON_LOSS    = "💀"
+# --- Discord ANSI code-block coloring -------------------------------------
+# Discord renders SGR color only inside ```ansi blocks, and only the 4-bit
+# palette below (no 256-color / truecolor). Orange has no ANSI slot, so the
+# orange team is rendered in yellow - the conventional RL-bot substitute.
+_ESC = ""
+A_GRAY, A_RED, A_GREEN, A_YELLOW, A_BLUE, A_MAGENTA, A_CYAN, A_WHITE = (
+    30, 31, 32, 33, 34, 35, 36, 37)
+A_BOLD = 1
+_TEAM_FG = {0: A_BLUE, 1: A_YELLOW}  # blue team / orange team (yellow ~= orange)
+
+
+def _sgr(text: str, *codes: int) -> str:
+    """Wrap text in an ANSI SGR sequence followed by a reset."""
+    return f"{_ESC}[{';'.join(str(c) for c in codes)}m{text}{_ESC}[0m"
 
 
 def _arena_pretty(arena: str) -> str:
@@ -41,74 +51,87 @@ def _arena_pretty(arena: str) -> str:
     return _arena_nice(arena)
 
 
-def _team_block(team_num: int, team_name: str, team_score: int,
-                players: list, me, is_mvp_map: dict[str, bool]) -> str:
-    """One team's roster as a fixed-width code block. Sorted by score desc.
+# Scoreboard columns. Kept tight (~33 chars) so the block survives Discord's
+# narrow mobile code-block width without wrapping. Names are truncated; the
+# MVP badge sits past the last aligned column so it never shifts the grid.
+_SB_NAME_W = 13
+_SB_HEADER = (f"  {'PLAYER':<{_SB_NAME_W}}{'PTS':>6} {'G':>2} {'A':>2} "
+              f"{'SV':>2} {'SH':>2} {'D':>2}")
 
-    Layout is tuned to fit within Discord's code-block width (~52 chars on
-    desktop, ~38 on mobile). We use shortened-but-readable column labels
-    and a single-line advanced row for teammates with spectator data.
 
-    Row prefix:
-       > = you  (so you can spot yourself at a glance)
-       (space) everyone else
+def _sb_row(p, is_you: bool) -> str:
+    name = f"{p.name}{' (BOT)' if p.is_bot else ''}"[:_SB_NAME_W]
+    prefix = "▸ " if is_you else "  "
+    return (f"{prefix}{name:<{_SB_NAME_W}}{p.score:>6} {p.goals:>2} "
+            f"{p.assists:>2} {p.saves:>2} {p.shots:>2} {p.demos:>2}")
 
-    Name suffix: (MVP), (BOT)
-    """
-    sorted_players = sorted(players, key=lambda p: p.score, reverse=True)
 
-    # Column widths chosen so a typical row is ~46 chars. Targets:
-    #   prefix(2) + name(15) + space + score(5) + sp + G(3) + sp + A(3)
-    #   + sp + Sv(3) + sp + Sh(3) + sp + D(2) = 45
-    name_w = 15
-    rows: list[str] = []
-    rows.append(
-        f"  {'PLAYER':<{name_w}} {'Score':>5} {'G':>3} {'A':>3} "
-        f"{'Sv':>3} {'Sh':>3} {'D':>2}"
-    )
+def _mvp_player_ids(s) -> set[int]:
+    """Resolve which player *objects* should show the MVP badge.
 
-    for p in sorted_players:
-        is_me = bool(me and p.team_num == me.team_num and p.name == me.name
-                     and p.primary_id == me.primary_id)
-        is_teammate = bool(me and p.team_num == me.team_num)
-        mvp = is_mvp_map.get(p.primary_id, False) and not p.is_bot
+    Real players key cleanly on primary_id. Bots all share the sentinel id
+    'Unknown|0|0', so flagging by primary_id would badge every bot at once -
+    instead, when a bot is MVP we award it to the single top scorer on the
+    winning team, matching RL's actual MVP rule."""
+    flagged = s.is_mvp or {}
+    if not flagged:
+        return set()
+    out = {id(p) for p in s.players
+           if not p.is_bot and flagged.get(p.primary_id)}
+    if any(p.is_bot and flagged.get(p.primary_id) for p in s.players):
+        winning_bots = [p for p in s.players
+                        if p.is_bot and p.team_num == s.winner_team_num]
+        if winning_bots:
+            out.add(id(max(winning_bots, key=lambda p: p.score)))
+    return out
 
-        prefix = "> " if is_me else "  "
 
-        # Compact (MVP)/(BOT) markers - we tag MVPs with an asterisk to save
-        # 4 chars in the name field; (BOT) still spelled out so opponents are
-        # clearly identifiable.
-        suffix_bits: list[str] = []
-        if mvp:      suffix_bits.append("*")
-        if p.is_bot: suffix_bits.append("(BOT)")
-        suffix = "".join(suffix_bits) if suffix_bits else ""
+def _team_section(s, team_num: int, is_winner: bool, me,
+                  mvp_ids: set[int]) -> list[str]:
+    """One team's colored scoreboard lines: header row + one row per player,
+    sorted by score. Team identity is carried by color; the winner is tagged
+    and the viewer's own row is bolded and marked with a caret."""
+    fg = _TEAM_FG[team_num]
+    players = sorted((p for p in s.players if p.team_num == team_num),
+                     key=lambda p: p.score, reverse=True)
+    name = (s.team_name(team_num) or ("Blue" if team_num == 0 else "Orange")).upper()
+    head = _sgr(f"{name}  {s.team_score(team_num)}", A_BOLD, fg)
+    if is_winner:
+        head += "  " + _sgr("WIN", A_BOLD, A_GREEN)
+    lines = [head, _sgr(_SB_HEADER, A_GRAY)]
+    for p in players:
+        is_you = bool(me and p.primary_id == me.primary_id
+                      and p.name == me.name and p.team_num == me.team_num)
+        codes = (A_BOLD, fg) if is_you else (fg,)
+        seg = _sgr(_sb_row(p, is_you), *codes)
+        if id(p) in mvp_ids:
+            # Purple badge (white text on a violet bg, ANSI 45) - distinct from
+            # both the blue and yellow team colors so it always stands out.
+            seg += " " + _sgr(" MVP ", A_BOLD, A_WHITE, 45)
+        lines.append(seg)
+    return lines
 
-        name_with_suffix = f"{p.name}{suffix}"[:name_w]
+
+def _adv_stats_block(s, me) -> str | None:
+    """Movement & boost for the viewer's own team only (spectator-visible
+    data). Pulled into its own section so the scoreboard stays scannable."""
+    if not me:
+        return None
+    team = sorted((p for p in s.players
+                   if p.team_num == me.team_num and p.ticks_total >= 200),
+                  key=lambda p: p.score, reverse=True)
+    if not team:
+        return None
+    rows = [f"{'PLAYER':<{_SB_NAME_W}}{'AIR':>5}{'WALL':>6}{'SUP':>5}"
+            f"{'SPD':>5}{'BOOST':>7}"]
+    for p in team:
+        nm = f"{p.name}{' (BOT)' if p.is_bot else ''}"[:_SB_NAME_W]
         rows.append(
-            f"{prefix}{name_with_suffix:<{name_w}} "
-            f"{p.score:>5} {p.goals:>3} {p.assists:>3} "
-            f"{p.saves:>3} {p.shots:>3} {p.demos:>2}"
+            f"{nm:<{_SB_NAME_W}}{p.pct_in_air * 100:>4.0f}%"
+            f"{p.pct_on_wall * 100:>5.0f}%{p.pct_supersonic * 100:>4.0f}%"
+            f"{p.avg_speed:>5.0f}{p.boost_used:>7.0f}"
         )
-        # Indented adv line only for teammates with spectator-visible data.
-        # Compact form, single-space separators - room for 5-digit boost.
-        if is_teammate and p.ticks_total >= 200:
-            rows.append(
-                f"   air {p.pct_in_air * 100:.0f}% "
-                f"wall {p.pct_on_wall * 100:.0f}% "
-                f"sup {p.pct_supersonic * 100:.0f}% "
-                f"spd {p.avg_speed:.0f} "
-                f"boost {p.boost_used:.0f}"
-            )
-
-    # MVP star legend - only if we actually rendered a *
-    legend = "  * = MVP" if any(is_mvp_map.get(p.primary_id) and not p.is_bot
-                                  for p in sorted_players) else ""
-
-    icon = _team_emoji(team_num)
-    title = f"{icon}  **{team_name}**  —  **{team_score}**"
-    body_lines = rows + ([legend] if legend else [])
-    body = "```\n" + "\n".join(body_lines) + "\n```"
-    return title + "\n" + body
+    return "```\n" + "\n".join(rows) + "\n```"
 
 
 def _last_n_stats(store, primary_id: str | None, n: int = 10) -> dict | None:
@@ -192,23 +215,31 @@ def build_match_embed(
         title_text = "Match"
 
     if is_mvp:
-        title_text += f" · MVP"
+        title_text += " · MVP"
 
     arena_label = _arena_pretty(s.arena)
-    mode_tag = s.match_type
     duration_str = ""
     if s.duration_seconds:
         mm = int(s.duration_seconds // 60); ss = int(s.duration_seconds % 60)
         duration_str = f"{mm}:{ss:02d}"
 
-    # Big result line. Team color emoji is the only decoration here - it's
-    # functional (tells you which team is which).
-    description = (
-        f"{_team_emoji(0)} **{s.team0_name}  {s.team0_score}**"
-        f"  —  "
-        f"**{s.team1_score}  {s.team1_name}** {_team_emoji(1)}\n\n"
-        f"`{arena_label}`  ·  `{mode_tag}`  ·  `{duration_str or '?'}`"
-    )
+    # ----- scoreboard: one colored ANSI block, winner on top -----
+    # Color carries team identity (blue / yellow), a green WIN tag marks the
+    # winner, and the viewer's row is bolded. The context line groups the
+    # match facts (type, arena, length) in one place.
+    context_bits = [s.match_type, arena_label]
+    if duration_str:
+        context_bits.append(duration_str)
+    order = ([s.winner_team_num, 1 - s.winner_team_num]
+             if s.winner_team_num in (0, 1) else [0, 1])
+    mvp_ids = _mvp_player_ids(s)
+    sb_lines = [_sgr(" · ".join(context_bits), A_GRAY)]
+    for team_num in order:
+        sb_lines.append("")
+        sb_lines += _team_section(s, team_num, team_num == s.winner_team_num,
+                                  me, mvp_ids)
+    description = "```ansi\n" + "\n".join(sb_lines) + "\n```"
+
     # If we have a public URL configured, make the title a clickable link to
     # the match-detail page.
     embed_url = None
@@ -220,22 +251,17 @@ def build_match_embed(
         url=embed_url,
         color=color, description=description,
     )
+    # Stamp the embed with when the match actually ended, not when we post it
+    # (posting can lag, or replay a saved capture). Discord shows it in the
+    # footer in each viewer's local timezone.
+    match_ts = s.ended_at or s.started_at
+    if match_ts:
+        embed.timestamp = datetime.fromtimestamp(match_ts, tz=timezone.utc)
 
-    # ----- main scoreboard (single section, advanced stats inline) -----
-    blue = [p for p in s.players if p.team_num == 0]
-    orange = [p for p in s.players if p.team_num == 1]
-    if blue:
-        embed.add_field(
-            name="​",
-            value=_team_block(0, s.team0_name, s.team0_score, blue, me, s.is_mvp),
-            inline=False,
-        )
-    if orange:
-        embed.add_field(
-            name="​",
-            value=_team_block(1, s.team1_name, s.team1_score, orange, me, s.is_mvp),
-            inline=False,
-        )
+    # ----- your team's movement & boost (separate, secondary section) -----
+    adv = _adv_stats_block(s, me)
+    if adv:
+        embed.add_field(name="Movement & boost", value=adv, inline=False)
 
     # ----- last 10 matches (rolling form, DB-backed) -----
     # Falls back to the in-memory session totals only when there's no DB or we
@@ -263,14 +289,12 @@ def build_match_embed(
         inline=False,
     )
 
-    # ----- footer: misc match notes -----
-    foot_parts: list[str] = []
+    # ----- footer: match notes, rendered next to the match timestamp -----
+    # Only crossbar hits earn a spot here; "touches logged" was an internal
+    # capture diagnostic, not a player-facing stat, so it's dropped.
     if s.crossbar_hits:
-        foot_parts.append(f"{s.crossbar_hits} crossbar")
-    if s.ball_touches:
-        foot_parts.append(f"{len(s.ball_touches)} touches logged")
-    if foot_parts:
-        embed.set_footer(text="  ·  ".join(foot_parts))
+        plural = "s" if s.crossbar_hits != 1 else ""
+        embed.set_footer(text=f"{s.crossbar_hits} crossbar hit{plural}")
 
     return embed
 
