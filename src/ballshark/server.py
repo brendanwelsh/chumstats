@@ -4229,9 +4229,9 @@ def _ball_heatmap_svg(playback: dict, player_filter: str | None = None,
             '<div class="hm-split" style="display:grid;'
             'grid-template-columns:1fr 1fr;gap:12px;align-items:start">'
             f'<div>{_heat_split_label("Blue", "Orange net", "var(--team-blue)")}'
-            f'{_heat_pitch_svg(blue, svg, compact, key + "-b")}</div>'
+            f'{_heat_pitch_svg(blue, svg, compact, key + "-b", team=0)}</div>'
             f'<div>{_heat_split_label("Orange", "Blue net", "var(--team-orng)")}'
-            f'{_heat_pitch_svg(orng, svg, compact, key + "-o")}</div>'
+            f'{_heat_pitch_svg(orng, svg, compact, key + "-o", team=1)}</div>'
             '</div>'
         )
     return _heat_pitch_svg(ball, svg, compact, key)
@@ -4245,9 +4245,11 @@ def _heat_split_label(team: str, target_net: str, color: str) -> str:
     )
 
 
-def _heat_pitch_svg(ball: list, svg: dict, compact: bool, key: str) -> str:
-    """Render ONE thermal density pitch for a list of touches (one team's, or
-    all of them when only one team is present)."""
+def _heat_pitch_svg(ball: list, svg: dict, compact: bool, key: str,
+                    team: int | None = None) -> str:
+    """Render ONE density pitch for a list of touches (one team's, or all of
+    them when only one team is present). `team` picks the colour ramp: 0=blue,
+    1=orange, None=legacy thermal (ball-only maps)."""
     if not ball:
         return ""
     vb_w, vb_h = svg["vb_w"], svg["vb_h"]
@@ -4268,9 +4270,23 @@ def _heat_pitch_svg(ball: list, svg: dict, compact: bool, key: str) -> str:
         f'fill="#000" fill-opacity="{pt_opacity:.3f}"/>'
         for bh in ball
     )
-    # Blur the splats into a density field, copy density into every channel (gain
-    # so mid densities reach warm), recolour cold->hot via the LUT, fade empties.
-    # Thermal ramp: indigo -> blue -> teal -> green -> yellow -> red.
+    # Blur the splats into a density field, copy density into every channel, then
+    # recolour sparse->dense through a SINGLE-HUE ramp keyed to the team, so a
+    # "Blue" pitch reads blue and an "Orange" pitch reads orange (peaks go
+    # white-hot for legibility). team=None keeps the legacy thermal rainbow.
+    alpha = "0 0.42 0.66 0.82 0.90 0.95 0.98 1"
+    if team == 0:        # blue: deep blue -> cyan -> white-hot
+        fr = "0.05 0.06 0.10 0.18 0.34 0.58 0.82 1"
+        fg = "0.10 0.28 0.46 0.62 0.76 0.88 0.95 1"
+        fb = "0.30 0.55 0.78 0.92 0.99 1 1 1"
+    elif team == 1:      # orange: deep orange -> amber -> white-hot
+        fr = "0.25 0.50 0.74 0.92 1 1 1 1"
+        fg = "0.08 0.20 0.36 0.52 0.68 0.82 0.92 1"
+        fb = "0.05 0.06 0.09 0.16 0.28 0.48 0.74 1"
+    else:                # legacy thermal: indigo -> blue -> teal -> green -> yellow -> red
+        fr = "0.13 0.10 0.12 0.34 0.74 0.97 1 1"
+        fg = "0.09 0.36 0.66 0.86 0.89 0.70 0.40 0.18"
+        fb = "0.28 0.69 0.73 0.43 0.17 0.06 0.05 0.12"
     defs = (
         f'<defs>'
         f'<filter id="{heat_id}" x="-15%" y="-15%" width="130%" height="130%" '
@@ -4279,15 +4295,15 @@ def _heat_pitch_svg(ball: list, svg: dict, compact: bool, key: str) -> str:
         f'<feColorMatrix in="b" type="matrix" '
         f'values="0 0 0 2.6 0  0 0 0 2.6 0  0 0 0 2.6 0  0 0 0 2.6 0" result="d"/>'
         f'<feComponentTransfer in="d">'
-        f'<feFuncR type="table" tableValues="0.13 0.10 0.12 0.34 0.74 0.97 1 1"/>'
-        f'<feFuncG type="table" tableValues="0.09 0.36 0.66 0.86 0.89 0.70 0.40 0.18"/>'
-        f'<feFuncB type="table" tableValues="0.28 0.69 0.73 0.43 0.17 0.06 0.05 0.12"/>'
-        f'<feFuncA type="table" tableValues="0 0.42 0.66 0.82 0.90 0.95 0.98 1"/>'
+        f'<feFuncR type="table" tableValues="{fr}"/>'
+        f'<feFuncG type="table" tableValues="{fg}"/>'
+        f'<feFuncB type="table" tableValues="{fb}"/>'
+        f'<feFuncA type="table" tableValues="{alpha}"/>'
         f'</feComponentTransfer>'
         f'</filter>'
         f'</defs>'
     )
-    legend = "" if compact else _heat_legend_svg(vb_w, vb_h, sfx)
+    legend = "" if compact else _heat_legend_svg(vb_w, vb_h, sfx, team)
     pitch_cls = "hm-pitch hm-pitch-compact" if compact else "hm-pitch"
     return (
         f'<svg viewBox="0 0 {vb_w} {vb_h}" class="{pitch_cls}" '
@@ -4308,19 +4324,35 @@ def _heat_pitch_svg(ball: list, svg: dict, compact: bool, key: str) -> str:
     )
 
 
-def _heat_legend_svg(vb_w: float, vb_h: float, sfx: str) -> str:
-    """Small 'fewer -> more touches' thermal key, bottom-right of a heatmap."""
+def _heat_legend_svg(vb_w: float, vb_h: float, sfx: str, team: int | None = None) -> str:
+    """Small 'fewer -> more touches' key, bottom-right of a heatmap. Tinted to the
+    team hue so the legend matches the pitch (blue / orange); thermal otherwise."""
     lw, lh = 96, 6
     lx, ly = vb_w - lw - 14, vb_h - 16
     gid = f"heatleg{sfx}"
-    stops = (
-        '<stop offset="0%" stop-color="rgb(33,26,82)"/>'
-        '<stop offset="26%" stop-color="rgb(26,92,176)"/>'
-        '<stop offset="50%" stop-color="rgb(40,176,150)"/>'
-        '<stop offset="70%" stop-color="rgb(214,209,60)"/>'
-        '<stop offset="86%" stop-color="rgb(240,120,40)"/>'
-        '<stop offset="100%" stop-color="rgb(220,40,40)"/>'
-    )
+    if team == 0:
+        stops = (
+            '<stop offset="0%" stop-color="rgb(18,34,78)"/>'
+            '<stop offset="45%" stop-color="rgb(38,110,200)"/>'
+            '<stop offset="78%" stop-color="rgb(120,200,255)"/>'
+            '<stop offset="100%" stop-color="rgb(235,248,255)"/>'
+        )
+    elif team == 1:
+        stops = (
+            '<stop offset="0%" stop-color="rgb(74,32,12)"/>'
+            '<stop offset="45%" stop-color="rgb(214,108,36)"/>'
+            '<stop offset="78%" stop-color="rgb(255,196,110)"/>'
+            '<stop offset="100%" stop-color="rgb(255,246,232)"/>'
+        )
+    else:
+        stops = (
+            '<stop offset="0%" stop-color="rgb(33,26,82)"/>'
+            '<stop offset="26%" stop-color="rgb(26,92,176)"/>'
+            '<stop offset="50%" stop-color="rgb(40,176,150)"/>'
+            '<stop offset="70%" stop-color="rgb(214,209,60)"/>'
+            '<stop offset="86%" stop-color="rgb(240,120,40)"/>'
+            '<stop offset="100%" stop-color="rgb(220,40,40)"/>'
+        )
     tstyle = "font:600 8px system-ui,sans-serif;fill:currentColor;opacity:.7"
     return (
         f'<defs><linearGradient id="{gid}" x1="0" y1="0" x2="1" y2="0">{stops}</linearGradient></defs>'
