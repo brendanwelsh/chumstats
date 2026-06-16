@@ -103,6 +103,17 @@ log = logging.getLogger("ballshark.server")
 
 OVERLAY_DIR = Path(__file__).resolve().parent / "overlay"
 
+# Monochrome brand glyphs for the opponent-platform filter chips. Vendored as
+# inline-ready SVGs under overlay/icons/platforms/ (see SOURCES.md) and loaded
+# once at import. Rendered inline so they inherit currentColor and tint to the
+# accent on hover/active, matching the rest of the sidebar selector.
+_PLATFORM_ICONS = {
+    name: (OVERLAY_DIR / "icons" / "platforms" / f"{name}.svg")
+    .read_text(encoding="utf-8")
+    .strip()
+    for name in ("steam", "epic", "playstation", "xbox", "switch")
+}
+
 
 def _summary_to_dict(s: MatchSummary) -> dict[str, Any]:
     d = asdict(s)
@@ -6218,65 +6229,14 @@ def _filter_sidebar(active: str, force_hidden: bool = False) -> str:
           </div>
         </div>
     """)
-    # Platform marks - original geometric concept drawings.
-    # Larger viewBox + bigger render size for recognizability.
-    sz = 'width="18" height="18"'
-    # Steam: stylized pipe-valve wheel (4-spoke cog)
-    ic_steam = (
-        f'<svg class="plat-ic" viewBox="0 0 24 24" {sz} '
-        'fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">'
-        '<circle cx="12" cy="12" r="8"/>'
-        '<circle cx="12" cy="12" r="2.4" fill="currentColor"/>'
-        '<path d="M12 2 V5.5 M12 18.5 V22 M2 12 H5.5 M18.5 12 H22 M5 5 L7.5 7.5 M16.5 16.5 L19 19 M5 19 L7.5 16.5 M16.5 7.5 L19 5"/>'
-        '</svg>'
-    )
-    # Epic: heavy block letter "E" inside a square frame (generic typography)
-    ic_epic = (
-        f'<svg class="plat-ic" viewBox="0 0 24 24" {sz} '
-        'fill="currentColor">'
-        '<rect x="2.5" y="2" width="19" height="20" fill="none" stroke="currentColor" stroke-width="2"/>'
-        '<rect x="6.5" y="6"  width="11" height="2.5"/>'
-        '<rect x="6.5" y="10.75" width="8.5" height="2.5"/>'
-        '<rect x="6.5" y="15.5" width="11" height="2.5"/>'
-        '</svg>'
-    )
-    # PlayStation: generic gamepad silhouette with two grip handles + d-pad/buttons hint
-    ic_ps = (
-        f'<svg class="plat-ic" viewBox="0 0 24 24" {sz} '
-        'fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round">'
-        # Body: two rounded shoulders with a curved center
-        '<path d="M5 9 Q5 6 8 6 H16 Q19 6 19 9 V14 Q19 17 16 17 H13.5 L12 19 L10.5 17 H8 Q5 17 5 14 Z"/>'
-        # Left d-pad cross
-        '<line x1="7" y1="11" x2="9" y2="11"/>'
-        '<line x1="8" y1="10" x2="8" y2="12"/>'
-        # Right two action buttons
-        '<circle cx="14.5" cy="10.5" r="0.7" fill="currentColor"/>'
-        '<circle cx="16.5" cy="12.5" r="0.7" fill="currentColor"/>'
-        '</svg>'
-    )
-    # Xbox: sphere with bold "X" (Greek chi) inside
-    ic_xbox = (
-        f'<svg class="plat-ic" viewBox="0 0 24 24" {sz} '
-        'fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">'
-        '<circle cx="12" cy="12" r="9"/>'
-        '<line x1="7.5" y1="7.5" x2="16.5" y2="16.5"/>'
-        '<line x1="16.5" y1="7.5" x2="7.5" y2="16.5"/>'
-        '</svg>'
-    )
-    # Nintendo Switch: handheld console silhouette with side rails + screen
-    ic_switch = (
-        f'<svg class="plat-ic" viewBox="0 0 24 24" {sz} '
-        'fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round">'
-        # Outer console body
-        '<rect x="2" y="3" width="20" height="18"/>'
-        # Center screen (smaller inner rect)
-        '<rect x="7.5" y="5.5" width="9" height="13" fill="none"/>'
-        # Left analog dot
-        '<circle cx="4.75" cy="8" r="1" fill="currentColor"/>'
-        # Right small buttons
-        '<circle cx="19.25" cy="16" r="1" fill="currentColor"/>'
-        '</svg>'
-    )
+    # Platform marks: monochrome single-path brand glyphs (simple-icons),
+    # vendored under overlay/icons/platforms/ and inlined so they inherit
+    # currentColor and tint to the accent on hover/active. See SOURCES.md.
+    ic_steam = _PLATFORM_ICONS["steam"]
+    ic_epic = _PLATFORM_ICONS["epic"]
+    ic_ps = _PLATFORM_ICONS["playstation"]
+    ic_xbox = _PLATFORM_ICONS["xbox"]
+    ic_switch = _PLATFORM_ICONS["switch"]
     platform = section("platform", f"""
         <div class="sf-section">
           <div class="sf-title">Opponent platform</div>
