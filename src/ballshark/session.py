@@ -141,6 +141,7 @@ class MatchSummary:
     players: list[PlayerLine] = field(default_factory=list)
     is_mvp: dict[str, bool] = field(default_factory=dict)  # primary_id -> True
     crossbar_hits: int = 0
+    crossbar_by_team: dict[int, int] = field(default_factory=dict)  # team_num -> posts
     is_online: bool = False  # MatchGuid present => online/LAN
     color_primary: dict[int, str] = field(default_factory=dict)  # team_num -> hex color
     ball_touches: list[BallTouch] = field(default_factory=list)
@@ -222,6 +223,7 @@ class MatchAggregator:
         self.last_update: UpdateState | None = None
         self.winner_team_num: int | None = None
         self.crossbar_hits: int = 0
+        self._crossbar_by_team: dict[int, int] = {}
         self._mvp_ids: set[str] = set()  # primary_ids of MVP recipients
 
         # Derived per-player accumulators keyed by primary_id (fall back to name).
@@ -273,6 +275,12 @@ class MatchAggregator:
 
         elif event_name == "CrossbarHit":
             self.crossbar_hits += 1
+            # Attribute the post/crossbar hit to whoever last touched the ball.
+            last = ((raw or {}).get("BallLastTouch") or {}).get("Player") or {}
+            team = last.get("TeamNum")
+            if team is not None:
+                self._crossbar_by_team[int(team)] = (
+                    self._crossbar_by_team.get(int(team), 0) + 1)
 
         elif event_name == "GoalScored" and isinstance(parsed, GoalScored):
             if parsed.is_replay_echo:
@@ -454,6 +462,7 @@ class MatchAggregator:
             players=players,
             is_mvp=is_mvp,
             crossbar_hits=self.crossbar_hits,
+            crossbar_by_team=dict(self._crossbar_by_team),
             is_online=is_online,
             color_primary=color_primary,
             ball_touches=list(self._ball_touches),

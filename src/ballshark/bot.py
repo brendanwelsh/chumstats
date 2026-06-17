@@ -115,25 +115,44 @@ def _team_section(s, team_num: int, is_winner: bool, me,
 
 
 def _adv_stats_block(s, me) -> str | None:
-    """Movement & boost for the viewer's own team only (spectator-visible
-    data). Pulled into its own section so the scoreboard stays scannable."""
+    """Your team's current-match detail, colored in your team color: a one-line
+    team summary (post hits, touches, possession, avg hit speed) plus per-player
+    movement & boost rows. Only our-team data is shown - opponent movement isn't
+    in the feed and nothing else is confidently derivable per team."""
     if not me:
         return None
+    fg = _TEAM_FG.get(me.team_num, A_WHITE)
+    lines: list[str] = []
+
+    # Team summary from the (reliable) ball-touch stream + per-team post hits.
+    ours = [t for t in s.ball_touches if t.team_num == me.team_num]
+    posts = s.crossbar_by_team.get(me.team_num, 0)
+    if ours or posts:
+        bits = [f"posts {posts}"]
+        if ours:
+            poss = (len(ours) / len(s.ball_touches)) if s.ball_touches else 0.0
+            avg_hit = sum(t.post_speed for t in ours) / len(ours)
+            bits.append(f"touches {len(ours)} ({poss * 100:.0f}%)")
+            bits.append(f"avg hit {avg_hit:.0f}")
+        lines.append(_sgr(" · ".join(bits), A_BOLD, fg))
+
+    # Per-player movement & boost (spectator-only -> our team).
     team = sorted((p for p in s.players
                    if p.team_num == me.team_num and p.ticks_total >= 200),
                   key=lambda p: p.score, reverse=True)
-    if not team:
+    if team:
+        lines.append(_sgr(f"{'PLAYER':<{_SB_NAME_W}}{'AIR':>5}{'WALL':>6}{'SUP':>5}"
+                          f"{'SPD':>5}{'BOOST':>7}", A_WHITE))
+        for p in team:
+            nm = f"{p.name}{' (BOT)' if p.is_bot else ''}"[:_SB_NAME_W]
+            nums = (f"{p.pct_in_air * 100:>4.0f}%"
+                    f"{p.pct_on_wall * 100:>5.0f}%{p.pct_supersonic * 100:>4.0f}%"
+                    f"{p.avg_speed:>5.0f}{p.boost_used:>7.0f}")
+            lines.append(_sgr(f"{nm:<{_SB_NAME_W}}", fg) + _sgr(nums, A_WHITE))
+
+    if not lines:
         return None
-    fg = _TEAM_FG.get(me.team_num, A_WHITE)
-    rows = [_sgr(f"{'PLAYER':<{_SB_NAME_W}}{'AIR':>5}{'WALL':>6}{'SUP':>5}"
-                 f"{'SPD':>5}{'BOOST':>7}", A_WHITE)]
-    for p in team:
-        nm = f"{p.name}{' (BOT)' if p.is_bot else ''}"[:_SB_NAME_W]
-        nums = (f"{p.pct_in_air * 100:>4.0f}%"
-                f"{p.pct_on_wall * 100:>5.0f}%{p.pct_supersonic * 100:>4.0f}%"
-                f"{p.avg_speed:>5.0f}{p.boost_used:>7.0f}")
-        rows.append(_sgr(f"{nm:<{_SB_NAME_W}}", fg) + _sgr(nums, A_WHITE))
-    return "```ansi\n" + "\n".join(rows) + "\n```"
+    return "```ansi\n" + "\n".join(lines) + "\n```"
 
 
 def _last_n_stats(store, primary_id: str | None, n: int = 10) -> dict | None:
@@ -232,13 +251,11 @@ def build_match_embed(
     context_bits = [s.match_type, arena_label]
     if duration_str:
         context_bits.append(duration_str)
-    if s.crossbar_hits:
-        context_bits.append(
-            f"{s.crossbar_hits} crossbar{'s' if s.crossbar_hits != 1 else ''}")
     order = ([s.winner_team_num, 1 - s.winner_team_num]
              if s.winner_team_num in (0, 1) else [0, 1])
     mvp_ids = _mvp_player_ids(s)
-    sb_lines = [_sgr(" · ".join(context_bits), A_GRAY)]
+    # White (not gray) so it's readable on Discord's dark code-block background.
+    sb_lines = [_sgr(" · ".join(context_bits), A_WHITE)]
     for team_num in order:
         sb_lines.append("")
         sb_lines += _team_section(s, team_num, team_num == s.winner_team_num,
@@ -266,7 +283,7 @@ def build_match_embed(
     # ----- your team's movement & boost (separate, secondary section) -----
     adv = _adv_stats_block(s, me)
     if adv:
-        embed.add_field(name="Movement & boost", value=adv, inline=False)
+        embed.add_field(name="Your team · this match", value=adv, inline=False)
 
     # ----- last 10 matches (rolling form, DB-backed) -----
     # Falls back to the in-memory session totals only when there's no DB or we
@@ -276,15 +293,17 @@ def build_match_embed(
     def _form_box(wins, losses, win_rate, streak, goals, assists, saves,
                   shots, demos, form=None):
         st_col = A_GREEN if streak.startswith("W") else A_RED
-        lines = [
+        box = "```ansi\n" + "\n".join([
             _sgr(f"{wins}-{losses}   {win_rate * 100:.0f}% WR   streak ", A_WHITE)
             + _sgr(streak, A_BOLD, st_col),
             _sgr(f"G {goals}  A {assists}  Sv {saves}  Sh {shots}  D {demos}",
                  A_WHITE),
-        ]
+        ]) + "\n```"
         if form:
-            lines.append(form)
-        return "```ansi\n" + "\n".join(lines) + "\n```"
+            # Form dots OUTSIDE the box so Discord renders them as full-color
+            # emoji (inside a code block they shrink to monochrome), spaced out.
+            box += "\n" + " ".join(form)
+        return box
 
     if recent:
         field_name = f"Last {recent['count']}" if recent["count"] < 10 else "Last 10"
