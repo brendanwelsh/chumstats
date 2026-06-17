@@ -2044,11 +2044,15 @@ def _match_detail_html(store, match_id: str, viewer_pid: str | None, viewer_name
     if clock_map:
         reg_clocks = [tg for _, tg in clock_map if tg >= 0]
         ot_clocks  = [-tg for _, tg in clock_map if tg < 0]
-        regulation_played = (max(reg_clocks) - min(reg_clocks)) if reg_clocks else 0
+        # Nominal whole-minute regulation + OT elapsed - identical to the
+        # aggregator/Discord derivation so every surface shows the same length.
+        regulation_played = (round(max(reg_clocks) / 60) * 60) if reg_clocks else 0
         overtime_played = max(ot_clocks) if ot_clocks else 0
         game_duration = regulation_played + overtime_played
+        is_overtime_match = overtime_played > 0
     else:
         game_duration = duration  # fallback if we never captured clock ticks
+        is_overtime_match = False
     g_mm, g_ss = int(game_duration // 60), int(game_duration % 60)
 
     # Per-player touch counts for the mini-heatmap thumbnails + the BPM /
@@ -2399,18 +2403,12 @@ def _match_detail_html(store, match_id: str, viewer_pid: str | None, viewer_name
     blue_result = "win" if winner_is_0 else "loss"
     orng_result = "loss" if winner_is_0 else "win"
 
-    # Match-context tag. RL standard match is 5:00 (300s) of game time.
-    # Wall-clock duration in our DB includes goal celebrations (~30s each),
-    # so a clean reg game with N goals = roughly 300 + 30*N seconds.
-    total_goals = (t0_score or 0) + (t1_score or 0)
-    expected_clean = 300 + 30 * total_goals
-    score_diff = abs((t0_score or 0) - (t1_score or 0))
+    # Match-context tag, from the real game clock (not a wall-clock guess):
+    # any overtime clock ticks => Overtime; a very short match => Forfeit.
     if duration < 180:
         match_context = "Forfeit"
         match_context_class = "ff"
-    elif duration > expected_clean + 75 and score_diff <= 1:
-        # Notably longer than the expected wall time and ended on a close
-        # margin (consistent with sudden-death OT).
+    elif is_overtime_match:
         match_context = "Overtime"
         match_context_class = "ot"
     else:
