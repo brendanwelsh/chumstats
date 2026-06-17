@@ -45,3 +45,4 @@ docs/screens/
 
 # local UI preview scratch
 .uipreview.py
+server.log
