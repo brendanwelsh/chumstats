@@ -239,10 +239,14 @@ def build_match_embed(
         title_text += " · MVP"
 
     arena_label = _arena_pretty(s.arena)
+    # Game length from the in-game clock (regulation + overtime); fall back to
+    # the wall/tick duration only when no clock was captured. Normal games show
+    # the full match length; OT games add the extra time and an "OT" tag.
+    game_secs = (s.regulation_seconds + s.overtime_seconds) or s.duration_seconds
     duration_str = ""
-    if s.duration_seconds:
-        mm = int(s.duration_seconds // 60); ss = int(s.duration_seconds % 60)
-        duration_str = f"{mm}:{ss:02d}"
+    if game_secs:
+        mm = int(game_secs // 60); ss = int(game_secs % 60)
+        duration_str = f"{mm}:{ss:02d}" + (" OT" if s.is_overtime else "")
 
     # ----- scoreboard: one colored ANSI block, winner on top -----
     # Color carries team identity (blue / yellow), a green WIN tag marks the

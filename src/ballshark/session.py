@@ -146,6 +146,9 @@ class MatchSummary:
     color_primary: dict[int, str] = field(default_factory=dict)  # team_num -> hex color
     ball_touches: list[BallTouch] = field(default_factory=list)
     duration_seconds: float = 0.0
+    regulation_seconds: float = 0.0   # nominal in-game-clock length (no OT)
+    overtime_seconds: float = 0.0     # OT elapsed on the game clock (0 if none)
+    is_overtime: bool = False
     goal_events: list[dict] = field(default_factory=list)  # deduped goal records
 
     def team_name(self, team_num: int) -> str:
@@ -224,6 +227,10 @@ class MatchAggregator:
         self.winner_team_num: int | None = None
         self.crossbar_hits: int = 0
         self._crossbar_by_team: dict[int, int] = {}
+        # Game-clock tracking (from ClockUpdatedSeconds) for true match length.
+        self._reg_max_seconds: float = 0.0
+        self._ot_max_seconds: float = 0.0
+        self._has_overtime: bool = False
         self._mvp_ids: set[str] = set()  # primary_ids of MVP recipients
 
         # Derived per-player accumulators keyed by primary_id (fall back to name).
@@ -281,6 +288,15 @@ class MatchAggregator:
             if team is not None:
                 self._crossbar_by_team[int(team)] = (
                     self._crossbar_by_team.get(int(team), 0) + 1)
+
+        elif event_name == "ClockUpdatedSeconds" and raw:
+            ts = raw.get("TimeSeconds")
+            if ts is not None:
+                if raw.get("bOvertime"):
+                    self._has_overtime = True
+                    self._ot_max_seconds = max(self._ot_max_seconds, float(ts))
+                else:
+                    self._reg_max_seconds = max(self._reg_max_seconds, float(ts))
 
         elif event_name == "GoalScored" and isinstance(parsed, GoalScored):
             if parsed.is_replay_echo:
@@ -448,6 +464,10 @@ class MatchAggregator:
         max_ticks = max((p.ticks_total for p in self._lines.values()), default=0)
         tick_dur = max_ticks / 30.0
         duration = wall_dur if wall_dur > tick_dur * 0.5 else tick_dur
+        # Round regulation to the nominal whole-minute match length (the clock's
+        # first sample is ~299s, not 300); OT elapsed is added on top.
+        regulation = (round(self._reg_max_seconds / 60.0) * 60
+                      if self._reg_max_seconds else 0.0)
 
         return MatchSummary(
             match_id=match_id,
@@ -467,6 +487,9 @@ class MatchAggregator:
             color_primary=color_primary,
             ball_touches=list(self._ball_touches),
             duration_seconds=duration,
+            regulation_seconds=regulation,
+            overtime_seconds=self._ot_max_seconds,
+            is_overtime=self._has_overtime,
             goal_events=list(self._goals),
         )
 
