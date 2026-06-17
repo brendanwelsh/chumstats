@@ -59,13 +59,6 @@ _SB_HEADER = (f"  {'PLAYER':<{_SB_NAME_W}}{'PTS':>6} {'G':>2} {'A':>2} "
               f"{'SV':>2} {'SH':>2} {'D':>2}")
 
 
-def _sb_row(p, is_you: bool) -> str:
-    name = f"{p.name}{' (BOT)' if p.is_bot else ''}"[:_SB_NAME_W]
-    prefix = "▸ " if is_you else "  "
-    return (f"{prefix}{name:<{_SB_NAME_W}}{p.score:>6} {p.goals:>2} "
-            f"{p.assists:>2} {p.saves:>2} {p.shots:>2} {p.demos:>2}")
-
-
 def _mvp_player_ids(s) -> set[int]:
     """Resolve which player *objects* should show the MVP badge.
 
@@ -98,16 +91,25 @@ def _team_section(s, team_num: int, is_winner: bool, me,
     head = _sgr(f"{name}  {s.team_score(team_num)}", A_BOLD, fg)
     if is_winner:
         head += "  " + _sgr("WIN", A_BOLD, A_GREEN)
-    lines = [head, _sgr(_SB_HEADER, A_GRAY)]
+    # Column header row (PLAYER / PTS / G / A ...) in white.
+    lines = [head, _sgr(_SB_HEADER, A_WHITE)]
     for p in players:
         is_you = bool(me and p.primary_id == me.primary_id
                       and p.name == me.name and p.team_num == me.team_num)
-        codes = (A_BOLD, fg) if is_you else (fg,)
-        seg = _sgr(_sb_row(p, is_you), *codes)
+        nm = f"{p.name}{' (BOT)' if p.is_bot else ''}"[:_SB_NAME_W]
+        prefix = "▸ " if is_you else "  "
+        # Names in the team's color (blue team blue, orange team orange/yellow),
+        # numbers in white; the viewer's own row is bolded.
+        name_codes = (A_BOLD, fg) if is_you else (fg,)
+        num_codes  = (A_BOLD, A_WHITE) if is_you else (A_WHITE,)
+        nums = (f"{p.score:>6} {p.goals:>2} {p.assists:>2} "
+                f"{p.saves:>2} {p.shots:>2} {p.demos:>2}")
+        seg = (_sgr(f"{prefix}{nm:<{_SB_NAME_W}}", *name_codes)
+               + _sgr(nums, *num_codes))
         if id(p) in mvp_ids:
-            # Purple badge (white text on a violet bg, ANSI 45) - distinct from
-            # both the blue and yellow team colors so it always stands out.
-            seg += " " + _sgr(" MVP ", A_BOLD, A_WHITE, 45)
+            # MVP marker in the winning team's own color (MVP is always on the
+            # winner, so fg here is that color), bold so it still reads.
+            seg += "  " + _sgr("MVP", A_BOLD, fg)
         lines.append(seg)
     return lines
 
@@ -122,16 +124,16 @@ def _adv_stats_block(s, me) -> str | None:
                   key=lambda p: p.score, reverse=True)
     if not team:
         return None
-    rows = [f"{'PLAYER':<{_SB_NAME_W}}{'AIR':>5}{'WALL':>6}{'SUP':>5}"
-            f"{'SPD':>5}{'BOOST':>7}"]
+    fg = _TEAM_FG.get(me.team_num, A_WHITE)
+    rows = [_sgr(f"{'PLAYER':<{_SB_NAME_W}}{'AIR':>5}{'WALL':>6}{'SUP':>5}"
+                 f"{'SPD':>5}{'BOOST':>7}", A_WHITE)]
     for p in team:
         nm = f"{p.name}{' (BOT)' if p.is_bot else ''}"[:_SB_NAME_W]
-        rows.append(
-            f"{nm:<{_SB_NAME_W}}{p.pct_in_air * 100:>4.0f}%"
-            f"{p.pct_on_wall * 100:>5.0f}%{p.pct_supersonic * 100:>4.0f}%"
-            f"{p.avg_speed:>5.0f}{p.boost_used:>7.0f}"
-        )
-    return "```\n" + "\n".join(rows) + "\n```"
+        nums = (f"{p.pct_in_air * 100:>4.0f}%"
+                f"{p.pct_on_wall * 100:>5.0f}%{p.pct_supersonic * 100:>4.0f}%"
+                f"{p.avg_speed:>5.0f}{p.boost_used:>7.0f}")
+        rows.append(_sgr(f"{nm:<{_SB_NAME_W}}", fg) + _sgr(nums, A_WHITE))
+    return "```ansi\n" + "\n".join(rows) + "\n```"
 
 
 def _last_n_stats(store, primary_id: str | None, n: int = 10) -> dict | None:
@@ -271,26 +273,34 @@ def build_match_embed(
     # can't identify the player (e.g. post-test against raw fixtures).
     me_pid = me.primary_id if me else self_primary_id
     recent = _last_n_stats(store, me_pid, n=10)
+    def _form_box(wins, losses, win_rate, streak, goals, assists, saves,
+                  shots, demos, form=None):
+        st_col = A_GREEN if streak.startswith("W") else A_RED
+        lines = [
+            _sgr(f"{wins}-{losses}   {win_rate * 100:.0f}% WR   streak ", A_WHITE)
+            + _sgr(streak, A_BOLD, st_col),
+            _sgr(f"G {goals}  A {assists}  Sv {saves}  Sh {shots}  D {demos}",
+                 A_WHITE),
+        ]
+        if form:
+            lines.append(form)
+        return "```ansi\n" + "\n".join(lines) + "\n```"
+
     if recent:
         field_name = f"Last {recent['count']}" if recent["count"] < 10 else "Last 10"
-        recent_lines = [
-            f"**{recent['wins']}-{recent['losses']}**  ·  {recent['win_rate'] * 100:.0f}% win rate  ·  streak **{recent['streak_label']}**",
-            f"Goals **{recent['goals']}**  ·  Assists **{recent['assists']}**  ·  Saves **{recent['saves']}**  "
-            f"·  Shots **{recent['shots']}**  ·  Demos **{recent['demos']}**",
-            recent["form"],
-        ]
+        value = _form_box(
+            recent["wins"], recent["losses"], recent["win_rate"],
+            recent["streak_label"], recent["goals"], recent["assists"],
+            recent["saves"], recent["shots"], recent["demos"], recent["form"],
+        )
     else:
         field_name = "Session"
-        recent_lines = [
-            f"**{totals.wins}-{totals.losses}**  ·  {totals.win_rate * 100:.0f}% win rate  ·  streak **{totals.streak_label}**",
-            f"Goals **{totals.goals}**  ·  Assists **{totals.assists}**  ·  Saves **{totals.saves}**  "
-            f"·  Shots **{totals.shots}**  ·  Demos **{totals.demos}**",
-        ]
-    embed.add_field(
-        name=field_name,
-        value="\n".join(recent_lines),
-        inline=False,
-    )
+        value = _form_box(
+            totals.wins, totals.losses, totals.win_rate, totals.streak_label,
+            totals.goals, totals.assists, totals.saves, totals.shots,
+            totals.demos,
+        )
+    embed.add_field(name=field_name, value=value, inline=False)
 
     # ----- footer: just the match end timestamp -----
     # Crossbar hits moved up into the match context line (top), so every
