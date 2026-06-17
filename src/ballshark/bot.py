@@ -230,6 +230,9 @@ def build_match_embed(
     context_bits = [s.match_type, arena_label]
     if duration_str:
         context_bits.append(duration_str)
+    if s.crossbar_hits:
+        context_bits.append(
+            f"{s.crossbar_hits} crossbar{'s' if s.crossbar_hits != 1 else ''}")
     order = ([s.winner_team_num, 1 - s.winner_team_num]
              if s.winner_team_num in (0, 1) else [0, 1])
     mvp_ids = _mvp_player_ids(s)
@@ -289,12 +292,11 @@ def build_match_embed(
         inline=False,
     )
 
-    # ----- footer: match notes, rendered next to the match timestamp -----
-    # Only crossbar hits earn a spot here; "touches logged" was an internal
-    # capture diagnostic, not a player-facing stat, so it's dropped.
-    if s.crossbar_hits:
-        plural = "s" if s.crossbar_hits != 1 else ""
-        embed.set_footer(text=f"{s.crossbar_hits} crossbar hit{plural}")
+    # ----- footer: just the match end timestamp -----
+    # Crossbar hits moved up into the match context line (top), so every
+    # "this match" stat sits together above the rolling "Last 10" box and
+    # nothing this-match dangles under it. The timestamp set above still
+    # renders here on its own.
 
     return embed
 
