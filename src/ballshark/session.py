@@ -150,6 +150,7 @@ class MatchSummary:
     overtime_seconds: float = 0.0     # OT elapsed on the game clock (0 if none)
     is_overtime: bool = False
     goal_events: list[dict] = field(default_factory=list)  # deduped goal records
+    statfeed: dict[str, dict[str, int]] = field(default_factory=dict)  # pid -> {event: n}
 
     def team_name(self, team_num: int) -> str:
         return self.team0_name if team_num == 0 else self.team1_name
@@ -232,6 +233,8 @@ class MatchAggregator:
         self._ot_max_seconds: float = 0.0
         self._has_overtime: bool = False
         self._mvp_ids: set[str] = set()  # primary_ids of MVP recipients
+        # primary_id -> {statfeed event name: count} (epic saves, demos, ...).
+        self._statfeed: dict[str, dict[str, int]] = {}
 
         # Derived per-player accumulators keyed by primary_id (fall back to name).
         self._lines: dict[str, PlayerLine] = {}
@@ -321,13 +324,20 @@ class MatchAggregator:
             self._record_ball_hit(raw)
 
         elif event_name == "StatfeedEvent" and isinstance(parsed, StatfeedEvent):
-            if parsed.event_name == "MVP":
-                # We don't have primary_id here, just name/team. Resolve to
-                # primary_id on the LAST update state we saw.
-                if self.last_update:
-                    for p in self.last_update.players:
-                        if p.name == parsed.main_target.name and p.team_num == parsed.main_target.team_num:
-                            self._mvp_ids.add(p.primary_id)
+            # We get name/team, not primary_id - resolve via the last tick.
+            pid = None
+            if self.last_update and parsed.main_target:
+                for p in self.last_update.players:
+                    if (p.name == parsed.main_target.name
+                            and p.team_num == parsed.main_target.team_num):
+                        pid = p.primary_id
+                        break
+            if pid:
+                ev = parsed.event_name
+                d = self._statfeed.setdefault(pid, {})
+                d[ev] = d.get(ev, 0) + 1
+                if ev == "MVP":
+                    self._mvp_ids.add(pid)
 
     def _accumulate_tick(self, update: UpdateState) -> None:
         for p in update.players:
@@ -491,6 +501,7 @@ class MatchAggregator:
             overtime_seconds=self._ot_max_seconds,
             is_overtime=self._has_overtime,
             goal_events=list(self._goals),
+            statfeed={pid: dict(d) for pid, d in self._statfeed.items()},
         )
 
 
