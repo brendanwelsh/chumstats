@@ -163,6 +163,12 @@ def cmd_run(args: argparse.Namespace) -> int:
                 last_arena = game.get("Arena") or last_arena
                 last_t0_name = t0.get("Name") or last_t0_name or "Blue"
                 last_t1_name = t1.get("Name") or last_t1_name or "Orange"
+                # The overlay tick is throttled to 4 Hz; skip building the full
+                # per-player payload on the ~26/30 ticks that would be dropped.
+                # (Arena/team-name tracking above stays at 30 Hz — it's cheap and
+                # feeds match_start.) push_tick still guards the throttle clock.
+                if not broadcaster.tick_due():
+                    return
                 ball = game.get("Ball") or {}
                 payload = {
                     "team0_name":  last_t0_name,

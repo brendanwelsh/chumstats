@@ -7,11 +7,12 @@ with no delimiters. We accumulate bytes and use a brace-aware scanner
 what we did in capture.ps1 but in Python.
 
 Pipeline per envelope:
-    raw bytes -> JSON object -> Envelope -> dispatch to MatchAggregator
-                                         -> append to raw_events (DB)
-On MatchEnded + MatchDestroyed sequence, MatchAggregator emits a
-MatchSummary, which we persist via Store.save_match and feed to the in-memory
-SessionTracker.
+    raw bytes -> JSON object + typed payload -> dispatch to MatchAggregator
+                                             -> buffer for raw_events (DB)
+Raw events are flushed to SQLite in batches (one transaction per ~hundreds of
+packets) rather than one tiny transaction per packet. On MatchEnded +
+MatchDestroyed sequence, MatchAggregator emits a MatchSummary, which we persist
+via Store.save_match and feed to the in-memory SessionTracker.
 
 THREADING / WHY IT'S SPLIT IN TWO
 ---------------------------------
@@ -51,7 +52,7 @@ import time
 from collections.abc import Callable
 from typing import Any
 
-from .models import Envelope
+from .models import EVENT_MODEL
 from .session import MatchAggregator, MatchSummary, SessionTracker
 from .store import Store
 
@@ -59,6 +60,15 @@ from .store import Store
 # and how long a match may go without ANY events before we treat it as over.
 SOCKET_POLL_INTERVAL = 1.0
 MATCH_IDLE_TIMEOUT = 30.0
+
+# Raw-event persistence is batched: instead of one SQLite transaction per
+# envelope (~30 Hz UpdateState + clock + ball-hit => tens of tiny commits per
+# second, each re-opening a connection), the worker buffers rows and flushes
+# them with a single executemany. We flush when the buffer hits this many rows,
+# on every idle tick, and always before a match is finalized (so the syncer and
+# any reader see a complete, persisted match). Bounds memory mid-match while
+# collapsing hundreds of transactions into a handful.
+RAW_BATCH_MAX = 256
 
 # Reader-thread recv() timeout. Small so the reader notices a stop request
 # promptly; otherwise it just blocks waiting for RL packets. This is NOT an
@@ -85,14 +95,14 @@ def _find_complete_json(buf: str, start: int = 0) -> tuple[int, int] | None:
     Brace-depth scanner that respects strings and escapes."""
     i = start
     n = len(buf)
-    # Skip whitespace
-    while i < n and buf[i] in " \r\n\t":
+    # Skip anything that isn't the start of an object: whitespace between
+    # concatenated envelopes, or stray bytes from a malformed packet. Iterative
+    # (not recursive) so a buffer full of leading non-'{' bytes can't blow the
+    # recursion limit or pay a stack frame per skipped byte.
+    while i < n and buf[i] != "{":
         i += 1
     if i >= n:
         return None
-    if buf[i] != "{":
-        # Not the start of an object - skip one char so we don't loop.
-        return _find_complete_json(buf, i + 1)
 
     depth = 0
     in_str = False
@@ -120,30 +130,54 @@ def _find_complete_json(buf: str, start: int = 0) -> tuple[int, int] | None:
     return None
 
 
-def _drain_buffer(buf: str) -> tuple[list[tuple[Envelope, dict[str, Any]]], str]:
+def _drain_buffer(buf: str) -> tuple[list[tuple[str, dict[str, Any], Any]], str]:
     """Pull every complete envelope out of `buf`, returning
-    (list_of_(Envelope, raw_outer_dict), unconsumed_remainder).
+    (list_of_(event_name, raw_payload_dict, parsed_or_None), unconsumed_remainder).
 
     Runs on the WORKER thread — JSON decoding and pydantic validation are part
     of the "slow work" we keep off the recv path. Malformed objects are skipped
-    individually so one bad packet can't wedge the stream."""
-    out: list[tuple[Envelope, dict[str, Any]]] = []
+    individually so one bad packet can't wedge the stream.
+
+    Each envelope is parsed all the way through here (outer object + inner Data
+    payload + the typed model), so the worker loop gets ready-to-use triples and
+    we never build a throwaway `Envelope` instance per packet. We scan with a
+    moving cursor and slice the remainder exactly once instead of reslicing the
+    whole buffer per object (that was quadratic when many envelopes arrive in one
+    recv chunk)."""
+    out: list[tuple[str, dict[str, Any], Any]] = []
+    pos = 0
     while True:
-        hit = _find_complete_json(buf)
+        hit = _find_complete_json(buf, pos)
         if hit is None:
-            return out, buf
+            return out, buf[pos:]
         start, end = hit
-        obj_str = buf[start:end + 1]
-        buf = buf[end + 1:]
+        pos = end + 1
         try:
-            obj = json.loads(obj_str)
+            obj = json.loads(buf[start:end + 1])
         except json.JSONDecodeError:
             continue
-        try:
-            env = Envelope.model_validate(obj)
-        except Exception:
+        if not isinstance(obj, dict):
             continue
-        out.append((env, obj))
+        event = obj.get("Event")
+        data = obj.get("Data")
+        # Outer shape requires string Event + Data (Data is itself JSON text).
+        if not isinstance(event, str) or not isinstance(data, str):
+            continue
+        try:
+            raw = json.loads(data) if data else {}
+        except ValueError:
+            continue
+        model = EVENT_MODEL.get(event)
+        parsed = None
+        if model is not None:
+            try:
+                parsed = model.model_validate(raw)
+            except Exception:
+                # A payload that fails its model is dropped wholesale — same as
+                # the old path, where parse_payload() raising skipped the event
+                # before it reached aggregation or the raw_events archive.
+                continue
+        out.append((event, raw, parsed))
 
 
 def _socket_reader(sock: socket.socket, out: queue.Queue, stop: threading.Event,
@@ -199,10 +233,37 @@ def run_live(
          the full post-game screen). Most common for the "leave matches a lot
          when done" workflow.
     """
+    # Pending raw_events, flushed in one transaction instead of one per packet.
+    # Lives across reconnects; the finally clause flushes whatever's left.
+    raw_batch: list[tuple[float, str | None, str, str]] = []
+
+    def _flush_raw() -> None:
+        """Persist buffered raw_events in a single transaction. Best-effort: a DB
+        error drops the batch with a log rather than tearing down ingest (the
+        match itself is still saved via save_match, and raw_events are an archive
+        we can rebuild). Prefers the bulk path but falls back to per-row writes so
+        a duck-typed store without save_raw_events_bulk still works."""
+        if not raw_batch:
+            return
+        rows = raw_batch[:]
+        raw_batch.clear()
+        try:
+            bulk = getattr(store, "save_raw_events_bulk", None)
+            if bulk is not None:
+                bulk(rows)
+            else:
+                for r in rows:
+                    store.save_raw_event(*r)
+        except Exception as e:
+            print(f"[ingest] save_raw_events failed (dropped {len(rows)}): {e}")
+
     # Shared helper used by all finalization paths. Runs on the WORKER thread,
     # never on the recv path, so a slow save_match / on_match cannot back up the
     # socket.
     def _commit(agg: MatchAggregator, reason: str, force: bool = False) -> None:
+        # Flush first so the finalized match's raw_events are on disk before the
+        # syncer (or any reader) goes looking for them in save_match/on_match.
+        _flush_raw()
         if not agg:
             return
         s = agg.finalize(force=force)
@@ -222,13 +283,11 @@ def run_live(
             except Exception as e:
                 print(f"[ingest] on_match callback failed: {e}")
 
-    def _process(env: Envelope, agg: MatchAggregator | None) -> MatchAggregator | None:
-        """Handle one parsed envelope; returns the (possibly new/cleared) agg."""
+    def _process(event_name: str, raw: dict[str, Any], parsed: Any,
+                 agg: MatchAggregator | None) -> MatchAggregator | None:
+        """Handle one already-parsed envelope; returns the (possibly new/cleared)
+        agg. Parsing now happens in _drain_buffer, so this is pure dispatch."""
         received_at = time.time()
-        try:
-            event_name, raw, parsed = env.parse_payload()
-        except Exception:
-            return agg
 
         if event_name == "MatchCreated":
             if agg is not None:
@@ -253,12 +312,14 @@ def run_live(
             agg.handle(event_name, parsed, raw=raw)
 
         match_id = agg.match_guid if agg else ""
-        store.save_raw_event(
+        raw_batch.append((
             received_at,
             match_id or None,
             event_name,
             json.dumps(raw, separators=(",", ":")),
-        )
+        ))
+        if len(raw_batch) >= RAW_BATCH_MAX:
+            _flush_raw()
 
         if on_event:
             on_event(event_name, raw)
@@ -300,9 +361,12 @@ def run_live(
                 try:
                     kind, payload = q.get(timeout=SOCKET_POLL_INTERVAL)
                 except queue.Empty:
-                    # Idle tick (no data this interval): run closure checks so a
-                    # match that ended but never got MatchDestroyed / next
-                    # MatchCreated (user sitting on a screen) still finalizes.
+                    # Idle tick (no data this interval): flush any buffered
+                    # raw_events so a quiet stretch can't leave recent packets
+                    # unpersisted, then run closure checks so a match that ended
+                    # but never got MatchDestroyed / next MatchCreated (user
+                    # sitting on a screen) still finalizes.
+                    _flush_raw()
                     if (agg is not None and agg.ended
                             and (time.time() - last_event) > MATCH_IDLE_TIMEOUT):
                         _commit(agg, "idle timeout")
@@ -321,9 +385,9 @@ def run_live(
                 except UnicodeDecodeError:
                     buf += payload.decode("utf-8", errors="replace")
                 envs, buf = _drain_buffer(buf)
-                for env, _obj in envs:
+                for event_name, raw, parsed in envs:
                     last_event = time.time()
-                    agg = _process(env, agg)
+                    agg = _process(event_name, raw, parsed, agg)
 
         except ConnectionRefusedError:
             print("[ingest] connection refused; is RL running with PacketSendRate > 0?")
@@ -348,6 +412,9 @@ def run_live(
                     pass
             if reader is not None:
                 reader.join(timeout=2.0)
+            # Persist any buffered raw_events (including between-match events with
+            # no agg) before we drop this connection.
+            _flush_raw()
             # Socket dropped (RL closed): RL is gone, so force-finalize a match
             # that had real play even if MatchEnded/Destroyed were missed — it's
             # as complete as it will ever be. On localhost a socket close means

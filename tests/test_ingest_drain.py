@@ -206,3 +206,110 @@ def _wait_for(pred, timeout: float) -> bool:
         return pred()
     finally:
         t.cancel()
+
+
+# --- _drain_buffer parser (the brace-scanner + inline payload parse) ---------
+
+from ballshark.ingest import _drain_buffer
+from ballshark.models import MatchEnded, UpdateState
+
+
+def test_drain_buffer_parses_concatenated_envelopes():
+    """Two back-to-back envelopes (no delimiter, exactly like the wire) drain to
+    (event_name, raw_dict, typed_payload) triples with the right models."""
+    buf = (_match_stream()).decode("utf-8")  # 4 concatenated envelopes
+    out, rem = _drain_buffer(buf)
+    assert rem == ""  # everything consumed
+    names = [ev for ev, _raw, _p in out]
+    assert names == ["MatchCreated", "UpdateState", "MatchEnded", "MatchDestroyed"]
+    # Inner payload is decoded to a dict, and modelled events get a typed object.
+    by_name = {ev: (raw, p) for ev, raw, p in out}
+    assert by_name["UpdateState"][0]["MatchGuid"] == GUID
+    assert isinstance(by_name["UpdateState"][1], UpdateState)
+    assert isinstance(by_name["MatchEnded"][1], MatchEnded)
+    assert by_name["MatchEnded"][1].winner_team_num == 0
+
+
+def test_drain_buffer_keeps_partial_trailing_object():
+    """A trailing, not-yet-complete object stays in the remainder for the next
+    recv chunk; complete ones ahead of it are still drained."""
+    full = _envelope("MatchCreated", {"MatchGuid": GUID}).decode("utf-8")
+    partial = full[:-5]  # chop the closing braces off the second object
+    out, rem = _drain_buffer(full + partial)
+    assert [ev for ev, _r, _p in out] == ["MatchCreated"]
+    assert rem == partial  # exact bytes preserved for reassembly
+
+
+def test_drain_buffer_skips_malformed_without_wedging():
+    """A junk byte between objects and an envelope whose Data isn't valid JSON
+    are both skipped individually — the good events on either side survive."""
+    good1 = _envelope("MatchCreated", {"MatchGuid": GUID}).decode("utf-8")
+    bad_inner = '{"Event":"UpdateState","Data":"{not json}"}'
+    good2 = _envelope("MatchEnded", {"MatchGuid": GUID, "WinnerTeamNum": 1}).decode("utf-8")
+    out, rem = _drain_buffer(good1 + "\n\t" + bad_inner + good2)
+    assert [ev for ev, _r, _p in out] == ["MatchCreated", "MatchEnded"]
+
+
+def test_live_ingest_persists_every_raw_event_batched(tmp_path):
+    """End-to-end against a REAL Store: the batched raw_events path must persist
+    every envelope (in order) and save the match — i.e. batching changes timing,
+    not content."""
+    from ballshark.store import Store
+
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+    port = listener.getsockname()[1]
+
+    store = Store(str(tmp_path / "live.db"))
+    session = SessionTracker(self_name="Me")
+    matched: list = []
+    done = threading.Event()
+
+    def serve() -> None:
+        try:
+            conn, _ = listener.accept()
+        except OSError:
+            return
+        conn.sendall(_match_stream())
+        done.wait(timeout=15)
+        try:
+            conn.close()
+        except OSError:
+            pass
+
+    srv = threading.Thread(target=serve, name="fake-rl", daemon=True)
+    srv.start()
+
+    def on_match(s) -> None:
+        matched.append(s)
+        done.set()
+
+    worker = threading.Thread(
+        target=lambda: ingest.run_live(
+            store, session, host="127.0.0.1", port=port,
+            on_match=on_match, reconnect_delay=60.0,
+        ),
+        name="ingest-under-test", daemon=True,
+    )
+    worker.start()
+    try:
+        assert _wait_for(lambda: len(matched) == 1, timeout=15), "match never finalized"
+        # _commit flushes raw_events before save_match/on_match, so by the time
+        # on_match fired all four envelopes must be on disk, in arrival order.
+        with store._conn() as c:
+            rows = c.execute(
+                "SELECT event FROM raw_events ORDER BY received_at ASC, id ASC"
+            ).fetchall()
+            events = [r[0] for r in rows]
+            n_matches = c.execute("SELECT COUNT(*) FROM matches").fetchone()[0]
+        assert events == ["MatchCreated", "UpdateState", "MatchEnded", "MatchDestroyed"]
+        assert n_matches == 1
+        assert matched[0].team0_score == 1
+    finally:
+        done.set()
+        try:
+            listener.close()
+        except OSError:
+            pass
