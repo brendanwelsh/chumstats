@@ -18,7 +18,7 @@ from io import BytesIO
 
 import discord
 
-from .heatmap import render_match_heatmap_png
+from .goalmap import render_goal_map_png
 from .session import MatchSummary, SessionTotals
 
 log = logging.getLogger("ballshark.bot")
@@ -28,7 +28,7 @@ ICON_WIN  = "🏆"
 ICON_LOSS = "💀"
 
 # Attachment filename the embed's image points at (attachment://<this>).
-HEATMAP_FILENAME = "heatmap.png"
+GOALMAP_FILENAME = "goal_map.png"
 
 
 # --- Discord ANSI code-block coloring -------------------------------------
@@ -282,7 +282,7 @@ def build_match_embed(
     store=None,
     friends: list[str] | None = None,
     public_url: str | None = None,
-    heatmap_attached: bool = False,
+    image_attached: bool = False,
 ) -> discord.Embed:
     me = s.me(self_primary_id, self_name)
     won = bool(me and me.team_num == s.winner_team_num)
@@ -396,11 +396,11 @@ def build_match_embed(
         )
     embed.add_field(name=field_name, value=value, inline=False)
 
-    # ----- touch heatmap (team-hued, same ramps as the dashboard) -----
+    # ----- goal map (one pitch: where each goal was scored, by whom) -----
     # The caller renders + attaches the PNG (it can't be built inside the embed
     # itself). When it did, point the embed's image at the attachment.
-    if heatmap_attached:
-        embed.set_image(url=f"attachment://{HEATMAP_FILENAME}")
+    if image_attached:
+        embed.set_image(url=f"attachment://{GOALMAP_FILENAME}")
 
     # ----- footer: just the match end timestamp -----
     # Crossbar hits moved up into the match context line (top), so every
@@ -411,20 +411,21 @@ def build_match_embed(
     return embed
 
 
-def build_heatmap_file(s: MatchSummary) -> discord.File | None:
-    """Render the match's team-hued touch heatmap to a PNG and wrap it as a
-    Discord attachment. Returns None when the match has no ball touches or the
-    optional image dependency (Pillow) isn't installed — in either case the
-    post still goes out, just without the image. CPU-bound (a blur pass), so
-    call it off the event loop (run_in_executor)."""
+def build_goal_map_file(s: MatchSummary, viewer_name: str | None = None) -> discord.File | None:
+    """Render the match's goal map (one pitch: where each goal was scored, and
+    by whom) to a PNG and wrap it as a Discord attachment. Returns None when the
+    match has no goals or the optional image dependency (Pillow) isn't installed
+    — in either case the post still goes out without the image. Runs off the
+    event loop (run_in_executor)."""
     try:
-        png = render_match_heatmap_png(s.ball_touches)
+        png = render_goal_map_png(s.goal_events, s.team0_name, s.team1_name,
+                                  viewer_name=viewer_name)
     except Exception:
-        log.exception("heatmap render failed")
+        log.exception("goal map render failed")
         return None
     if not png:
         return None
-    return discord.File(BytesIO(png), filename=HEATMAP_FILENAME)
+    return discord.File(BytesIO(png), filename=GOALMAP_FILENAME)
 
 
 class MatchPoster:
@@ -507,8 +508,9 @@ class MatchPoster:
         while True:
             summary, totals = await self.queue.get()
             try:
-                # Render the heatmap PNG off the event loop (it runs a blur pass).
-                heatmap = await loop.run_in_executor(None, build_heatmap_file, summary)
+                # Render the goal-map PNG off the event loop.
+                gmap = await loop.run_in_executor(
+                    None, build_goal_map_file, summary, self.self_name)
                 embed = build_match_embed(
                     summary, totals,
                     self_primary_id=self.self_primary_id,
@@ -516,9 +518,9 @@ class MatchPoster:
                     store=self.store,
                     friends=self.friends,
                     public_url=self.public_url,
-                    heatmap_attached=heatmap is not None,
+                    image_attached=gmap is not None,
                 )
-                await channel.send(embed=embed, **({"file": heatmap} if heatmap else {}))
+                await channel.send(embed=embed, **({"file": gmap} if gmap else {}))
             except discord.Forbidden:
                 print(f"[bot] ERROR posting: bot lost access to channel {self.channel_id}")
             except Exception:
@@ -582,13 +584,14 @@ async def post_one(token: str, channel_id: int, summary: MatchSummary, totals: S
                 return
             channel = client.get_channel(channel_id) or await client.fetch_channel(channel_id)
             loop = asyncio.get_running_loop()
-            heatmap = await loop.run_in_executor(None, build_heatmap_file, summary)
+            gmap = await loop.run_in_executor(
+                None, build_goal_map_file, summary, self_name)
             embed = build_match_embed(
                 summary, totals,
                 self_primary_id=self_primary_id, self_name=self_name, store=store,
-                friends=friends, heatmap_attached=heatmap is not None,
+                friends=friends, image_attached=gmap is not None,
             )
-            msg = await channel.send(embed=embed, **({"file": heatmap} if heatmap else {}))
+            msg = await channel.send(embed=embed, **({"file": gmap} if gmap else {}))
             result.success = True
             result.message_id = msg.id
         except discord.Forbidden as e:
