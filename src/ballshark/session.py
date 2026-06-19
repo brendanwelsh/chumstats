@@ -245,7 +245,6 @@ class MatchAggregator:
 
         # Goal log (deduped by (goal_time, scorer.name)).
         self._goals: list[dict] = []
-        self._seen_goal_keys: set[tuple] = set()
 
     @property
     def ended(self) -> bool:
@@ -302,25 +301,15 @@ class MatchAggregator:
                     self._reg_max_seconds = max(self._reg_max_seconds, float(ts))
 
         elif event_name == "GoalScored" and isinstance(parsed, GoalScored):
+            # The Stats API emits exactly one GoalScored per goal (with the real
+            # scorer); the goal replay then re-broadcasts a blank copy (empty
+            # scorer + 0 speed), which is_replay_echo drops. That blank echo is
+            # the ONLY duplicate, so we keep every real goal and don't de-dup
+            # further. (The old GoalTime-keyed de-dup merged distinct goals that
+            # happened to share a GoalTime — a coarse per-rally counter — and so
+            # undercounted high-scoring games.)
             if parsed.is_replay_echo:
                 return
-            # Dedupe re-emitted goals WITHOUT merging distinct ones. GoalTime is
-            # coarse (whole seconds, and it resets each rally), so it repeats
-            # across different goals in a high-scoring game — keying on it alone
-            # wrongly collapsed two goals a player scored at the same GoalTime
-            # (e.g. Outlaw's pair at GoalTime=8). Include goal_speed + impact so
-            # the key is unique per real goal; a true replay re-emit carries
-            # identical data and still dedupes. (Empty-scorer echoes already
-            # dropped above.)
-            imp = parsed.impact_location
-            key = (parsed.goal_time, parsed.scorer.name, parsed.scorer.team_num,
-                   round(parsed.goal_speed, 2),
-                   round(imp.x) if imp else None,
-                   round(imp.y) if imp else None,
-                   round(imp.z) if imp else None)
-            if key in self._seen_goal_keys:
-                return
-            self._seen_goal_keys.add(key)
             # Snapshot the live game clock at the moment the goal fired, from the
             # most recent tick. TimeSeconds counts DOWN in regulation (it starts
             # near the nominal length) and UP in overtime; the bot's timeline
