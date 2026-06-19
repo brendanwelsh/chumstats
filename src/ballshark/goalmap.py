@@ -159,7 +159,7 @@ def render_goal_map_png(goal_events, team0_name: str = "Blue",
         placed.append(c)
         centers.append(c)
 
-    for g, (cx, cyc) in zip(goals, centers):
+    for g, (cx, cyc) in zip(goals, centers, strict=True):
         al = g.get("assist_location")
         if not (al and len(al) >= 2):
             continue
@@ -170,7 +170,7 @@ def render_goal_map_png(goal_events, team0_name: str = "Blue",
         d.ellipse([ax - ASSIST_R, ay - ASSIST_R, ax + ASSIST_R, ay + ASSIST_R],
                   fill=_dim(col, 0.32), outline=BG, width=1)
 
-    for i, (g, (cx, cyc)) in enumerate(zip(goals, centers), 1):
+    for i, (g, (cx, cyc)) in enumerate(zip(goals, centers, strict=True), 1):
         col = _team_color(g.get("scorer_team"))
         is_you = bool(viewer_name and g.get("scorer") == viewer_name)
         ring = GOLD if is_you else (245, 248, 252)
