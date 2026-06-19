@@ -34,12 +34,14 @@ LABEL_H = 24
 GAP = 20
 MARGIN = 16
 # Per-touch Gaussian brush: sigma proportional to the pitch (mirrors the
-# dashboard SVG's stdDeviation 13 on its 800px pitch). DENSITY_GAIN mirrors the
-# SVG feColorMatrix x2.6 boost — both surfaces accumulate adaptive-opacity
-# splats, scale them up, then clamp, so hot zones reach the white tip while
-# moderate traffic stays team-coloured.
+# dashboard SVG's stdDeviation 13 on its 800px pitch).
 BRUSH_SIGMA = PITCH_W / 61.0
-DENSITY_GAIN = 2.6
+# Density is normalised to a high percentile rather than a fixed gain so the map
+# reads well whether it's ~100 touches (one match) or thousands (a lifetime
+# map): the NORM_PCT-percentile cell maps to PEAK_TARGET on the ramp, the
+# hottest few % climb into the white tip, the rest stays team-coloured.
+NORM_PCT = 0.96
+PEAK_TARGET = 0.95
 
 # --- palette (matches the dashboard CSS custom properties) ------------------
 BG = (10, 13, 20)          # --bg   #0a0d14
@@ -115,14 +117,10 @@ def _density_field(points: list[tuple[int, int]], Image):
     import math
     if not points:
         return None
-    n = len(points)
-    # Same adaptive per-point opacity the SVG uses, so sparse minis stay warm
-    # and dense maps don't saturate everywhere.
-    pt_op = max(0.06, min(0.60, 2.4 / (n ** 0.5)))
     sigma = max(4.0, BRUSH_SIGMA)
     R = int(round(2.5 * sigma))
     inv = 1.0 / (2.0 * sigma * sigma)
-    kernel = [[pt_op * math.exp(-((dx * dx + dy * dy) * inv))
+    kernel = [[math.exp(-((dx * dx + dy * dy) * inv))
                for dx in range(-R, R + 1)] for dy in range(-R, R + 1)]
     buf = [0.0] * (PITCH_W * PITCH_H)
     for (x, y) in points:
@@ -135,7 +133,13 @@ def _density_field(points: list[tuple[int, int]], Image):
                     xx = x + dx
                     if 0 <= xx < PITCH_W:
                         buf[base + xx] += row[dx + R]
-    data = bytes(min(255, int(min(1.0, v * DENSITY_GAIN) * 255)) for v in buf)
+    # Normalise to a high percentile so brightness adapts to touch count.
+    nz = sorted(v for v in buf if v > 1e-4)
+    if not nz:
+        return None
+    p = nz[min(len(nz) - 1, int(NORM_PCT * (len(nz) - 1)))] or nz[-1]
+    scale = PEAK_TARGET / p
+    data = bytes(min(255, int(min(1.0, v * scale) * 255)) for v in buf)
     return Image.frombytes("L", (PITCH_W, PITCH_H), data)
 
 
