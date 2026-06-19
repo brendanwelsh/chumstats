@@ -304,7 +304,20 @@ class MatchAggregator:
         elif event_name == "GoalScored" and isinstance(parsed, GoalScored):
             if parsed.is_replay_echo:
                 return
-            key = (parsed.goal_time, parsed.scorer.name, parsed.scorer.team_num)
+            # Dedupe re-emitted goals WITHOUT merging distinct ones. GoalTime is
+            # coarse (whole seconds, and it resets each rally), so it repeats
+            # across different goals in a high-scoring game — keying on it alone
+            # wrongly collapsed two goals a player scored at the same GoalTime
+            # (e.g. Outlaw's pair at GoalTime=8). Include goal_speed + impact so
+            # the key is unique per real goal; a true replay re-emit carries
+            # identical data and still dedupes. (Empty-scorer echoes already
+            # dropped above.)
+            imp = parsed.impact_location
+            key = (parsed.goal_time, parsed.scorer.name, parsed.scorer.team_num,
+                   round(parsed.goal_speed, 2),
+                   round(imp.x) if imp else None,
+                   round(imp.y) if imp else None,
+                   round(imp.z) if imp else None)
             if key in self._seen_goal_keys:
                 return
             self._seen_goal_keys.add(key)
