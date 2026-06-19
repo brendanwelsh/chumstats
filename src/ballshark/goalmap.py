@@ -27,7 +27,8 @@ PITCH_W, PITCH_H = 560, 224   # 2.5 : 1
 MARGIN = 16
 TITLE_H = 26
 NET_T = 7
-DISC_R = 11
+DISC_R = 11      # scorer / shot marker
+ASSIST_R = 5     # assist marker (smaller, discreet)
 
 # --- palette (matches the dashboard CSS) ------------------------------------
 BG = (10, 13, 20)          # --bg
@@ -42,6 +43,12 @@ GOLD = (255, 209, 102)     # viewer-goal ring
 
 def _team_color(team: int | None):
     return TEAM_ORNG if team == 1 else TEAM_BLUE
+
+
+def _dim(c, f: float):
+    """Blend a colour toward the field background by fraction f (for the muted
+    assist dot + connecting line)."""
+    return tuple(int(c[i] * (1 - f) + FIELD[i] * f) for i in range(3))
 
 
 def _project(rx: float, ry: float) -> tuple[int, int]:
@@ -106,7 +113,7 @@ def render_goal_map_png(goal_events, team0_name: str = "Blue",
     px1, py1 = px0 + PITCH_W, py0 + PITCH_H
 
     n = len(goals)
-    cols = 1 if n <= 4 else (2 if n <= 10 else 3)
+    cols = 1 if n <= 3 else 2          # 2 cols max so "scorer <- assister" fits
     rows = math.ceil(n / cols)
     row_h = 18
     legend_top = py1 + 14
@@ -115,7 +122,7 @@ def render_goal_map_png(goal_events, team0_name: str = "Blue",
     img = Image.new("RGB", (W, H), BG)
     d = ImageDraw.Draw(img)
 
-    d.text((MARGIN, MARGIN // 2 + 2), "GOALS  -  where each was scored",
+    d.text((MARGIN, MARGIN // 2 + 2), "GOALS  -  where each was struck from  (line = assist)",
            fill=TEXT, font=f_title)
 
     # ---- pitch base ----
@@ -134,40 +141,63 @@ def render_goal_map_png(goal_events, team0_name: str = "Blue",
     rtw = d.textlength(rt, font=f_num)
     d.text((px1 - 4 - rtw, py0 + 3), rt, fill=TEAM_ORNG, font=f_num)
 
-    # ---- goal markers ----
-    placed: list[tuple[int, int]] = []
-    for i, g in enumerate(goals, 1):
-        team = g.get("scorer_team")
-        loc = g.get("impact_location")
+    # ---- goal markers: shot location (where struck from), with the assist as
+    # a smaller dot + a thin line back to it. Three passes so lines sit under
+    # the assist dots, which sit under the numbered shot discs. ----
+    def _loc(g):
+        loc = g.get("shot_location") or g.get("impact_location")
         if loc and len(loc) >= 2:
-            gx, gy = _project(float(loc[0]), float(loc[1]))
-        else:  # no location -> park at the net this goal went into
-            gx, gy = _project(0.0, RL_LEN / 2 if team == 0 else -RL_LEN / 2)
-        cx, cy2 = _declutter(px0 + gx, py0 + gy, placed, px0, py0)
-        placed.append((cx, cy2))
-        col = _team_color(team)
+            return _project(float(loc[0]), float(loc[1]))
+        team = g.get("scorer_team")
+        return _project(0.0, RL_LEN / 2 if team == 0 else -RL_LEN / 2)
+
+    placed: list[tuple[int, int]] = []
+    centers: list[tuple[int, int]] = []
+    for g in goals:
+        gx, gy = _loc(g)
+        c = _declutter(px0 + gx, py0 + gy, placed, px0, py0)
+        placed.append(c)
+        centers.append(c)
+
+    for g, (cx, cyc) in zip(goals, centers):
+        al = g.get("assist_location")
+        if not (al and len(al) >= 2):
+            continue
+        col = _team_color(g.get("scorer_team"))
+        ax, ay = _project(float(al[0]), float(al[1]))
+        ax, ay = px0 + ax, py0 + ay
+        d.line([ax, ay, cx, cyc], fill=_dim(col, 0.5), width=2)
+        d.ellipse([ax - ASSIST_R, ay - ASSIST_R, ax + ASSIST_R, ay + ASSIST_R],
+                  fill=_dim(col, 0.32), outline=BG, width=1)
+
+    for i, (g, (cx, cyc)) in enumerate(zip(goals, centers), 1):
+        col = _team_color(g.get("scorer_team"))
         is_you = bool(viewer_name and g.get("scorer") == viewer_name)
         ring = GOLD if is_you else (245, 248, 252)
-        d.ellipse([cx - DISC_R, cy2 - DISC_R, cx + DISC_R, cy2 + DISC_R],
+        d.ellipse([cx - DISC_R, cyc - DISC_R, cx + DISC_R, cyc + DISC_R],
                   fill=col, outline=ring, width=3 if is_you else 2)
         num = str(i)
         tw = d.textlength(num, font=f_num)
-        d.text((cx - tw / 2, cy2 - 8), num, fill=(255, 255, 255), font=f_num)
+        d.text((cx - tw / 2, cyc - 8), num, fill=(255, 255, 255), font=f_num)
 
-    # ---- legend: number -> scorer (in scoring order, team-coloured) ----
+    # ---- legend: number -> scorer (team-coloured), with assister dimmed ----
     col_w = PITCH_W // cols
     for idx, g in enumerate(goals):
         c = idx // rows
         r = idx % rows
         lx = MARGIN + c * col_w
         ly = legend_top + r * row_h
-        team = g.get("scorer_team")
-        col = _team_color(team)
+        col = _team_color(g.get("scorer_team"))
         d.ellipse([lx, ly + 3, lx + 11, ly + 14], fill=col)
         name = (g.get("scorer") or "?")
         is_you = bool(viewer_name and name == viewer_name)
-        label = f"{idx + 1}. {name}"[:22]
-        d.text((lx + 16, ly + 1), label, fill=(GOLD if is_you else TEXT), font=f_leg)
+        head = f"{idx + 1}. {name[:14]}"
+        d.text((lx + 16, ly + 1), head, fill=(GOLD if is_you else TEXT), font=f_leg)
+        assister = g.get("assister")
+        if assister:
+            hw = d.textlength(head, font=f_leg)
+            d.text((lx + 16 + hw, ly + 1), f"  ← {assister[:12]}",
+                   fill=TEXT_DIM, font=f_leg)
 
     buf = BytesIO()
     img.save(buf, format="PNG", optimize=True)

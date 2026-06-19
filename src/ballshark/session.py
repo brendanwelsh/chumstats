@@ -242,8 +242,14 @@ class MatchAggregator:
 
         # Ball touch events for heatmap.
         self._ball_touches: list[BallTouch] = []
+        # Most recent ball-touch (x, y) per player name, in stream order. Read
+        # at GoalScored to pin the scorer's shot and the assister's pass — the
+        # touches right BEFORE the goal (replay + kickoff touches arrive after,
+        # so they can't pollute it). The goal-line impact point is always at the
+        # net; this is where the goal was actually struck from.
+        self._last_touch_xy: dict[str, tuple[float, float]] = {}
 
-        # Goal log (deduped by (goal_time, scorer.name)).
+        # Goal log.
         self._goals: list[dict] = []
 
     @property
@@ -317,6 +323,12 @@ class MatchAggregator:
             # so downstream can show "--" instead of a bogus 0:00.
             game = self.last_update.game if self.last_update else None
             ts = game.time_seconds if game else 0.0
+            # Where the goal was struck from (scorer's last touch) and where the
+            # assist came from (assister's last touch) — the touches immediately
+            # before this goal in the event stream.
+            shot = self._last_touch_xy.get(parsed.scorer.name)
+            assist = (self._last_touch_xy.get(parsed.assister.name)
+                      if parsed.assister else None)
             self._goals.append({
                 "goal_time": parsed.goal_time,
                 "scorer": parsed.scorer.name,
@@ -327,6 +339,8 @@ class MatchAggregator:
                     [parsed.impact_location.x, parsed.impact_location.y, parsed.impact_location.z]
                     if parsed.impact_location else None
                 ),
+                "shot_location": [shot[0], shot[1]] if shot else None,
+                "assist_location": [assist[0], assist[1]] if assist else None,
                 "clock_seconds": (float(ts) if ts and ts > 0 else None),
                 "is_overtime": bool(game.is_overtime) if game else False,
             })
@@ -415,20 +429,23 @@ class MatchAggregator:
         players = raw.get("Players") or []
         ball = raw.get("Ball") or {}
         loc = ball.get("Location") or {}
+        x = float(loc.get("X", 0.0))
+        y = float(loc.get("Y", 0.0))
+        z = float(loc.get("Z", 0.0))
         t = 0.0
         if self.last_update is not None and self.last_update.game and self.last_update.game.time_seconds is not None:
             t = self.last_update.game.time_seconds
         for p in players:
+            name = p.get("Name", "")
             self._ball_touches.append(BallTouch(
-                t=t,
-                x=float(loc.get("X", 0.0)),
-                y=float(loc.get("Y", 0.0)),
-                z=float(loc.get("Z", 0.0)),
-                player=p.get("Name", ""),
+                t=t, x=x, y=y, z=z,
+                player=name,
                 team_num=int(p.get("TeamNum", 0)),
                 pre_speed=float(ball.get("PreHitSpeed", 0.0)),
                 post_speed=float(ball.get("PostHitSpeed", 0.0)),
             ))
+            # Latest touch position per player, for shot/assist pinning at goals.
+            self._last_touch_xy[name] = (x, y)
 
     def finalize(self, force: bool = False) -> MatchSummary | None:
         """Return a MatchSummary for the match.
