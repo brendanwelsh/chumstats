@@ -13,13 +13,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Iterable
 from datetime import datetime, timezone
-from pathlib import Path
+from io import BytesIO
 
 import discord
 
-from .analytics import MatchAnalytics, build_analytics
+from .heatmap import render_match_heatmap_png
 from .session import MatchSummary, SessionTotals
 
 log = logging.getLogger("ballshark.bot")
@@ -27,6 +26,9 @@ log = logging.getLogger("ballshark.bot")
 
 ICON_WIN  = "🏆"
 ICON_LOSS = "💀"
+
+# Attachment filename the embed's image points at (attachment://<this>).
+HEATMAP_FILENAME = "heatmap.png"
 
 
 # --- Discord ANSI code-block coloring -------------------------------------
@@ -43,112 +45,6 @@ _TEAM_FG = {0: A_BLUE, 1: A_YELLOW}  # blue team / orange team (yellow ~= orange
 def _sgr(text: str, *codes: int) -> str:
     """Wrap text in an ANSI SGR sequence followed by a reset."""
     return f"{_ESC}[{';'.join(str(c) for c in codes)}m{text}{_ESC}[0m"
-
-
-# ---- StatfeedEvent highlights -> custom Discord emoji -----------------------
-# Notable plays we surface as a highlights line. Box-score events (Goal/Assist/
-# Shot/Save/Win) are left out - they're already in the scoreboard. Each maps to
-# a custom-emoji name and the saved RL point-icon PNG it's uploaded from.
-_ICON_DIR = Path(__file__).resolve().parent / "overlay" / "icons"
-HIGHLIGHT_EVENTS: dict[str, tuple[str, str]] = {
-    "EpicSave":      ("bs_epicsave",   "Epic_Save_points_icon.png"),
-    "Savior":        ("bs_savior",     "Savior_points_icon.png"),
-    "Demolish":      ("bs_demo",       "Demolition_points_icon.png"),
-    "HatTrick":      ("bs_hattrick",   "Hat_Trick_points_icon.png"),
-    "AerialGoal":    ("bs_aerialgoal", "Aerial_Goal_points_icon.png"),
-    "BicycleHit":    ("bs_bikehit",    "Bicycle_Hit_points_icon.png"),
-    "BicycleGoal":   ("bs_bikegoal",   "Bicycle_Goal_points_icon.png"),
-    "LongGoal":      ("bs_longgoal",   "Long_Goal_points_icon.png"),
-    "OvertimeGoal":  ("bs_otgoal",     "Overtime_Goal_points_icon.png"),
-    "Playmaker":     ("bs_playmaker",  "Playmaker_points_icon.png"),
-    "PoolShot":      ("bs_poolshot",   "Pool_Shot_points_icon.png"),
-    "BackwardsGoal": ("bs_backgoal",   "Backwards_Goal_points_icon.png"),
-    "TurtleGoal":    ("bs_turtlegoal", "Turtle_Goal_points_icon.png"),
-    "SwishGoal":     ("bs_swishgoal",  "Swish_Goal_points_icon.png"),
-    "Extermination": ("bs_extermin",   "Extermination_points_icon.png"),
-}
-# Plain-text fallback labels when a custom emoji isn't uploaded yet.
-_HL_LABEL = {
-    "EpicSave": "epic save", "Savior": "savior", "Demolish": "demo",
-    "HatTrick": "hat trick", "AerialGoal": "aerial", "BicycleHit": "bike hit",
-    "BicycleGoal": "bicycle", "LongGoal": "long goal", "OvertimeGoal": "OT goal",
-    "Playmaker": "playmaker", "PoolShot": "pool shot", "BackwardsGoal": "backwards",
-    "TurtleGoal": "turtle", "SwishGoal": "swish", "Extermination": "extermination",
-}
-
-
-def emoji_map_from_client(client) -> dict[str, str]:
-    """Map highlight emoji-names -> their `<:name:id>` render token from whatever
-    custom emoji the bot can see. Empty until the icons are uploaded."""
-    out: dict[str, str] = {}
-    try:
-        for e in client.emojis:
-            out[e.name] = f"<:{e.name}:{e.id}>"
-    except Exception:
-        pass
-    return out
-
-
-def _highlights_field(s, me, emoji_map: dict[str, str] | None) -> str | None:
-    """Per-player highlights line for the viewer's team: notable plays as icons
-    (custom emoji) or a text fallback. None if nobody on the team had one."""
-    if not me:
-        return None
-    emoji_map = emoji_map or {}
-    team = [p for p in s.players if p.team_num == me.team_num]
-    team.sort(key=lambda p: (p.primary_id != me.primary_id, -p.score))
-    lines: list[str] = []
-    for p in team:
-        evs = s.statfeed.get(p.primary_id) or {}
-        bits: list[str] = []
-        for ev, (emoji_name, _icon) in HIGHLIGHT_EVENTS.items():
-            n = evs.get(ev, 0)
-            if not n:
-                continue
-            tok = emoji_map.get(emoji_name) or f"`{_HL_LABEL.get(ev, ev)}`"
-            bits.append(tok + (f"×{n}" if n > 1 else ""))
-        if bits:
-            tag = "▸ " if p.primary_id == me.primary_id else "   "
-            lines.append(f"{tag}**{p.name}**  " + " ".join(bits))
-    return "\n".join(lines) if lines else None
-
-
-async def ensure_highlight_emojis(client, guild_id: int) -> dict:
-    """Upload any missing highlight icons as custom guild emoji. Requires the bot
-    to have Manage Emojis & Stickers. Idempotent (skips existing)."""
-    guild = client.get_guild(guild_id) or await client.fetch_guild(guild_id)
-    existing = {e.name for e in guild.emojis}
-    res: dict[str, list] = {"created": [], "skipped": [], "errors": []}
-    for ev, (name, fname) in HIGHLIGHT_EVENTS.items():
-        if name in existing:
-            res["skipped"].append(name); continue
-        path = _ICON_DIR / fname
-        if not path.is_file():
-            res["errors"].append(f"{name}: missing {fname}"); continue
-        try:
-            e = await guild.create_custom_emoji(
-                name=name, image=_emoji_png_bytes(path),
-                reason="Ballshark highlight icons")
-            res["created"].append(f"{name}={e.id}")
-        except discord.Forbidden:
-            res["errors"].append(f"{name}: Forbidden (grant Manage Emojis)")
-            break
-        except Exception as ex:
-            res["errors"].append(f"{name}: {type(ex).__name__}: {ex}")
-    return res
-
-
-def _emoji_png_bytes(path: Path) -> bytes:
-    """Icon bytes as a Discord-emoji-safe PNG (<256KB). Downscales if needed."""
-    raw = path.read_bytes()
-    if len(raw) <= 256_000:
-        return raw
-    from io import BytesIO
-    from PIL import Image
-    im = Image.open(path).convert("RGBA")
-    im.thumbnail((128, 128))
-    buf = BytesIO(); im.save(buf, format="PNG")
-    return buf.getvalue()
 
 
 def _arena_pretty(arena: str) -> str:
@@ -316,6 +212,68 @@ def _last_n_stats(store, primary_id: str | None, n: int = 10) -> dict | None:
     }
 
 
+# ---- goal timeline ---------------------------------------------------------
+# A chronological "here's what happened" log of every goal. Replaces the old
+# emoji statfeed line (too small / unlabeled to read). The aggregator records
+# the live game clock (UpdateState.Game.TimeSeconds) at the moment each goal
+# fired. RL's clock counts DOWN in regulation, so we show ELAPSED game time
+# (nominal length minus remaining) and the list reads forward: 0:42, 2:15,
+# 4:58. Overtime goals are tagged "OT m:ss" (the OT clock counts up from 0).
+# Goals are listed in scoring order; the running team0-team1 score after each
+# goal makes the sequence and who-was-ahead unambiguous.
+
+def _fmt_mmss(seconds: float) -> str:
+    seconds = max(0, int(seconds))
+    return f"{seconds // 60}:{seconds % 60:02d}"
+
+
+def _goal_timeline_block(s, me) -> str | None:
+    """ANSI block: one row per goal — game-clock time, scorer (in the team
+    color, viewer's own goals bolded with a caret), running score. None when
+    the match has no recorded goals."""
+    goals = s.goal_events or []
+    if not goals:
+        return None
+    # Nominal regulation length for the elapsed conversion; fall back to a
+    # standard 5:00 if the clock was never captured (e.g. some exhibitions).
+    reg = s.regulation_seconds or 300.0
+    me_name = me.name if me else None
+    me_team = me.team_num if me else None
+
+    header = _sgr(f"{'WHEN':>7} {'':2}{'SCORER':<13} SCORE", A_WHITE)
+    rows = [header]
+    running = {0: 0, 1: 0}
+    for g in goals:
+        team = g.get("scorer_team")
+        if team in (0, 1):
+            running[team] += 1
+        ot = bool(g.get("is_overtime"))
+        cs = g.get("clock_seconds")
+        if cs is None:
+            when = "--"
+        elif ot:
+            when = f"OT {_fmt_mmss(cs)}"        # OT clock counts up from 0
+        else:
+            when = _fmt_mmss(reg - float(cs))   # regulation: elapsed since kickoff
+        scorer = (g.get("scorer") or "?")[:13]
+        fg = _TEAM_FG.get(team, A_WHITE)
+        is_you = bool(me_name and g.get("scorer") == me_name and team == me_team)
+        prefix = "▸ " if is_you else "  "
+        name_codes = (A_BOLD, fg) if is_you else (fg,)
+        rows.append(
+            _sgr(f"{when:>7}", A_WHITE) + " "
+            + _sgr(f"{prefix}{scorer:<13}", *name_codes) + " "
+            + _sgr(f"{running[0]}-{running[1]}", A_WHITE)
+        )
+
+    # Safety net for absurd blowouts: keep the block under Discord's 1024-char
+    # field cap by dropping the oldest goal rows (header always kept). Normal RL
+    # matches never approach this.
+    while len(rows) > 2 and sum(len(r) for r in rows) + 16 > 1000:
+        del rows[1]
+    return "```ansi\n" + "\n".join(rows) + "\n```"
+
+
 def build_match_embed(
     s: MatchSummary,
     totals: SessionTotals,
@@ -324,7 +282,7 @@ def build_match_embed(
     store=None,
     friends: list[str] | None = None,
     public_url: str | None = None,
-    emoji_map: dict[str, str] | None = None,
+    heatmap_attached: bool = False,
 ) -> discord.Embed:
     me = s.me(self_primary_id, self_name)
     won = bool(me and me.team_num == s.winner_team_num)
@@ -392,15 +350,15 @@ def build_match_embed(
     if match_ts:
         embed.timestamp = datetime.fromtimestamp(match_ts, tz=timezone.utc)
 
+    # ----- goal timeline: the match story, in order -----
+    timeline = _goal_timeline_block(s, me)
+    if timeline:
+        embed.add_field(name="Goal timeline", value=timeline, inline=False)
+
     # ----- your team's movement & boost (separate, secondary section) -----
     adv = _adv_stats_block(s, me)
     if adv:
         embed.add_field(name="Your team · this match", value=adv, inline=False)
-
-    # ----- highlights: notable plays as icons (your team) -----
-    hl = _highlights_field(s, me, emoji_map)
-    if hl:
-        embed.add_field(name="Highlights", value=hl, inline=False)
 
     # ----- last 10 matches (rolling form, DB-backed) -----
     # Falls back to the in-memory session totals only when there's no DB or we
@@ -438,6 +396,12 @@ def build_match_embed(
         )
     embed.add_field(name=field_name, value=value, inline=False)
 
+    # ----- touch heatmap (team-hued, same ramps as the dashboard) -----
+    # The caller renders + attaches the PNG (it can't be built inside the embed
+    # itself). When it did, point the embed's image at the attachment.
+    if heatmap_attached:
+        embed.set_image(url=f"attachment://{HEATMAP_FILENAME}")
+
     # ----- footer: just the match end timestamp -----
     # Crossbar hits moved up into the match context line (top), so every
     # "this match" stat sits together above the rolling "Last 10" box and
@@ -445,6 +409,22 @@ def build_match_embed(
     # renders here on its own.
 
     return embed
+
+
+def build_heatmap_file(s: MatchSummary) -> discord.File | None:
+    """Render the match's team-hued touch heatmap to a PNG and wrap it as a
+    Discord attachment. Returns None when the match has no ball touches or the
+    optional image dependency (Pillow) isn't installed — in either case the
+    post still goes out, just without the image. CPU-bound (a blur pass), so
+    call it off the event loop (run_in_executor)."""
+    try:
+        png = render_match_heatmap_png(s.ball_touches)
+    except Exception:
+        log.exception("heatmap render failed")
+        return None
+    if not png:
+        return None
+    return discord.File(BytesIO(png), filename=HEATMAP_FILENAME)
 
 
 class MatchPoster:
@@ -523,21 +503,12 @@ class MatchPoster:
 
         print(f"[bot] connected; ready to post to #{getattr(channel, 'name', self.channel_id)}")
 
-        # Best-effort: make sure our highlight icons exist as custom emoji.
-        gid = getattr(getattr(channel, "guild", None), "id", None)
-        if gid:
-            try:
-                r = await ensure_highlight_emojis(self.client, gid)
-                if r["created"]:
-                    print(f"[bot] uploaded {len(r['created'])} highlight emoji")
-                if any("Forbidden" in e for e in r["errors"]):
-                    print("[bot] grant Manage Emojis to show highlight icons")
-            except Exception:
-                log.exception("highlight-emoji ensure failed")
-
+        loop = asyncio.get_running_loop()
         while True:
             summary, totals = await self.queue.get()
             try:
+                # Render the heatmap PNG off the event loop (it runs a blur pass).
+                heatmap = await loop.run_in_executor(None, build_heatmap_file, summary)
                 embed = build_match_embed(
                     summary, totals,
                     self_primary_id=self.self_primary_id,
@@ -545,9 +516,9 @@ class MatchPoster:
                     store=self.store,
                     friends=self.friends,
                     public_url=self.public_url,
-                    emoji_map=emoji_map_from_client(self.client),
+                    heatmap_attached=heatmap is not None,
                 )
-                await channel.send(embed=embed)
+                await channel.send(embed=embed, **({"file": heatmap} if heatmap else {}))
             except discord.Forbidden:
                 print(f"[bot] ERROR posting: bot lost access to channel {self.channel_id}")
             except Exception:
@@ -610,12 +581,14 @@ async def post_one(token: str, channel_id: int, summary: MatchSummary, totals: S
                 result.error = f"bot is not in any server. Invite it: {invite}"
                 return
             channel = client.get_channel(channel_id) or await client.fetch_channel(channel_id)
+            loop = asyncio.get_running_loop()
+            heatmap = await loop.run_in_executor(None, build_heatmap_file, summary)
             embed = build_match_embed(
                 summary, totals,
                 self_primary_id=self_primary_id, self_name=self_name, store=store,
-                friends=friends, emoji_map=emoji_map_from_client(client),
+                friends=friends, heatmap_attached=heatmap is not None,
             )
-            msg = await channel.send(embed=embed)
+            msg = await channel.send(embed=embed, **({"file": heatmap} if heatmap else {}))
             result.success = True
             result.message_id = msg.id
         except discord.Forbidden as e:

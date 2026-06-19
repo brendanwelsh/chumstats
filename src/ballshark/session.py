@@ -308,6 +308,13 @@ class MatchAggregator:
             if key in self._seen_goal_keys:
                 return
             self._seen_goal_keys.add(key)
+            # Snapshot the live game clock at the moment the goal fired, from the
+            # most recent tick. TimeSeconds counts DOWN in regulation (it starts
+            # near the nominal length) and UP in overtime; the bot's timeline
+            # turns this into an elapsed time. Store None when no clock was seen
+            # so downstream can show "--" instead of a bogus 0:00.
+            game = self.last_update.game if self.last_update else None
+            ts = game.time_seconds if game else 0.0
             self._goals.append({
                 "goal_time": parsed.goal_time,
                 "scorer": parsed.scorer.name,
@@ -318,6 +325,8 @@ class MatchAggregator:
                     [parsed.impact_location.x, parsed.impact_location.y, parsed.impact_location.z]
                     if parsed.impact_location else None
                 ),
+                "clock_seconds": (float(ts) if ts and ts > 0 else None),
+                "is_overtime": bool(game.is_overtime) if game else False,
             })
 
         elif event_name == "BallHit" and raw:

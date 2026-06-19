@@ -20,6 +20,7 @@ server = [
 ]
 bot = [
     "discord.py>=2.3",
+    "pillow>=10.0",
 ]
 tray = [
     "pystray>=0.19",
