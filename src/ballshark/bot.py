@@ -117,44 +117,90 @@ def _team_section(s, team_num: int, is_winner: bool, me,
     return lines
 
 
+def _match_compare_block(s, me) -> str | None:
+    """Reliable team-vs-team comparison — every stat here is sent for ALL
+    players (box-score counters + the ball/crossbar event stream), unlike
+    movement/boost which is spectator-only. Shows possession, shots, saves,
+    demos and posts (US vs THEM), each player's touch share (sums to ~100%),
+    and who hit the posts. None if we can't identify the viewer's team."""
+    if not me:
+        return None
+    us, them = me.team_num, 1 - me.team_num
+    us_fg, them_fg = _TEAM_FG.get(us, A_WHITE), _TEAM_FG.get(them, A_WHITE)
+    up = [p for p in s.players if p.team_num == us]
+    tp = [p for p in s.players if p.team_num == them]
+
+    def tot(players, attr):
+        return sum(getattr(p, attr) for p in players)
+
+    us_touch = tot(up, "touches")
+    them_touch = tot(tp, "touches")
+    total_touch = us_touch + them_touch
+    us_poss = round(us_touch / total_touch * 100) if total_touch else 0
+
+    rows = [
+        ("Possession", f"{us_poss}%", f"{100 - us_poss if total_touch else 0}%"),
+        ("Shots", tot(up, "shots"), tot(tp, "shots")),
+        ("Saves", tot(up, "saves"), tot(tp, "saves")),
+        ("Demos", tot(up, "demos"), tot(tp, "demos")),
+        ("Posts", s.crossbar_by_team.get(us, 0), s.crossbar_by_team.get(them, 0)),
+    ]
+    lines = [
+        _sgr(f"{'':<11}", A_WHITE) + _sgr(f"{'US':>5}", A_BOLD, us_fg)
+        + _sgr(f"{'THEM':>7}", A_BOLD, them_fg)
+    ]
+    for label, u, t in rows:
+        lines.append(
+            _sgr(f"{label:<11}", A_WHITE) + _sgr(f"{str(u):>5}", us_fg)
+            + _sgr(f"{str(t):>7}", them_fg)
+        )
+
+    # Per-player touch share (all players; sums to ~100%), grouped by side.
+    if total_touch:
+        def share(players):
+            bits = []
+            for p in sorted(players, key=lambda p: -p.touches):
+                pct = round(p.touches / total_touch * 100)
+                mark = "▸" if (me and p.primary_id == me.primary_id
+                                    and p.name == me.name) else ""
+                bits.append(f"{mark}{p.name[:8]} {pct}")
+            return "  ".join(bits)
+        lines.append("")
+        lines.append(_sgr("Touch %", A_WHITE))
+        lines.append(_sgr("us   ", us_fg) + share(up))
+        lines.append(_sgr("them ", them_fg) + share(tp))
+
+    # Who hit the posts (reliable: CrossbarHit carries the last-touch player).
+    if s.crossbar_by_player:
+        named = ", ".join(
+            f"{nm[:12]}×{n}" if n > 1 else nm[:12]
+            for nm, n in sorted(s.crossbar_by_player.items(), key=lambda x: -x[1])
+        )
+        lines.append("")
+        lines.append(_sgr("Posts by ", A_WHITE) + named)
+
+    return "```ansi\n" + "\n".join(lines) + "\n```"
+
+
 def _adv_stats_block(s, me) -> str | None:
-    """Your team's current-match detail, colored in your team color: a one-line
-    team summary (post hits, touches, possession, avg hit speed) plus per-player
-    movement & boost rows. Only our-team data is shown - opponent movement isn't
-    in the feed and nothing else is confidently derivable per team."""
+    """Your team's per-player movement & boost (spectator-only fields, so we
+    only show them for our team — they're absent/unreliable for opponents)."""
     if not me:
         return None
     fg = _TEAM_FG.get(me.team_num, A_WHITE)
-    lines: list[str] = []
-
-    # Team summary from the (reliable) ball-touch stream + per-team post hits.
-    ours = [t for t in s.ball_touches if t.team_num == me.team_num]
-    posts = s.crossbar_by_team.get(me.team_num, 0)
-    if ours or posts:
-        bits = [f"posts {posts}"]
-        if ours:
-            poss = (len(ours) / len(s.ball_touches)) if s.ball_touches else 0.0
-            avg_hit = sum(t.post_speed for t in ours) / len(ours)
-            bits.append(f"touches {len(ours)} ({poss * 100:.0f}%)")
-            bits.append(f"avg hit {avg_hit:.0f}")
-        lines.append(_sgr(" · ".join(bits), A_BOLD, fg))
-
-    # Per-player movement & boost (spectator-only -> our team).
     team = sorted((p for p in s.players
                    if p.team_num == me.team_num and p.ticks_total >= 200),
                   key=lambda p: p.score, reverse=True)
-    if team:
-        lines.append(_sgr(f"{'PLAYER':<{_SB_NAME_W}}{'AIR':>5}{'WALL':>6}{'SUP':>5}"
-                          f"{'SPD':>5}{'BOOST':>7}", A_WHITE))
-        for p in team:
-            nm = f"{p.name}{' (BOT)' if p.is_bot else ''}"[:_SB_NAME_W]
-            nums = (f"{p.pct_in_air * 100:>4.0f}%"
-                    f"{p.pct_on_wall * 100:>5.0f}%{p.pct_supersonic * 100:>4.0f}%"
-                    f"{p.avg_speed:>5.0f}{p.boost_used:>7.0f}")
-            lines.append(_sgr(f"{nm:<{_SB_NAME_W}}", fg) + _sgr(nums, A_WHITE))
-
-    if not lines:
+    if not team:
         return None
+    lines = [_sgr(f"{'PLAYER':<{_SB_NAME_W}}{'AIR':>5}{'WALL':>6}{'SUP':>5}"
+                  f"{'SPD':>5}{'BOOST':>7}", A_WHITE)]
+    for p in team:
+        nm = f"{p.name}{' (BOT)' if p.is_bot else ''}"[:_SB_NAME_W]
+        nums = (f"{p.pct_in_air * 100:>4.0f}%"
+                f"{p.pct_on_wall * 100:>5.0f}%{p.pct_supersonic * 100:>4.0f}%"
+                f"{p.avg_speed:>5.0f}{p.boost_used:>7.0f}")
+        lines.append(_sgr(f"{nm:<{_SB_NAME_W}}", fg) + _sgr(nums, A_WHITE))
     return "```ansi\n" + "\n".join(lines) + "\n```"
 
 
@@ -355,10 +401,15 @@ def build_match_embed(
     if timeline:
         embed.add_field(name="Goal timeline", value=timeline, inline=False)
 
-    # ----- your team's movement & boost (separate, secondary section) -----
+    # ----- us vs them: reliable team comparison (works for both teams) -----
+    compare = _match_compare_block(s, me)
+    if compare:
+        embed.add_field(name="Match · us vs them", value=compare, inline=False)
+
+    # ----- your team's movement & boost (spectator-only, our team) -----
     adv = _adv_stats_block(s, me)
     if adv:
-        embed.add_field(name="Your team · this match", value=adv, inline=False)
+        embed.add_field(name="Your team · movement", value=adv, inline=False)
 
     # ----- last 10 matches (rolling form, DB-backed) -----
     # Falls back to the in-memory session totals only when there's no DB or we

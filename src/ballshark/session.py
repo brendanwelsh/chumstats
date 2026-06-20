@@ -142,6 +142,7 @@ class MatchSummary:
     is_mvp: dict[str, bool] = field(default_factory=dict)  # primary_id -> True
     crossbar_hits: int = 0
     crossbar_by_team: dict[int, int] = field(default_factory=dict)  # team_num -> posts
+    crossbar_by_player: dict[str, int] = field(default_factory=dict)  # player name -> posts
     is_online: bool = False  # MatchGuid present => online/LAN
     color_primary: dict[int, str] = field(default_factory=dict)  # team_num -> hex color
     ball_touches: list[BallTouch] = field(default_factory=list)
@@ -160,32 +161,23 @@ class MatchSummary:
 
     @property
     def match_type(self) -> str:
-        """Heuristic match-type detection.
+        """Best-effort match type.
 
-        The Stats API doesn't emit playlist/mode, so we infer from what's
-        observable in the stream. Order matters: bots are the strongest signal
-        because they never appear in matchmaking or tournaments, so they're
-        checked before custom team names.
-          - No MatchGuid       -> Exhibition (offline)
-          - Bots present       -> vs Bots (matchmaking/tournaments have none)
-          - Custom team name    -> Private Match (one or both teams has a
-                                  non-default name; matchmaking always uses
-                                  "Blue" / "Orange"). We can't detect actual
-                                  tournaments from the stream, so we don't claim
-                                  one.
-          - Otherwise          -> Online Matchmaking
+        The Stats API doesn't emit the playlist/mode, and a team name that isn't
+        "Blue"/"Orange" is almost always a party's CLUB tag carried into
+        matchmaking (e.g. "USA", "Justice Jugglers"), NOT a private match. So we
+        don't try to tell ranked / casual / private apart — that's not derivable
+        — we only distinguish what IS observable:
+          - No MatchGuid   -> Exhibition (offline)
+          - Bots present   -> vs Bots (matchmaking never has them)
+          - Otherwise      -> Online
         """
         has_bot = any(p.is_bot for p in self.players)
         if not self.is_online:
             return "Exhibition vs Bots" if has_bot else "Exhibition"
         if has_bot:
             return "Casual vs Bots"
-        DEFAULT_TEAM_NAMES = {"blue", "orange", ""}
-        custom = (self.team0_name.lower() not in DEFAULT_TEAM_NAMES
-                  or self.team1_name.lower() not in DEFAULT_TEAM_NAMES)
-        if custom:
-            return "Private Match"
-        return "Online Matchmaking"
+        return "Online"
 
     def me(self, self_primary_id: str | None = None, self_name: str | None = None) -> PlayerLine | None:
         if self_primary_id:
@@ -228,6 +220,10 @@ class MatchAggregator:
         self.winner_team_num: int | None = None
         self.crossbar_hits: int = 0
         self._crossbar_by_team: dict[int, int] = {}
+        self._crossbar_by_player: dict[str, int] = {}
+        # Game-clock of the last COUNTED post, per player — to debounce the
+        # burst of CrossbarHit events a single ball-on-bar contact emits.
+        self._last_crossbar_clock: dict[str, float] = {}
         # Game-clock tracking (from ClockUpdatedSeconds) for true match length.
         self._reg_max_seconds: float = 0.0
         self._ot_max_seconds: float = 0.0
@@ -289,13 +285,27 @@ class MatchAggregator:
                 self.match_guid = parsed.match_guid
 
         elif event_name == "CrossbarHit":
-            self.crossbar_hits += 1
-            # Attribute the post/crossbar hit to whoever last touched the ball.
+            # A single ball-on-bar contact emits a BURST of CrossbarHit events
+            # (~20 over ~0.2s as the ball rolls along the bar). Debounce per
+            # player on the game clock so one contact counts once, not 20×.
+            # Attribute the post to whoever last touched the ball.
             last = ((raw or {}).get("BallLastTouch") or {}).get("Player") or {}
+            nm = last.get("Name")
             team = last.get("TeamNum")
+            clock = (self.last_update.game.time_seconds
+                     if self.last_update and self.last_update.game else None)
+            key = nm or (f"t{team}" if team is not None else "?")
+            prev = self._last_crossbar_clock.get(key)
+            if clock is not None and prev is not None and abs(clock - prev) < 1.0:
+                return  # same contact still lingering on the bar — already counted
+            if clock is not None:
+                self._last_crossbar_clock[key] = clock
+            self.crossbar_hits += 1
             if team is not None:
                 self._crossbar_by_team[int(team)] = (
                     self._crossbar_by_team.get(int(team), 0) + 1)
+            if nm:
+                self._crossbar_by_player[nm] = self._crossbar_by_player.get(nm, 0) + 1
 
         elif event_name == "ClockUpdatedSeconds" and raw:
             ts = raw.get("TimeSeconds")
@@ -521,6 +531,7 @@ class MatchAggregator:
             is_mvp=is_mvp,
             crossbar_hits=self.crossbar_hits,
             crossbar_by_team=dict(self._crossbar_by_team),
+            crossbar_by_player=dict(self._crossbar_by_player),
             is_online=is_online,
             color_primary=color_primary,
             ball_touches=list(self._ball_touches),
