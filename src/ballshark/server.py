@@ -21,6 +21,7 @@ We throttle `tick` to ~4Hz so the overlay doesn't melt the browser.
 from __future__ import annotations
 
 import asyncio
+import html
 import json
 import logging
 import time
@@ -1284,6 +1285,85 @@ def _lifetime_touch_data(store, name: str | None) -> dict:
     }
 
 
+def _lifetime_shot_data(store, name: str | None) -> dict:
+    """Aggregate where the player SCORES FROM: the scorer's last ball-touch
+    before each of their goals (the shot), across every match. Derived live from
+    raw_events (BallHit + GoalScored) — the touch immediately before a goal is
+    the shot, and replay/kickoff touches arrive after it, so stream order alone
+    locates it (no stored backfill needed). Returns a playback-shaped dict so it
+    plugs straight into `_ball_heatmap_svg`."""
+    import json as _json
+    rl_len, rl_wid = 10240, 8192
+    vb_w, vb_h = 880, 380
+    pitch_w, pitch_h = 800, 320
+    pad_x, pad_y = (vb_w - pitch_w) / 2, (vb_h - pitch_h) / 2
+
+    def project(rx: float, ry: float) -> tuple[float, float]:
+        ry = max(min(ry, rl_len / 2 + 280), -(rl_len / 2 + 280))
+        rx = max(min(rx, rl_wid / 2 + 280), -(rl_wid / 2 + 280))
+        px = pad_x + ((ry + rl_len / 2) / rl_len) * pitch_w
+        py = pad_y + ((rx + rl_wid / 2) / rl_wid) * pitch_h
+        return round(px, 1), round(py, 1)
+
+    empty = {
+        "ball_track": [],
+        "svg": {"vb_w": vb_w, "vb_h": vb_h, "pitch_w": pitch_w,
+                "pitch_h": pitch_h, "pad_x": pad_x, "pad_y": pad_y},
+        "shots": 0,
+        "matches_with_goals": 0,
+    }
+    if not store or not name:
+        return empty
+
+    with store._conn() as con:
+        team_by_match = {
+            r["match_id"]: r["team_num"]
+            for r in con.execute(
+                "SELECT match_id, team_num FROM match_player_stats WHERE name = ?", (name,))
+        }
+        if not team_by_match:
+            return empty
+        rows = con.execute("""
+            SELECT match_id, event, payload FROM raw_events
+            WHERE event IN ('BallHit', 'GoalScored')
+              AND match_id IN (SELECT DISTINCT match_id FROM match_player_stats WHERE name = ?)
+            ORDER BY match_id, received_at, id
+        """, (name,)).fetchall()
+
+    shots: list[dict] = []
+    seen_matches: set[str] = set()
+    cur_match = None
+    last_xy: tuple[float, float] | None = None  # player's most recent touch this match
+    for r in rows:
+        if r["match_id"] != cur_match:
+            cur_match = r["match_id"]
+            last_xy = None
+        try:
+            d = _json.loads(r["payload"])
+        except Exception:
+            continue
+        if r["event"] == "BallHit":
+            if any((pp.get("Name") or "") == name for pp in (d.get("Players") or [])):
+                loc = (d.get("Ball") or {}).get("Location") or {}
+                last_xy = (float(loc.get("X") or 0), float(loc.get("Y") or 0))
+        elif (d.get("Scorer") or {}).get("Name") == name and last_xy is not None:
+            x, y = last_xy
+            sx, sy = project(x, y)
+            shots.append({
+                "x": x, "y": y, "sx": sx, "sy": sy,
+                "player": name, "team": team_by_match.get(r["match_id"], 0), "t": 0,
+            })
+            seen_matches.add(r["match_id"])
+
+    return {
+        "ball_track": shots,
+        "svg": {"vb_w": vb_w, "vb_h": vb_h, "pitch_w": pitch_w,
+                "pitch_h": pitch_h, "pad_x": pad_x, "pad_y": pad_y},
+        "shots": len(shots),
+        "matches_with_goals": len(seen_matches),
+    }
+
+
 def _recent_form_html(store, primary_id: str | None, name: str | None,
                       *, include_bots: bool = True, limit: int = 10) -> str:
     """Form-dot strip of the last N matches. Replaces the stale ASCII
@@ -1362,13 +1442,14 @@ def _player_ball_section_html(store, name: str | None) -> str:
     name_slug = "".join(ch if ch.isalnum() else "_" for ch in name)
     heatmap = _ball_heatmap_svg(td, key=f"player-{name_slug}")
 
-    return f"""
+    touch_card = f"""
       <div class="card insights-card">
         <div class="section-title">
-          <span>Ball control (lifetime)</span>
+          <span>Where they touch the ball (lifetime)</span>
           <span class="dim" style="text-transform:none;letter-spacing:0">
-            Every BallHit this player has been on, aggregated across
-            {td['matches_with_touches']} stored match{'' if td['matches_with_touches'] == 1 else 'es'}.
+            Every BallHit this player has been on across
+            {td['matches_with_touches']} stored match{'' if td['matches_with_touches'] == 1 else 'es'},
+            rotated so they always attack &#8594; (right). Brighter = more touches.
           </span>
         </div>
         <div class="insights-heatmap">
@@ -1384,6 +1465,29 @@ def _player_ball_section_html(store, name: str | None) -> str:
         </ul>
       </div>
     """
+
+    # Shot map: where this player's goals were actually struck from (their last
+    # touch before each goal), not the goal-line crossing. Reliable for all.
+    sd = _lifetime_shot_data(store, name)
+    shot_card = ""
+    if sd["shots"]:
+        shotmap = _ball_heatmap_svg(sd, key=f"shots-{name_slug}")
+        shot_card = f"""
+      <div class="card insights-card">
+        <div class="section-title">
+          <span>Where they score from</span>
+          <span class="dim" style="text-transform:none;letter-spacing:0">
+            Shot location of {sd['shots']} goal{'' if sd['shots'] == 1 else 's'} across
+            {sd['matches_with_goals']} match{'' if sd['matches_with_goals'] == 1 else 'es'},
+            rotated so they always attack &#8594; (right). Brighter = scored more from there.
+          </span>
+        </div>
+        <div class="insights-heatmap">
+          <div class="hm-wrap">{shotmap}</div>
+        </div>
+      </div>
+    """
+    return touch_card + shot_card
 
 
 def _radar_block_for_player(store, primary_id: str | None, name: str | None,
@@ -2323,8 +2427,10 @@ def _match_detail_html(store, match_id: str, viewer_pid: str | None, viewer_name
         if my_touches:
             # Slug the player name so the gradient ids stay unique per SVG.
             name_slug = "".join(ch if ch.isalnum() else "_" for ch in p["name"])
+            # Per-match mini: keep the literal pitch orientation (matches the
+            # playback above) since the player is on one team this match.
             hm = _ball_heatmap_svg(playback_data, player_filter=p["name"],
-                                   compact=True, key=name_slug)
+                                   compact=True, key=name_slug, orient=False)
             mini_heatmap = (
                 f'<div class="rc-adv-section">'
                 f'<div class="rc-adv-title">Where they touched the ball</div>'
@@ -2913,6 +3019,54 @@ def _match_playback_html(playback: dict) -> str:
             f'</g>'
         )
 
+    # Static "Goals" layer: every goal shown at once as where it was STRUCK
+    # from (the scorer's last touch) with the build-up play traced back to the
+    # assist. Reuses the same pre-goal chain; the goal-line impact is only a
+    # faint ring (a goal always crosses at the net — the shot location is the
+    # interesting part). Hover shows scorer / assist.
+    goals_layer_svg = []
+    for gi, g in enumerate(playback["goals"]):
+        team_color = "var(--team-blue)" if g["team"] == 0 else "var(--team-orng)"
+        chain = g["chain"]
+        impact = chain[-1]
+        shot = chain[-2] if len(chain) >= 2 else impact   # scorer's last touch
+        assister = g.get("assister") or ""
+        tip = f'Goal {gi + 1}: {g["scorer"]}'
+        if assister:
+            tip += f'  (assist: {assister})'
+        if g.get("speed"):
+            tip += f'  ·  {g["speed"]} km/h'
+        pts = " ".join(f'{p["sx"]:.1f},{p["sy"]:.1f}' for p in chain)
+        parts = [f'<g class="gm-goal"><title>{html.escape(tip)}</title>']
+        # Build-up / shot trajectory line through the whole chain.
+        parts.append(
+            f'<polyline points="{pts}" fill="none" stroke="{team_color}" '
+            f'stroke-width="2" stroke-dasharray="3 3" stroke-linecap="round" '
+            f'stroke-linejoin="round" stroke-opacity="0.6" />'
+        )
+        # Build-up touches (everything before the shot) as small dots.
+        for p in chain[:-2]:
+            parts.append(
+                f'<circle cx="{p["sx"]:.1f}" cy="{p["sy"]:.1f}" r="3.5" '
+                f'fill="{team_color}" fill-opacity="0.5" stroke="var(--card)" stroke-width="1" />'
+            )
+        # Faint ring at the goal-line impact.
+        parts.append(
+            f'<circle cx="{impact["sx"]:.1f}" cy="{impact["sy"]:.1f}" r="4" fill="none" '
+            f'stroke="{team_color}" stroke-width="1.5" stroke-opacity="0.7" />'
+        )
+        # Prominent numbered marker at the shot (where it was struck from).
+        parts.append(
+            f'<circle cx="{shot["sx"]:.1f}" cy="{shot["sy"]:.1f}" r="9" '
+            f'fill="{team_color}" stroke="var(--card)" stroke-width="2" />'
+        )
+        parts.append(
+            f'<text x="{shot["sx"]:.1f}" y="{shot["sy"] + 4:.1f}" text-anchor="middle" '
+            f'fill="#fff" font-size="11" font-weight="800" '
+            f'style="font-family: JetBrains Mono, monospace">{gi + 1}</text></g>'
+        )
+        goals_layer_svg.append("".join(parts))
+
     # Heatmap circles: one soft glow per BallHit. Tighter radius than before
     # so hot spots read as discrete clusters instead of smeary blobs.
     glow_r = 32
@@ -2990,6 +3144,8 @@ def _match_playback_html(playback: dict) -> str:
         f'<g class="hm-layer hm-blue" fill="url(#hm-blue-main)">{"".join(blue_glow)}</g>'
         f'<g class="hm-layer hm-orng" fill="url(#hm-orng-main)">{"".join(orng_glow)}</g>'
         f'</g>'
+        # Goals layer (visible only in goals mode): every goal's shot + build-up.
+        f'<g class="layer-goals">{"".join(goals_layer_svg)}</g>'
         # Playback layer (visible only in playback mode)
         f'<g class="layer-playback">'
         # Persistent icon overlay - every BallHit matched to a Goal/Save/Shot/
@@ -3064,6 +3220,7 @@ def _match_playback_html(playback: dict) -> str:
           <div class="pb-left">
             <div class="pb-mode-toggle">
               <button type="button" data-pb-mode="playback" class="active">Playback</button>
+              <button type="button" data-pb-mode="goals">Goals</button>
               <button type="button" data-pb-mode="heatmap">Heatmap</button>
             </div>
             <div class="pb-pitch-wrap">{pitch_svg}</div>
@@ -4137,8 +4294,8 @@ _PLAYBACK_JS = r"""
     scrubEl.value = String(Math.round((time / duration) * 1000));
   }
 
-  // Mode toggle (playback / heatmap). In heatmap mode we leave the controls
-  // visible but they're styled to look inert.
+  // Mode toggle (playback / goals / heatmap). The static modes leave the
+  // controls visible but styled inert.
   modeBtns.forEach(function(btn) {
     btn.addEventListener('click', function() {
       var mode = btn.dataset.pbMode;
@@ -4146,7 +4303,7 @@ _PLAYBACK_JS = r"""
       modeBtns.forEach(function(b) {
         b.classList.toggle('active', b === btn);
       });
-      if (mode === 'heatmap' && playing) pause();
+      if (mode !== 'playback' && playing) pause();
     });
   });
 
@@ -4200,14 +4357,20 @@ _PLAYBACK_JS = r"""
 
 
 def _ball_heatmap_svg(playback: dict, player_filter: str | None = None,
-                     compact: bool = False, key: str = "") -> str:
-    """Top-down ball-touch *density* heatmap.
+                     compact: bool = False, key: str = "", orient: bool = True) -> str:
+    """Top-down ball-touch *density* heatmap on ONE pitch.
 
     Every BallHit is splatted as a soft point, Gaussian-blurred into a
     continuous density field, then recoloured through a thermal palette LUT
-    (cool/sparse -> hot/dense) via feComponentTransfer. This reads like a real
-    heatmap — you see where the ball actually lived — instead of a scatter of
-    team-tinted dots. Team is intentionally ignored here: density is the signal.
+    (cool/sparse -> hot/dense) via feComponentTransfer. Density is the signal —
+    where the player contacts the ball most.
+
+    With `orient=True` (the default, for lifetime / multi-match maps) team-1
+    touches are rotated 180° about the pitch centre so every touch reads
+    "attacking ->". A player is on both teams across matches, so the old
+    blue/orange split drew two incoherent half-maps; normalising to one
+    attacking direction gives a single readable pitch. Per-match minis pass
+    `orient=False` to keep the literal pitch orientation (matches the playback).
 
     `player_filter` restricts to one player's touches. `key` must be unique per
     heatmap on the page so the <filter>/<gradient> ids don't collide (inline
@@ -4219,36 +4382,15 @@ def _ball_heatmap_svg(playback: dict, player_filter: str | None = None,
         return ""
 
     svg = playback["svg"]
-    vb_w, vb_h = svg["vb_w"], svg["vb_h"]
-    pad_x, pad_y = svg["pad_x"], svg["pad_y"]
-    pitch_w, pitch_h = svg["pitch_w"], svg["pitch_h"]
-
-    # Blue and orange render as SEPARATE pitches, never overlapped: with both
-    # teams' heat on one map you can't tell whose attacking pressure is where.
-    # Split, you read each side's concentration toward the goal it presses (blue
-    # attacks the orange net on the right; orange the blue net on the left). A
-    # single-team set (e.g. one player's per-match mini) renders as one pitch.
-    blue = [bh for bh in ball if bh.get("team") == 0]
-    orng = [bh for bh in ball if bh.get("team") == 1]
-    if blue and orng:
-        return (
-            '<div class="hm-split" style="display:grid;'
-            'grid-template-columns:1fr 1fr;gap:12px;align-items:start">'
-            f'<div>{_heat_split_label("Blue", "Orange net", "var(--team-blue)")}'
-            f'{_heat_pitch_svg(blue, svg, compact, key + "-b", team=0)}</div>'
-            f'<div>{_heat_split_label("Orange", "Blue net", "var(--team-orng)")}'
-            f'{_heat_pitch_svg(orng, svg, compact, key + "-o", team=1)}</div>'
-            '</div>'
-        )
+    if orient:
+        cx = svg["pad_x"] + svg["pitch_w"] / 2
+        cy = svg["pad_y"] + svg["pitch_h"] / 2
+        ball = [
+            ({**bh, "sx": 2 * cx - bh["sx"], "sy": 2 * cy - bh["sy"]}
+             if bh.get("team") == 1 else bh)
+            for bh in ball
+        ]
     return _heat_pitch_svg(ball, svg, compact, key)
-
-
-def _heat_split_label(team: str, target_net: str, color: str) -> str:
-    return (
-        f'<div style="font:700 10.5px system-ui,sans-serif;text-transform:uppercase;'
-        f'letter-spacing:.05em;color:{color};margin-bottom:4px">{team} '
-        f'<span style="opacity:.6">&#8594; attacking {target_net}</span></div>'
-    )
 
 
 def _heat_pitch_svg(ball: list, svg: dict, compact: bool, key: str,
@@ -5271,7 +5413,8 @@ def _compare_heatmap_row(slots: list, touch_data: list) -> str:
         <div class="section-title">
           <span>Where they touch the ball (lifetime)</span>
           <span class="dim" style="text-transform:none;letter-spacing:0">
-            Heatmap of every BallHit each player has been on, aggregated across all stored matches.
+            Every BallHit each player has been on across all stored matches,
+            rotated so each player attacks &#8594; (right).
           </span>
         </div>
         <div class="compare-hm-row">{"".join(cards)}</div>
@@ -6062,9 +6205,10 @@ def _clan_page_html(store, members: list[str], *, self_name: str | None = None,
         f"""
           <div class="card" style="margin-top:14px">
             <div class="section-title">
-              <span>Combined ball heatmap</span>
+              <span>Where the club touches the ball</span>
               <span class="dim" style="text-transform:none;letter-spacing:0">
-                {len(merged_track)} touches across every match these {len(members)} players appeared in.
+                {len(merged_track)} touches across every match these {len(members)} players appeared in,
+                rotated so the club always attacks &#8594; (right).
               </span>
             </div>
             <div class="hm-wrap">{heatmap_svg}</div>
@@ -8503,17 +8647,26 @@ table.history th .rl-icon,
   color: var(--accent);
 }
 
-/* Layer visibility driven by mode. Both layers are rendered in the SVG; we
-   just toggle which one paints. */
-.pb-grid[data-mode="playback"] .layer-heatmap { display: none; }
-.pb-grid[data-mode="heatmap"]  .layer-playback { display: none; }
+/* Layer visibility driven by mode. All three layers are rendered in the SVG;
+   we just toggle which one paints. */
+.pb-grid[data-mode="playback"] .layer-heatmap,
+.pb-grid[data-mode="playback"] .layer-goals { display: none; }
+.pb-grid[data-mode="heatmap"]  .layer-playback,
+.pb-grid[data-mode="heatmap"]  .layer-goals { display: none; }
+.pb-grid[data-mode="goals"]    .layer-playback,
+.pb-grid[data-mode="goals"]    .layer-heatmap { display: none; }
 .pb-grid[data-mode="heatmap"]  .pb-play,
 .pb-grid[data-mode="heatmap"]  .pb-scrub,
 .pb-grid[data-mode="heatmap"]  .pb-time,
-.pb-grid[data-mode="heatmap"]  .pb-speed {
+.pb-grid[data-mode="heatmap"]  .pb-speed,
+.pb-grid[data-mode="goals"]    .pb-play,
+.pb-grid[data-mode="goals"]    .pb-scrub,
+.pb-grid[data-mode="goals"]    .pb-time,
+.pb-grid[data-mode="goals"]    .pb-speed {
   opacity: 0.35;
   pointer-events: none;
 }
+.gm-goal { cursor: default; }
 
 /* Event pulse (spawned on event fire, CSS-animated then removed) */
 .pb-pulse {

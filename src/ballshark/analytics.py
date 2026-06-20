@@ -21,6 +21,14 @@ from typing import Iterable
 
 from .session import MatchSummary, PlayerLine
 
+# Movement / boost / positioning are SPECTATOR-only per-player fields: the Stats
+# API streams them every tick for the viewer + teammates (~12k ticks/match) but
+# only during goal replays for opponents (~1.2k/match). Below this ticks-per-
+# match the player was mostly an opponent, so those derived stats are an
+# unreliable ~10% sample and we omit them entirely (box-score + ball-touch stats
+# stay — those are sent for everyone).
+SPECTATOR_TICKS_PER_MATCH = 3000
+
 
 # ----- value objects --------------------------------------------------------
 
@@ -435,10 +443,16 @@ def build_dashboard(store, *, primary_id: str | None = None,
         ])
 
         # ---- movement / boost (lifetime, weighted by tick count) ----
-        if ticks >= 1000:
+        # Spectator-only: only meaningful when we have full per-tick coverage,
+        # i.e. this player was mostly the viewer / a teammate. For mostly-
+        # opponent profiles the data is a ~10% replay sample, so we omit it
+        # rather than show a misleading number.
+        if matches and (ticks / matches) >= SPECTATOR_TICKS_PER_MATCH:
             d.movement.lines.extend([
-                MetricLine("Avg speed", f"{(row['speed_sum'] or 0) / ticks:.2f}", f"all-time max {row['speed_max'] or 0:.1f}"),
-                MetricLine("Supersonic", _pct(row["ticks_super"] or 0, ticks, 1), ""),
+                MetricLine("Avg speed", f"{(row['speed_sum'] or 0) / ticks:.2f}",
+                           f"max {row['speed_max'] or 0:.1f} · relative scale, not km/h"),
+                MetricLine("Supersonic", _pct(row["ticks_super"] or 0, ticks, 1),
+                           "approx · speed-threshold heuristic"),
                 MetricLine("In air",     _pct(row["ticks_air"] or 0, ticks, 1), ""),
                 MetricLine("On wall",    _pct(row["ticks_wall"] or 0, ticks, 1), ""),
                 MetricLine("On ground",  _pct(row["ticks_ground"] or 0, ticks, 1), ""),
@@ -749,7 +763,7 @@ def build_comparison(store, a_primary_id: str | None = None, a_name: str | None 
     a_ticks = a.get("ticks") or 0; b_ticks = b.get("ticks") or 0
     a_tpm = a_ticks / max(am, 1)
     b_tpm = b_ticks / max(bm, 1)
-    LIMITED_THRESHOLD = 3000  # ticks/match below this means mostly-opponent
+    LIMITED_THRESHOLD = SPECTATOR_TICKS_PER_MATCH  # below this = mostly-opponent
 
     def add_adv(label, a_val, b_val, *, kind="pct"):
         a_show = a_val if a_ticks > 0 else None
