@@ -199,6 +199,14 @@ class Broadcaster:
             loop,
         )
 
+    def tick_due(self) -> bool:
+        """Cheap pre-check for producers: True if enough time has passed that a
+        tick would actually be broadcast. Lets the ingest thread skip building a
+        full 30 Hz tick payload that push_tick would only throttle away (~26 of
+        every 30 are dropped at 4 Hz). push_tick stays the authority that updates
+        the throttle clock; this never mutates it."""
+        return (time.monotonic() - self._last_tick_ts) >= self.tick_min_interval
+
     def push_tick(self, payload: dict[str, Any],
                   loop: asyncio.AbstractEventLoop) -> None:
         now = time.monotonic()
