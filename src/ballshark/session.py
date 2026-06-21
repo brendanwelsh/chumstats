@@ -409,9 +409,10 @@ class MatchAggregator:
                 line.ticks_on_wall += 1
             elif p.is_on_ground:
                 line.ticks_on_ground += 1
-            else:
-                # In-air is the residual, only meaningful when we KNOW the
-                # other two are false rather than just unset.
+            elif p.is_on_wall is False and p.is_on_ground is False:
+                # In-air only when we KNOW the other two are false (present-and-
+                # false). A lean payload missing bOnWall/bOnGround must NOT fall
+                # through to air -- that inflated air% toward 100%.
                 line.ticks_in_air += 1
 
             if p.speed is not None:

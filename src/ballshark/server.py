@@ -6124,7 +6124,7 @@ def _page_wrap(title: str, body_html: str, *, status: int = 200, active: str = "
     body_cls = "with-sidebar" if sidebar else "no-sidebar"
     main_html = f'<main class="page-main">{body_html}</main>' if sidebar else body_html
     return f"""<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>Ballshark - {title}</title>
+<html lang="en"><head><meta charset="utf-8"><title>Ballshark - {html.escape(title)}</title>
 <link rel="icon" type="image/png" href="/static/brand/chum-logo.png">
 {_STYLE_TAG}
 </head><body class="{body_cls}">
@@ -9480,9 +9480,9 @@ def _dashboard_html(d, store=None, primary_id: str | None = None,
 
     body = f"""
   <div class="profile-header">
-    <h1>{page_title} {bot_badge}</h1>
+    <h1>{html.escape(page_title)} {bot_badge}</h1>
   </div>
-  <div class="who">{d.player_label}</div>
+  <div class="who">{html.escape(d.player_label)}</div>
   {filter_html}
   {kpis}
   {form_section}
