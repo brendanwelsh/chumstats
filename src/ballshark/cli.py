@@ -400,6 +400,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
             broadcaster, store=store,
             self_primary_id=settings.player_primary_id,
             self_name=settings.player_name,
+            live_enabled=False,  # central serve host has no RL ingest -> no live
         )
         server_task = asyncio.create_task(
             serve(app, host=settings.server_host, port=settings.server_port)

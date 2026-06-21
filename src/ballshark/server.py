@@ -228,10 +228,16 @@ class Broadcaster:
         )
 
 
+# Whether THIS server has a live feed (a local RL ingest). The central `serve`
+# host has none, so its Live nav link + pip are hidden. Set by make_app().
+_LIVE_AVAILABLE = True
+
+
 def make_app(broadcaster: Broadcaster, *, store=None,
              self_primary_id: str | None = None,
              self_name: str | None = None,
-             friend_mode: bool = False) -> FastAPI:
+             friend_mode: bool = False,
+             live_enabled: bool = True) -> FastAPI:
     """Build the FastAPI app.
 
     When `friend_mode=True`, only the LIVE view + OBS overlay routes are
@@ -239,7 +245,13 @@ def make_app(broadcaster: Broadcaster, *, store=None,
     and the upload/whoami endpoints are omitted entirely — they 404 instead
     of returning data. Used by the friend tray's local server so the
     canonical analytics experience lives on the central host.
+
+    `live_enabled=False` marks a server with no RL ingest (the central `serve`
+    host): the /live feed is structurally dead there, so the Live nav link +
+    pip are hidden (the route itself still exists for direct hits).
     """
+    global _LIVE_AVAILABLE
+    _LIVE_AVAILABLE = live_enabled
     app = FastAPI(title="ballshark")
 
     if OVERLAY_DIR.is_dir():
@@ -6201,9 +6213,17 @@ def _nav(active: str = "", friend_mode: bool = False) -> str:
         # picker; the analytical pages and /about 404 here, so drop them.
         stat_items = [it for it in stat_items if it[0] == "live"]
         util_items = [it for it in util_items if it[0] == "overlay"]
+    if not _LIVE_AVAILABLE:
+        # The central `serve` host has no RL ingest -> no live feed; drop the
+        # dead 'Live' link (the /live route still exists for direct hits).
+        stat_items = [it for it in stat_items if it[0] != "live"]
     # In friend mode the brand can't point at /dashboard (it 404s); send it home
     # to the live view instead.
     brand_href = "/live" if friend_mode else "/dashboard"
+
+    live_pip = ('<span class="live-pip off" id="live-pip" title="No active match">'
+                '<span class="dot"></span><span id="live-pip-label">idle</span></span>'
+                if _LIVE_AVAILABLE else "")
 
     def _navlink(key, href, label, base="navlink"):
         klass = f"{base} active" if key == active else base
@@ -6222,10 +6242,7 @@ def _nav(active: str = "", friend_mode: bool = False) -> str:
   <div class="navlinks">{"".join(parts)}</div>
   <div class="nav-aside">
     {"".join(util_parts)}
-    <span class="live-pip off" id="live-pip" title="No active match">
-      <span class="dot"></span>
-      <span id="live-pip-label">idle</span>
-    </span>
+    {live_pip}
     <button id="theme-toggle" type="button" aria-label="Toggle theme">
       <span class="theme-icon" id="theme-icon"></span>
       <span id="theme-label">Dark</span>
