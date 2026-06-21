@@ -2513,6 +2513,7 @@ def _match_detail_html(store, match_id: str, viewer_pid: str | None, viewer_name
         _mn_chip("#overview", "Overview"),
         _mn_chip("#timeline", "Timeline"),
         _mn_chip("#goalmap", "Goal map") if playback_data.get("goals") else "",
+        _mn_chip("#compare", "Us vs them"),
         _mn_chip("#kickoff", "Kickoff"),
         _mn_chip("#players", "Players"),
     ]
@@ -2591,6 +2592,8 @@ def _match_detail_html(store, match_id: str, viewer_pid: str | None, viewer_name
       {_match_events_html(playback_data)}
 
       {_goal_map_html(playback_data)}
+
+      {_match_compare_html(players, viewer_pid, viewer_name, t0_name, t1_name, playback_data)}
 
       <div id="kickoff" class="mn-target">
         {_kickoff_card_html(playback_data, players, viewer_pid, viewer_name)}
@@ -2931,6 +2934,83 @@ def _build_playback_data(store, match_id: str, started_at: float,
         "goals": goals_raw,
         "clock_map": clock_map,
     }
+
+
+def _match_compare_html(players, viewer_pid, viewer_name,
+                        t0_name: str, t1_name: str, playback: dict | None = None) -> str:
+    """Us-vs-them team comparison (touch share, shots, saves, demos, posts) +
+    per-player touch%, ported from the liked Discord embed. Viewer-relative
+    US/THEM when a viewer resolves, else a neutral Blue-vs-Orange framing.
+    Every stat here is reported for ALL players (unlike movement/boost)."""
+    if not players:
+        return ""
+    us = None
+    if viewer_pid or viewer_name:
+        for p in players:
+            if (viewer_pid and p["primary_id"] == viewer_pid) or \
+               (viewer_name and p["name"] == viewer_name):
+                us = p["team_num"]
+                break
+    viewer_relative = us is not None
+    if us is None:
+        us = 0
+    them = 1 - us
+    up = [p for p in players if p["team_num"] == us]
+    tp = [p for p in players if p["team_num"] == them]
+
+    def tot(pl, k):
+        return sum((p[k] or 0) for p in pl)
+
+    us_touch, them_touch = tot(up, "touches"), tot(tp, "touches")
+    total = us_touch + them_touch
+    us_poss = round(us_touch / total * 100) if total else 0
+    rows = [
+        ("Touch share", f"{us_poss}%", f"{(100 - us_poss) if total else 0}%"),
+        ("Shots", tot(up, "shots"), tot(tp, "shots")),
+        ("Saves", tot(up, "saves"), tot(tp, "saves")),
+        ("Demos", tot(up, "demos"), tot(tp, "demos")),
+    ]
+    if playback:
+        evs = playback.get("events") or []
+        pu = sum(1 for e in evs if e.get("kind") == "crossbar" and e.get("team") == us)
+        pt = sum(1 for e in evs if e.get("kind") == "crossbar" and e.get("team") == them)
+        if pu or pt:
+            rows.append(("Posts", pu, pt))
+
+    us_cls = "team-blue" if us == 0 else "team-orng"
+    them_cls = "team-blue" if them == 0 else "team-orng"
+    us_label = "Us" if viewer_relative else html.escape(
+        (t0_name if us == 0 else t1_name) or ("Blue" if us == 0 else "Orange"))
+    them_label = "Them" if viewer_relative else html.escape(
+        (t0_name if them == 0 else t1_name) or ("Blue" if them == 0 else "Orange"))
+    body_rows = "".join(
+        f'<tr><td class="cmp-label">{lbl}</td>'
+        f'<td class="num tnum">{u}</td><td class="num tnum">{t}</td></tr>'
+        for lbl, u, t in rows
+    )
+    pp = ""
+    if total:
+        def share(pl):
+            return " ".join(
+                f'<span class="cmp-pp">{html.escape((p["name"] or "")[:12])} '
+                f'{round((p["touches"] or 0) / total * 100)}%</span>'
+                for p in sorted(pl, key=lambda p: -(p["touches"] or 0))
+            )
+        pp = (f'<div class="cmp-touch"><div class="cmp-pp-title">Touch %</div>'
+              f'<div class="cmp-pp-row {us_cls}">{share(up)}</div>'
+              f'<div class="cmp-pp-row {them_cls}">{share(tp)}</div></div>')
+    return f"""
+      <section id="compare" class="card mn-target">
+        <div class="section-title"><span>Us vs them</span></div>
+        <table class="cmp-table">
+          <thead><tr><th></th>
+            <th class="num {us_cls}">{us_label}</th>
+            <th class="num {them_cls}">{them_label}</th></tr></thead>
+          <tbody>{body_rows}</tbody>
+        </table>
+        {pp}
+      </section>
+    """
 
 
 def _goal_map_html(playback: dict) -> str:
@@ -7296,6 +7376,21 @@ table.history tr.match-row:hover { background: var(--card-hover); }
 .match-nav .mn-player.team-orng .mn-swatch { background: var(--team-orng); }
 .match-nav .mn-you { font-size: 9px; font-weight: 800; color: var(--accent); margin-left: 4px; }
 .mn-target, #timeline, #goalmap, .radar-card[id] { scroll-margin-top: 64px; }
+
+/* Us-vs-them compare block */
+.cmp-table { width: 100%; max-width: 420px; border-collapse: collapse; }
+.cmp-table th, .cmp-table td { padding: 6px 10px; }
+.cmp-table thead th { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+.cmp-table thead th.team-blue { color: var(--team-blue); }
+.cmp-table thead th.team-orng { color: var(--team-orng); }
+.cmp-table .cmp-label { color: var(--text-faint); font-size: 13px; }
+.cmp-table tbody tr + tr td { border-top: 1px solid var(--accent-line); }
+.cmp-touch { margin-top: 12px; }
+.cmp-touch .cmp-pp-title { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-faint); margin-bottom: 6px; }
+.cmp-pp-row { display: flex; flex-wrap: wrap; gap: 6px 12px; margin-bottom: 4px; }
+.cmp-pp-row.team-blue .cmp-pp { color: var(--team-blue); }
+.cmp-pp-row.team-orng .cmp-pp { color: var(--team-orng); }
+.cmp-pp { font-size: 12px; font-variant-numeric: tabular-nums; }
 .radar-card .rc-adv { display: flex; flex-direction: column; gap: 16px; }
 .radar-card .rc-adv-section { display: flex; flex-direction: column; gap: 10px; }
 .radar-card .rc-adv-title {
