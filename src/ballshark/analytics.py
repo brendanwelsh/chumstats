@@ -430,7 +430,11 @@ def build_dashboard(store, *, primary_id: str | None = None,
         ])
 
         # ---- per-match averages ----
-        shooting_pct = ((row["goals"] or 0) / (row["shots"] or 1)) * 100
+        # Shooting % is goals/shots. A goal can register without an on-target
+        # shot (deflections, own goals), so guard shots==0 -> "n/a" rather than
+        # dividing by 1 and printing nonsense like 300%.
+        _shots = row["shots"] or 0
+        shooting_pct = f"{(row['goals'] or 0) / _shots * 100:.1f}%" if _shots else "n/a"
         d.averages.lines.extend([
             MetricLine("Goals/match",   f"{(row['goals'] or 0) / matches:.2f}", ""),
             MetricLine("Assists/match", f"{(row['assists'] or 0) / matches:.2f}", ""),
@@ -439,7 +443,7 @@ def build_dashboard(store, *, primary_id: str | None = None,
             MetricLine("Demos/match",   f"{(row['demos'] or 0) / matches:.2f}", ""),
             MetricLine("Score/match",   f"{(row['score'] or 0) / matches:.0f}", ""),
             MetricLine("Touches/match", f"{(row['touches'] or 0) / matches:.0f}", ""),
-            MetricLine("Shooting %",    f"{shooting_pct:.1f}%", "career"),
+            MetricLine("Shooting %",    shooting_pct, "career"),
         ])
 
         # ---- movement / boost (lifetime, weighted by tick count) ----

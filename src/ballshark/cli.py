@@ -13,7 +13,9 @@ from pathlib import Path
 from .config import Settings
 from .ingest import run_live
 from .replay import iter_for_aggregator
-from .session import MatchSummary, SessionTracker, run_aggregation
+from .session import (
+    MatchSummary, SessionTracker, SUPERSONIC_THRESHOLD, run_aggregation,
+)
 from .store import Store
 
 
@@ -202,7 +204,9 @@ def cmd_run(args: argparse.Namespace) -> int:
                             "on_wall":    p.get("bOnWall", False),
                             "has_car":    p.get("bHasCar", False),
                             "boosting":   p.get("bBoosting", False),
-                            "supersonic": (p.get("Speed") or 0) >= 2200,
+                            # Speed is km/h; supersonic = 2200 uu/s = 79.2 km/h
+                            # (shared with the aggregator so live + stored agree).
+                            "supersonic": (p.get("Speed") or 0) >= SUPERSONIC_THRESHOLD,
                         }
                         for p in (raw.get("Players") or [])
                     ],

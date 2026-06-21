@@ -1432,7 +1432,7 @@ def _player_ball_section_html(store, name: str | None) -> str:
     off_pct = thirds["off"] / tt * 100
 
     bpm = None
-    if row and row.get("ticks", 0) >= 1000:
+    if row and (row.get("ticks") or 0) >= 1000:
         minutes = row["ticks"] / 30 / 60
         if minutes:
             bpm = (row.get("boost_used") or 0) / minutes
@@ -2530,7 +2530,7 @@ def _match_detail_html(store, match_id: str, viewer_pid: str | None, viewer_name
 
     # Match-context tag, from the real game clock (not a wall-clock guess):
     # any overtime clock ticks => Overtime; a very short match => Forfeit.
-    if duration < 180:
+    if game_duration < 180:
         match_context = "Forfeit"
         match_context_class = "ff"
     elif is_overtime_match:
@@ -5261,12 +5261,12 @@ def _compare_page_html(store, slots: list[str], *, self_name: str | None = None,
             ("Time on ground %", lambda v: f"{v*100:.1f}%",
              [pct_if(r.get("ticks"), r.get("ticks_ground")) for r in rows], False),
             ("Avg speed",        lambda v: f"{v:.1f}",
-             [safe_div(r.get("speed_sum"), r.get("ticks")) if r.get("ticks", 0) >= 1000 else None for r in rows], True),
+             [safe_div(r.get("speed_sum"), r.get("ticks")) if (r.get("ticks") or 0) >= 1000 else None for r in rows], True),
         ]),
         ("Boost (total · per match)", "totavg", [
             ("Boost used", lambda v: f"{v:.0f}", lambda v: f"{v:.0f}",
-             [r.get("boost_used") if r.get("ticks", 0) >= 1000 else None for r in rows],
-             [safe_div(r.get("boost_used"), r.get("matches")) if r.get("ticks", 0) >= 1000 else None for r in rows], True),
+             [r.get("boost_used") if (r.get("ticks") or 0) >= 1000 else None for r in rows],
+             [safe_div(r.get("boost_used"), r.get("matches")) if (r.get("ticks") or 0) >= 1000 else None for r in rows], True),
         ]),
         ("Boost timing", "single", [
             ("BPM (boost used per minute)", lambda v: f"{v:.0f}",

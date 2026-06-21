@@ -36,14 +36,13 @@ from .models import (
 # Bump whenever aggregation logic changes in a way that alters derived stats.
 # Stamped onto every match (matches.parser_version) so a future reprocess pass
 # can tell which matches predate a fix and need re-deriving from raw_events.
-AGGREGATOR_VERSION = 1
+AGGREGATOR_VERSION = 2
 
-# Speed units in this API appear normalized to ~0-100+ where 100 is car
-# top-speed-without-boost. Supersonic in real RL is at ~2200 uu/s; in our
-# fixture captures players topped at ~82-110 in normal play. Using 80 as a
-# "moving fast" threshold approximates supersonic-time in this metric.
-# Recalibrate once we collect more matches.
-SUPERSONIC_THRESHOLD = 80.0
+# The Stats API "Speed" field is in km/h (verified against real tick payloads:
+# it tops out at 82.8 km/h, which is 2300 uu/s -- the in-game max car speed).
+# Supersonic in RL is 2200 uu/s = 79.2 km/h, so that is the supersonic-time
+# threshold on this field.
+SUPERSONIC_THRESHOLD = 79.2
 
 
 # --- value objects ----------------------------------------------------------
