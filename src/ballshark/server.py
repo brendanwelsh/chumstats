@@ -2276,17 +2276,12 @@ def _match_detail_html(store, match_id: str, viewer_pid: str | None, viewer_name
         marker = " <span class='you-marker' style='margin-left:6px'>YOU</span>" if is_viewer else ""
         mvp = " <span class='chip mvp' style='margin-left:6px'>MVP</span>" if p["is_mvp"] else ""
         bot = " <span class='chip bot' style='margin-left:6px'>BOT</span>" if p["is_bot"] else ""
-        values = [
-            ("Goals",   p["goals"],   peak_g),
-            ("Shots",   p["shots"],   peak_sh),
-            ("Demos",   p["demos"],   peak_d),
-            ("Saves",   p["saves"],   peak_sv),
-            ("Assists", p["assists"], peak_a),
-        ]
+        slug = "".join(ch if ch.isalnum() else "_" for ch in (p["name"] or "")) or "p"
         href = f"/player/{quote(p['name'], safe='')}"
-        name_link = (f"<span class='player-link' style='cursor:default;color:var(--text-faint)'>{p['name']}</span>"
+        nm = html.escape(p["name"] or "")  # attacker-controllable
+        name_link = (f"<span class='player-link' style='cursor:default;color:var(--text-faint)'>{nm}</span>"
                      if p["is_bot"] else
-                     f"<a class='player-link' href='{href}'>{p['name']}</a>")
+                     f"<a class='player-link' href='{href}'>{nm}</a>")
 
         ticks = p["ticks_total"] or 0
         expected_ticks = max(int(duration * 30), 1)
@@ -2424,8 +2419,7 @@ def _match_detail_html(store, match_id: str, viewer_pid: str | None, viewer_name
           <div class="rc-adv-section">
             <div class="rc-adv-title">Combat &amp; scoring quality</div>
             <ul class="rc-stat-line">
-              <li><b>{p['demos']}</b> <span>demos given</span></li>
-              <li><b>{ext['demos_received']}</b> <span>taken</span></li>
+              <li><b>{ext['demos_received']}</b> <span>demos taken</span></li>
               <li><b>{ext['crossbar_hits']}</b> <span>crossbars</span></li>
               <li><b>{gp_pct:.0f}%</b> <span>goal participation</span></li>
               <li><b>{avg_goal_speed:.0f}</b> <span>kph avg goal</span></li>
@@ -2469,15 +2463,16 @@ def _match_detail_html(store, match_id: str, viewer_pid: str | None, viewer_name
         if ext["highlights"]:
             header_badges = f' <span class="chip highlight-chip" title="Special moments">{ext["highlights"]} HL</span>'
 
+        # Collapsible: the viewer's card opens by default, everyone else's
+        # collapses to just the name row -- fixes the tall 6-card vertical stack.
+        # G/A/Sv/Sh/D/Score live once in the roster table above; this card holds
+        # only the non-roster detail (combat extras, highlights, movement, map).
         return f"""
-          <div class="radar-card {team_class}">
-            <div class="rc-head">
+          <details class="radar-card {team_class}" id="p-{slug}"{' open' if is_viewer else ''}>
+            <summary class="rc-head">
               <div class="rc-head-name">{name_link}{mvp}{bot}{marker}{header_badges}</div>
-              <!-- Goals/Assists/Saves/Shots/Demos/Score live in the roster table
-                   above and are visualised by the radar below — not repeated here. -->
-            </div>
+            </summary>
             <div class="rc-body">
-              <div class="rc-radar">{_radar_svg(values, size=280, color=color)}</div>
               <div class="rc-adv">
                 {combat_html}
                 {activity_html}
@@ -2486,7 +2481,7 @@ def _match_detail_html(store, match_id: str, viewer_pid: str | None, viewer_name
                 {mini_heatmap}
               </div>
             </div>
-          </div>
+          </details>
         """
 
     blue_players = sorted([p for p in players if p["team_num"] == 0], key=lambda p: -(p["score"] or 0))
@@ -7232,15 +7227,19 @@ table.history tr.match-row:hover { background: var(--card-hover); }
 
 /* Body grid: radar on the left, advanced stats on the right */
 .radar-card .rc-body {
-  display: grid;
-  grid-template-columns: minmax(260px, 320px) 1fr;
-  gap: 28px;
-  align-items: start;
+  display: block;
+  padding-top: 14px;
 }
-@media (max-width: 820px) {
-  .radar-card .rc-body { grid-template-columns: 1fr; }
+.radar-card > summary.rc-head {
+  cursor: pointer; list-style: none; -webkit-user-select: none; user-select: none;
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
 }
-.radar-card .rc-radar svg { overflow: visible; }
+.radar-card > summary.rc-head::-webkit-details-marker { display: none; }
+.radar-card > summary.rc-head::after {
+  content: '\25B8'; color: var(--text-faint); font-size: 13px;
+  transition: transform .15s ease; flex: 0 0 auto;
+}
+.radar-card[open] > summary.rc-head::after { transform: rotate(90deg); }
 .radar-card .rc-adv { display: flex; flex-direction: column; gap: 16px; }
 .radar-card .rc-adv-section { display: flex; flex-direction: column; gap: 10px; }
 .radar-card .rc-adv-title {
