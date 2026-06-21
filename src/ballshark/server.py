@@ -6590,7 +6590,13 @@ body.with-sidebar .page-layout {
 }
 /* Icon-only chips: SVG centered, same height as text chips */
 .side-filters .sf-chip-ic { padding: 0; }
-.side-filters .sf-chip-ic svg.plat-ic { display: block; }
+/* The platform icon files (steam.svg etc.) ship with a 512 viewBox, NO
+   width/height, and NO class -- so without a hard CSS size on the SVG itself
+   they balloon to ~512px (the "huge console icons" bug, worst when the sidebar
+   goes full-width on narrow screens). Constrain the SVG directly. */
+svg.plat-ic { width: 16px; height: 16px; flex: 0 0 auto; }
+.side-filters .sf-chip-ic { display: flex; align-items: center; justify-content: center; }
+.side-filters .sf-chip-ic svg { display: block; width: 20px; height: 20px; }
 .side-filters .sf-chip-ic:hover svg.plat-ic { color: var(--accent); }
 .side-filters .sf-chip-ic.active svg.plat-ic { color: var(--accent); }
 .side-filters .sf-platform .sf-chip[data-val=""] {
@@ -6665,6 +6671,27 @@ body.with-sidebar .page-layout {
 }
 @media (max-width: 1200px) {
   .navlink, .nav-link { padding: 5px 8px; font-size: 12px; }
+}
+/* Narrow screens: stop the stat links from wrapping into a pile over the brand.
+   Brand + controls on top; the links become one horizontally-scrollable row. */
+@media (max-width: 760px) {
+  .topnav {
+    grid-template-columns: 1fr auto;
+    grid-template-areas: "brand aside" "nav nav";
+    gap: 8px 12px;
+  }
+  .topnav > .brand { grid-area: brand; }
+  .topnav > .nav-aside { grid-area: aside; flex-wrap: wrap; justify-content: flex-end; }
+  .topnav > .navlinks {
+    grid-area: nav;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    justify-content: flex-start;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .topnav > .navlinks::-webkit-scrollbar { height: 0; }
+  .topnav > .navlinks .navlink { flex: 0 0 auto; }
 }
 .navlink:hover, .nav-link:hover { color: var(--text); background: var(--card); }
 .navlink.active, .nav-link.active {
