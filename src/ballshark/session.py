@@ -475,7 +475,13 @@ class MatchAggregator:
             teams = {t.team_num: t for t in self.last_update.game.teams}
             s0 = teams[0].score if 0 in teams else 0
             s1 = teams[1].score if 1 in teams else 0
-            self.winner_team_num = 0 if s0 >= s1 else 1
+            if s0 == s1:
+                # Rocket League has no ties: a force-finalized match with equal
+                # scores never actually concluded (quit/aborted before a winner).
+                # Don't record a phantom result -- the old `s0 >= s1` defaulted
+                # every such match to a blue (team 0) win, corrupting records.
+                return None
+            self.winner_team_num = 0 if s0 > s1 else 1
             if self.ended_at is None:
                 self.ended_at = time.time()
 
