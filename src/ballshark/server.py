@@ -1017,9 +1017,9 @@ def _mvp_callout_html(players, viewer_pid: str | None, viewer_name: str | None) 
                   (viewer_name and p["name"] == viewer_name and not viewer_pid)
         self_tag = ' <span class="hero-mvp-you">YOU</span>' if is_self else ""
         href = f"/player/{quote(p['name'], safe='')}"
-        name_html = (f'<span class="hero-mvp-name">{p["name"]}</span>'
+        name_html = (f'<span class="hero-mvp-name">{html.escape(p["name"])}</span>'
                      if p["is_bot"] else
-                     f'<a class="hero-mvp-name" href="{href}">{p["name"]}</a>')
+                     f'<a class="hero-mvp-name" href="{href}">{html.escape(p["name"])}</a>')
         parts.append(
             f'<span class="hero-mvp-entry {team_cls}">'
             f'{name_html}{self_tag}'
@@ -1644,9 +1644,9 @@ def _mvp_cell_html(mvp: dict | None, *, viewer_is_mvp: bool = False) -> str:
     team_cls = "team-blue" if mvp["team_num"] == 0 else "team-orng"
     name = mvp["name"]
     href = f"/player/{quote(name, safe='')}"
-    name_html = (f'<span class="mvp-name">{name}</span>'
+    name_html = (f'<span class="mvp-name">{html.escape(name)}</span>'
                  if mvp["is_bot"] else
-                 f'<a class="mvp-name" href="{href}" onclick="event.stopPropagation()">{name}</a>')
+                 f'<a class="mvp-name" href="{href}" onclick="event.stopPropagation()">{html.escape(name)}</a>')
     you = ' <span class="mvp-you">YOU</span>' if viewer_is_mvp else ''
     icon = _rl_icon_html("MVP", size=14, alt="")
     return (
@@ -1686,11 +1686,11 @@ def _match_history_html(store, primary_id: str | None, name: str | None, *,
             <td><span class="badge {'win' if won else 'loss'}">{'W' if won else 'L'}</span></td>
             <td class="dim"><time datetime="{ts_iso}">{ts_fallback}</time></td>
             <td class="score-cell">
-              <span class="score-team team-blue" title="{r["team0_name"]}">{r["team0_name"]}</span>
+              <span class="score-team team-blue" title="{html.escape(r["team0_name"])}">{html.escape(r["team0_name"])}</span>
               <b class="tnum">{r["team0_score"]}</b>
               <span class="dim">-</span>
               <b class="tnum">{r["team1_score"]}</b>
-              <span class="score-team team-orng" title="{r["team1_name"]}">{r["team1_name"]}</span>
+              <span class="score-team team-orng" title="{html.escape(r["team1_name"])}">{html.escape(r["team1_name"])}</span>
             </td>
             <td class="dim">{arena}{(' &middot; ' + mode_html) if mode_html else ''}</td>
             <td class="num"><b>{r["goals"]}</b></td>
@@ -1814,7 +1814,7 @@ def _players_directory_html(store, self_primary_id: str | None = None,
         kind_str = " · ".join(kind) or "n/a"
         return f"""
           <tr class="player-row">
-            <td><a class="player-link" href="{href}">{r["name"]}</a> {tag}</td>
+            <td><a class="player-link" href="{href}">{html.escape(r["name"])}</a> {tag}</td>
             <td class="dim">{r["platform"] or 'n/a'}</td>
             <td class="dim">{kind_str}</td>
             <td class="num tnum">{r["n"]}</td>
@@ -1904,7 +1904,7 @@ def _filter_chip_html(action: str, label: str, include_bots: bool, *, extra: str
 def _not_found_html(name: str) -> str:
     return _page_wrap("Not found", f"""
       <h1>Player not found</h1>
-      <p class="caption">No matches in the DB for <b>{name}</b>. Check spelling or
+      <p class="caption">No matches in the DB for <b>{html.escape(name)}</b>. Check spelling or
       see <a href="/players">all players</a>.</p>
     """, status=404)
 
@@ -1992,11 +1992,11 @@ def _history_page_html(store, primary_id, name, *,
             <td class="dim tnum"><time datetime="{ts_iso}">{ts_fallback}</time></td>
             <td class="score-cell">
               <div class="vs-line">
-                <span class="vs-team blue" title="{r['team0_name']}">Blue</span>
+                <span class="vs-team blue" title="{html.escape(r['team0_name'])}">Blue</span>
                 <span class="vs-score {t0_winner}">{r['team0_score']}</span>
                 <span class="vs-sep">vs</span>
                 <span class="vs-score {t1_winner}">{r['team1_score']}</span>
-                <span class="vs-team orng" title="{r['team1_name']}">Orange</span>
+                <span class="vs-team orng" title="{html.escape(r['team1_name'])}">Orange</span>
               </div>
               {poss_html}
               {('<div class="row-chips">' + chips + '</div>') if chips else ''}
@@ -4105,7 +4105,7 @@ def _kickoff_card_html(playback: dict, players, viewer_pid: str | None,
             <td class="dim">{kind}</td>
             <td class="num tnum">{int(k['start'] // 60)}:{int(k['start'] % 60):02d}</td>
             <td class="num tnum"><b>{delta}</b></td>
-            <td class="{team_cls}"><b>{k['player'] or '?'}</b>{you_mark}</td>
+            <td class="{team_cls}"><b>{html.escape(k['player'] or '?')}</b>{you_mark}</td>
           </tr>
         """)
     my_wins = (t0_wins if me_team == 0 else t1_wins if me_team == 1 else 0)
@@ -4372,7 +4372,7 @@ def _match_insights_html(playback: dict, t0_name: str, t1_name: str) -> str:
             pct = v["n"] / total * 100
             out.append(
                 f'<li class="touch-row {tcls}">'
-                f'<span class="touch-name">{name}</span>'
+                f'<span class="touch-name">{html.escape(name)}</span>'
                 f'<span class="touch-bar"><span class="touch-bar-fill" '
                 f'style="width:{pct:.1f}%"></span></span>'
                 f'<span class="touch-num tnum">{v["n"]} <span class="dim">({pct:.0f}%)</span></span>'
@@ -5395,8 +5395,8 @@ def _club_detail_html(store, club_name: str,
             body = f"""
               <div class="page-head">
                 <div>
-                  <h1>{club_name}</h1>
-                  <div class="sub">No matches found vs <b>{club_name}</b>.</div>
+                  <h1>{html.escape(club_name)}</h1>
+                  <div class="sub">No matches found vs <b>{html.escape(club_name)}</b>.</div>
                 </div>
               </div>
               <div class="empty">Nothing to show.</div>
@@ -5438,7 +5438,7 @@ def _club_detail_html(store, club_name: str,
         link_close = "</a>" if not r["is_bot"] else "</span>"
         roster_rows.append(f"""
           <tr class="row">
-            <td>{link_open}<b>{r['name']}</b>{link_close}{bot}</td>
+            <td>{link_open}<b>{html.escape(r['name'])}</b>{link_close}{bot}</td>
             <td class="dim">{r['platform'] or 'n/a'}</td>
             <td class="num tnum"><b>{r['n']}</b></td>
             <td class="num tnum">{r['score'] or 0}</td>
@@ -5463,14 +5463,14 @@ def _club_detail_html(store, club_name: str,
             <td><span class="badge {'win' if won else 'loss'}">{'W' if won else 'L'}</span></td>
             <td class="dim tnum"><time datetime="{ts_iso}">{ts_fall}</time></td>
             <td class="score-cell"><b class="tnum">{my_score}</b> <span class="dim">vs</span> <b class="tnum">{their_score}</b></td>
-            <td class="dim"><span class="club-name" title="{my_team_name}">{my_team_name}</span></td>
+            <td class="dim"><span class="club-name" title="{html.escape(my_team_name)}">{html.escape(my_team_name)}</span></td>
           </tr>
         """)
 
     body = f"""
       <div class="page-head">
         <div>
-          <h1><span class="club-name" title="{club_name}">{club_name}</span></h1>
+          <h1><span class="club-name" title="{html.escape(club_name)}">{html.escape(club_name)}</span></h1>
           <div class="sub">Head-to-head detail. We played them {len(rows)} time{'s' if len(rows) != 1 else ''}.</div>
         </div>
       </div>
@@ -5788,7 +5788,7 @@ def _clan_page_html(store, members: list[str], *, self_name: str | None = None,
         arena = _arena_nice(cm["arena"] or "")
         won = cm["won"]
         member_chips = " ".join(
-            f'<span class="clan-member-chip">{r["name"]}</span>'
+            f'<span class="clan-member-chip">{html.escape(r["name"])}</span>'
             for r in cm["members"]
         )
         match_rows.append(f"""
@@ -5797,11 +5797,11 @@ def _clan_page_html(store, members: list[str], *, self_name: str | None = None,
             <td><span class="badge {'win' if won else 'loss'}">{'W' if won else 'L'}</span></td>
             <td class="dim tnum"><time datetime="{ts_iso}">{ts_fallback}</time></td>
             <td class="score-cell">
-              <span class="score-team team-blue" title="{cm['team0_name']}">{cm['team0_name']}</span>
+              <span class="score-team team-blue" title="{html.escape(cm['team0_name'])}">{html.escape(cm['team0_name'])}</span>
               <b class="tnum">{cm['team0_score']}</b>
               <span class="dim">-</span>
               <b class="tnum">{cm['team1_score']}</b>
-              <span class="score-team team-orng" title="{cm['team1_name']}">{cm['team1_name']}</span>
+              <span class="score-team team-orng" title="{html.escape(cm['team1_name'])}">{html.escape(cm['team1_name'])}</span>
             </td>
             <td class="dim">{arena}</td>
             <td class="clan-members-cell">{member_chips}</td>
@@ -5838,7 +5838,7 @@ def _clan_page_html(store, members: list[str], *, self_name: str | None = None,
         from urllib.parse import quote as _q
         rivals_cells.append(f"""
           <tr class="row click" onclick="window.location='/club/{_q(r['name'], safe='')}'">
-            <td><a class="player-link" href="/club/{_q(r['name'], safe='')}"><span class="club-name" title="{r['name']}"><b>{r['name']}</b></span></a></td>
+            <td><a class="player-link" href="/club/{_q(r['name'], safe='')}"><span class="club-name" title="{html.escape(r['name'])}"><b>{html.escape(r['name'])}</b></span></a></td>
             <td class="num tnum"><b>{r['matches']}</b></td>
             <td class="num tnum">
               <span class="{'good' if wn > ls else 'bad' if ls > wn else 'dim'}">
@@ -5856,7 +5856,7 @@ def _clan_page_html(store, members: list[str], *, self_name: str | None = None,
         rivals_html = f"""
           <div class="card" style="margin-top:14px;padding:0;overflow:hidden">
             <div class="section-title" style="padding:14px 18px 6px">
-              <span>Rivalries{' &mdash; <b style="color:var(--accent)">' + our_team_name + '</b> vs.' if our_team_name else ''}</span>
+              <span>Rivalries{' &mdash; <b style="color:var(--accent)">' + html.escape(our_team_name) + '</b> vs.' if our_team_name else ''}</span>
               <span class="dim" style="text-transform:none;letter-spacing:0">
                 Other named clubs we've matched up against.
               </span>
@@ -5882,7 +5882,7 @@ def _clan_page_html(store, members: list[str], *, self_name: str | None = None,
     body = f"""
       <div class="page-head">
         <div>
-          <h1>Opposing clubs{' &middot; <span style="color:var(--accent)">' + our_team_name + '</span>' if our_team_name else ''}</h1>
+          <h1>Opposing clubs{' &middot; <span style="color:var(--accent)">' + html.escape(our_team_name) + '</span>' if our_team_name else ''}</h1>
           <div class="sub">Every named club we have played against, and our head-to-head record vs each.</div>
         </div>
       </div>
