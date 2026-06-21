@@ -2205,9 +2205,10 @@ def _match_detail_html(store, match_id: str, viewer_pid: str | None, viewer_name
             you = " <span class='you-marker'>YOU</span>" if is_viewer else ""
             href = f"/player/{quote(p['name'], safe='')}"
             link_cls = "player-link self" if is_viewer else "player-link"
-            name_link = (f"<span class='{link_cls}' style='cursor:default;color:var(--text-faint)'>{p['name']}</span>"
+            nm = html.escape(p["name"] or "")  # attacker-controllable
+            name_link = (f"<span class='{link_cls}' style='cursor:default;color:var(--text-faint)'>{nm}</span>"
                          if p["is_bot"] else
-                         f"<a class='{link_cls}' href='{href}'>{p['name']}</a>")
+                         f"<a class='{link_cls}' href='{href}'>{nm}</a>")
             platform = p["platform"] if "platform" in p.keys() else ""
             # The roster table stays clean - basic counts only. All advanced
             # stats (where you are on the field, boost usage, speed) move into
@@ -2234,7 +2235,7 @@ def _match_detail_html(store, match_id: str, viewer_pid: str | None, viewer_name
             <div class="roster-head">
               <div class="roster-team">
                 <span class="roster-stripe"></span>
-                <span>{tname}</span>
+                <span>{html.escape(tname)}</span>
                 {winner_chip}
               </div>
               <span class="roster-score tnum">{tscore}</span>
@@ -4292,14 +4293,14 @@ def _match_insights_html(playback: dict, t0_name: str, t1_name: str) -> str:
         <div class="section-title">
           <span>Match insights</span>
           <span class="dim" style="text-transform:none;letter-spacing:0">
-            Derived from {len(ball)} ball contacts. Possession and pressure
+            Derived from {len(ball)} ball contacts. Time-on-ball and pressure
             are estimates from inter-touch intervals.
           </span>
         </div>
 
         <div class="insights-row">
           <div class="insights-bars">
-            <div class="insights-subtitle">Possession (time after each touch)</div>
+            <div class="insights-subtitle">Time on ball (share of play after each touch)</div>
             <div class="dual-bar">
               <div class="dual-bar-blue" style="width:{b_pct:.1f}%">
                 <span class="dual-bar-label">{b_pct:.0f}%</span>
