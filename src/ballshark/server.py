@@ -2562,7 +2562,7 @@ def _match_detail_html(store, match_id: str, viewer_pid: str | None, viewer_name
 
       {_kickoff_card_html(playback_data, players, viewer_pid, viewer_name)}
 
-      {_match_playback_html(playback_data)}
+      {_match_events_html(playback_data)}
 
       {_match_insights_html(playback_data, t0_name, t1_name)}
 
@@ -2904,333 +2904,62 @@ def _build_playback_data(store, match_id: str, started_at: float,
     }
 
 
-def _static_icon_svg(playback: dict) -> list[str]:
-    """Render every iconed BallHit as a permanent overlay group. JS later
-    bumps opacity once playback time passes each one, but they're visible
-    even before pressing play - that's the whole point: the map should
-    show you 'a goal happened here, a demo there' at a glance."""
-    out: list[str] = []
-    for bh in playback.get("ball_track") or []:
-        icon = bh.get("icon")
-        if not icon:
-            continue
-        team_cls = ("team-blue" if bh["team"] == 0
-                    else "team-orng" if bh["team"] == 1 else "")
-        # Build a tooltip-style label: "@Player - Save (12.3s)"
-        ev = bh.get("event") or "Touch"
-        title = f'{bh.get("player") or "Unknown"} - {ev} ({bh["t"]:.1f}s)'
-        out.append(
-            f'<g class="pb-static-icon {team_cls}" '
-            f'data-t="{bh["t"]}" '
-            f'transform="translate({bh["sx"]:.1f},{bh["esy"]:.1f})">'
-            f'<title>{title}</title>'
-            f'<circle class="pb-touch-halo" r="16" />'
-            f'<image href="{icon}" xlink:href="{icon}" '
-            f'width="26" height="26" x="-13" y="-13" />'
-            f'</g>'
-        )
-    return out
-
-
-def _match_playback_html(playback: dict) -> str:
-    """Single unified pitch (playback + heatmap modes toggled in-place) plus a
-    side rail event list. Animation is driven by a small vanilla-JS engine
-    embedded below; the data is dumped inline as JSON.
-
-    SVG layout:
-      defs: gradients + RL ball/car symbols (defined once, instanced via <use>)
-      static pitch: field, mid line, mid circle, nets, net labels
-      .layer-heatmap : soft glow circles per BallHit, two team-tinted groups
-      .layer-playback: goal chains (static), touch trail (dynamic), pulses,
-                       and the animated ball + current-player label
-    CSS toggles which layer is visible via the [data-mode] attribute on the
-    enclosing .pb-grid."""
-    import json as _json
-
-    svg = playback["svg"]
-    vb_w, vb_h = svg["vb_w"], svg["vb_h"]
-    pad_x, pad_y = svg["pad_x"], svg["pad_y"]
-    pitch_w, pitch_h = svg["pitch_w"], svg["pitch_h"]
-    t0_name = playback["meta"]["t0_name"]
-    t1_name = playback["meta"]["t1_name"]
-
-    if not playback["ball_track"] and not playback["events"]:
-        return ""
-
-    # Pre-goal chain overlays (static; they don't move during playback,
-    # they appear from t-of-goal onward).
-    chains_svg = []
-    for gi, g in enumerate(playback["goals"]):
-        team_color = "var(--team-blue)" if g["team"] == 0 else "var(--team-orng)"
-        pts = " ".join(f'{p["sx"]:.1f},{p["sy"]:.1f}' for p in g["chain"])
-        chains_svg.append(
-            f'<g class="pb-chain" data-chain-t="{g["t"]}" data-chain-team="{g["team"]}" '
-            f'style="opacity:0">'
-            f'<polyline points="{pts}" fill="none" stroke="{team_color}" '
-            f'stroke-width="2.5" stroke-dasharray="4 3" stroke-linecap="round" '
-            f'stroke-linejoin="round" />'
-        )
-        for p in g["chain"]:
-            is_impact = p.get("impact")
-            r = 7 if is_impact else 4
-            cls = "pb-chain-impact" if is_impact else "pb-chain-dot"
-            chains_svg.append(
-                f'<circle class="{cls}" cx="{p["sx"]:.1f}" cy="{p["sy"]:.1f}" '
-                f'r="{r}" fill="{team_color}" stroke="var(--card)" stroke-width="1.5" />'
-            )
-        label_x = g["chain"][-1]["sx"]
-        label_y = g["chain"][-1]["sy"] - 14
-        chains_svg.append(
-            f'<text x="{label_x:.1f}" y="{label_y:.1f}" text-anchor="middle" '
-            f'fill="{team_color}" font-size="12" font-weight="800" '
-            f'style="font-family: JetBrains Mono, monospace; '
-            f'paint-order: stroke; stroke: var(--card); stroke-width: 3">{gi + 1}</text>'
-            f'</g>'
-        )
-
-    # Static "Goals" layer: every goal shown at once as where it was STRUCK
-    # from (the scorer's last touch) with the build-up play traced back to the
-    # assist. Reuses the same pre-goal chain; the goal-line impact is only a
-    # faint ring (a goal always crosses at the net — the shot location is the
-    # interesting part). Hover shows scorer / assist.
-    goals_layer_svg = []
-    for gi, g in enumerate(playback["goals"]):
-        team_color = "var(--team-blue)" if g["team"] == 0 else "var(--team-orng)"
-        chain = g["chain"]
-        impact = chain[-1]
-        shot = chain[-2] if len(chain) >= 2 else impact   # scorer's last touch
-        assister = g.get("assister") or ""
-        tip = f'Goal {gi + 1}: {g["scorer"]}'
-        if assister:
-            tip += f'  (assist: {assister})'
-        if g.get("speed"):
-            tip += f'  ·  {g["speed"]} km/h'
-        pts = " ".join(f'{p["sx"]:.1f},{p["sy"]:.1f}' for p in chain)
-        parts = [f'<g class="gm-goal"><title>{html.escape(tip)}</title>']
-        # Build-up / shot trajectory line through the whole chain.
-        parts.append(
-            f'<polyline points="{pts}" fill="none" stroke="{team_color}" '
-            f'stroke-width="2" stroke-dasharray="3 3" stroke-linecap="round" '
-            f'stroke-linejoin="round" stroke-opacity="0.6" />'
-        )
-        # Build-up touches (everything before the shot) as small dots.
-        for p in chain[:-2]:
-            parts.append(
-                f'<circle cx="{p["sx"]:.1f}" cy="{p["sy"]:.1f}" r="3.5" '
-                f'fill="{team_color}" fill-opacity="0.5" stroke="var(--card)" stroke-width="1" />'
-            )
-        # Faint ring at the goal-line impact.
-        parts.append(
-            f'<circle cx="{impact["sx"]:.1f}" cy="{impact["sy"]:.1f}" r="4" fill="none" '
-            f'stroke="{team_color}" stroke-width="1.5" stroke-opacity="0.7" />'
-        )
-        # Prominent numbered marker at the shot (where it was struck from).
-        parts.append(
-            f'<circle cx="{shot["sx"]:.1f}" cy="{shot["sy"]:.1f}" r="9" '
-            f'fill="{team_color}" stroke="var(--card)" stroke-width="2" />'
-        )
-        parts.append(
-            f'<text x="{shot["sx"]:.1f}" y="{shot["sy"] + 4:.1f}" text-anchor="middle" '
-            f'fill="#fff" font-size="11" font-weight="800" '
-            f'style="font-family: JetBrains Mono, monospace">{gi + 1}</text></g>'
-        )
-        goals_layer_svg.append("".join(parts))
-
-    # Heatmap circles: one soft glow per BallHit. Tighter radius than before
-    # so hot spots read as discrete clusters instead of smeary blobs.
-    glow_r = 32
-    glow_alpha = 0.28
-    blue_glow, orng_glow = [], []
-    for bh in playback["ball_track"]:
-        c = f'<circle cx="{bh["sx"]:.1f}" cy="{bh["esy"]:.1f}" r="{glow_r}" />'
-        if bh["team"] == 0:
-            blue_glow.append(c)
-        elif bh["team"] == 1:
-            orng_glow.append(c)
-
-    defs = (
-        '<defs>'
-        # Heatmap gradients
-        f'<radialGradient id="hm-blue-main" cx="50%" cy="50%" r="50%">'
-        f'<stop offset="0%" stop-color="var(--team-blue)" stop-opacity="{glow_alpha}"/>'
-        f'<stop offset="55%" stop-color="var(--team-blue)" stop-opacity="{glow_alpha * 0.45:.3f}"/>'
-        f'<stop offset="100%" stop-color="var(--team-blue)" stop-opacity="0"/>'
-        f'</radialGradient>'
-        f'<radialGradient id="hm-orng-main" cx="50%" cy="50%" r="50%">'
-        f'<stop offset="0%" stop-color="var(--team-orng)" stop-opacity="{glow_alpha}"/>'
-        f'<stop offset="55%" stop-color="var(--team-orng)" stop-opacity="{glow_alpha * 0.45:.3f}"/>'
-        f'<stop offset="100%" stop-color="var(--team-orng)" stop-opacity="0"/>'
-        f'</radialGradient>'
-        # Soccer ball symbol (Rocket League's ball is essentially a soccer ball).
-        '<radialGradient id="rl-ball-sheen" cx="35%" cy="30%" r="65%">'
-        '<stop offset="0%" stop-color="#ffffff"/>'
-        '<stop offset="55%" stop-color="#d0d4d8"/>'
-        '<stop offset="100%" stop-color="#8a8e94"/>'
-        '</radialGradient>'
-        '<symbol id="rl-ball" viewBox="-13 -13 26 26" overflow="visible">'
-        '<circle cx="0" cy="0" r="12" fill="url(#rl-ball-sheen)" '
-        'stroke="rgba(0,0,0,0.85)" stroke-width="0.8"/>'
-        '<polygon points="0,-7 6.65,-2.15 4.1,5.7 -4.1,5.7 -6.65,-2.15" '
-        'fill="rgba(0,0,0,0.92)"/>'
-        '<line x1="0" y1="-7" x2="0" y2="-12" stroke="rgba(0,0,0,0.55)" stroke-width="0.85"/>'
-        '<line x1="6.65" y1="-2.15" x2="11.4" y2="-3.7" stroke="rgba(0,0,0,0.55)" stroke-width="0.85"/>'
-        '<line x1="4.1" y1="5.7" x2="7" y2="9.8" stroke="rgba(0,0,0,0.55)" stroke-width="0.85"/>'
-        '<line x1="-4.1" y1="5.7" x2="-7" y2="9.8" stroke="rgba(0,0,0,0.55)" stroke-width="0.85"/>'
-        '<line x1="-6.65" y1="-2.15" x2="-11.4" y2="-3.7" stroke="rgba(0,0,0,0.55)" stroke-width="0.85"/>'
-        '</symbol>'
-        # Car silhouette (forward-pointing; rotated per touch direction in JS-less render).
-        '<symbol id="rl-car" viewBox="-9 -5 18 10" overflow="visible">'
-        '<rect x="-7.5" y="-3.5" width="15" height="7" rx="1.2" fill="currentColor" '
-        'stroke="rgba(0,0,0,0.45)" stroke-width="0.5"/>'
-        '<rect x="-3.5" y="-3.7" width="7" height="2" rx="0.5" fill="rgba(255,255,255,0.45)"/>'
-        '<circle cx="-4.5" cy="3" r="1.2" fill="rgba(0,0,0,0.5)"/>'
-        '<circle cx="4.5" cy="3" r="1.2" fill="rgba(0,0,0,0.5)"/>'
-        '</symbol>'
-        '</defs>'
-    )
-
-    pitch_svg = (
-        f'<svg viewBox="0 0 {vb_w} {vb_h}" class="pb-pitch" id="playback-svg" '
-        f'xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Match map">'
-        f'{defs}'
-        f'<rect class="pb-field" x="{pad_x:.1f}" y="{pad_y:.1f}" '
-        f'width="{pitch_w}" height="{pitch_h}" />'
-        f'<line class="pb-midline" x1="{vb_w/2:.1f}" y1="{pad_y:.1f}" '
-        f'x2="{vb_w/2:.1f}" y2="{pad_y + pitch_h:.1f}" />'
-        f'<circle class="pb-midcircle" cx="{vb_w/2:.1f}" cy="{vb_h/2:.1f}" r="48" />'
-        # Net markers
-        f'<rect class="pb-net pb-net-blue" x="{pad_x - 10:.1f}" '
-        f'y="{pad_y + pitch_h/2 - 60:.1f}" width="10" height="120" />'
-        f'<rect class="pb-net pb-net-orng" x="{pad_x + pitch_w:.1f}" '
-        f'y="{pad_y + pitch_h/2 - 60:.1f}" width="10" height="120" />'
-        # Net labels
-        f'<text class="pb-net-label pb-net-label-blue" x="{pad_x:.1f}" '
-        f'y="{pad_y - 6:.1f}" text-anchor="start">{t0_name} net</text>'
-        f'<text class="pb-net-label pb-net-label-orng" x="{pad_x + pitch_w:.1f}" '
-        f'y="{pad_y + pitch_h + 18:.1f}" text-anchor="end">{t1_name} net</text>'
-        # Heatmap layer (visible only in heatmap mode)
-        f'<g class="layer-heatmap">'
-        f'<g class="hm-layer hm-blue" fill="url(#hm-blue-main)">{"".join(blue_glow)}</g>'
-        f'<g class="hm-layer hm-orng" fill="url(#hm-orng-main)">{"".join(orng_glow)}</g>'
-        f'</g>'
-        # Goals layer (visible only in goals mode): every goal's shot + build-up.
-        f'<g class="layer-goals">{"".join(goals_layer_svg)}</g>'
-        # Playback layer (visible only in playback mode)
-        f'<g class="layer-playback">'
-        # Persistent icon overlay - every BallHit matched to a Goal/Save/Shot/
-        # Demo/Aerial/etc. event is rendered as a static RL point icon so the
-        # match map tells the story without requiring the user to press play.
-        f'<g id="playback-static-icons">{"".join(_static_icon_svg(playback))}</g>'
-        f'<g id="playback-trail"></g>'
-        f'<g id="playback-chains">{"".join(chains_svg)}</g>'
-        f'<g id="playback-pulses"></g>'
-        # Ball-altitude shadow (thin vertical line indicating air height)
-        f'<line id="playback-altitude" x1="0" y1="0" x2="0" y2="0" '
-        f'stroke="rgba(255,255,255,0.35)" stroke-width="1.2" stroke-dasharray="2 2" '
-        f'style="display:none"/>'
-        # Ball: SVG soccer-ball symbol. Scaled up so it's actually visible.
-        f'<g id="playback-ball-group" transform="translate({vb_w/2:.1f},{vb_h/2:.1f})">'
-        f'<use href="#rl-ball" width="40" height="40" x="-20" y="-20" />'
-        f'</g>'
-        # Current-touch player label, repositioned by JS.
-        f'<g id="playback-label" style="display:none">'
-        f'<rect class="pb-label-bg" x="0" y="0" width="60" height="20" rx="0"/>'
-        f'<text class="pb-label-text" x="0" y="0">player</text>'
-        f'</g>'
-        f'</g>'
-        f'</svg>'
-    )
-
-    # Right-hand event list. Each row clickable -> seek.
+def _match_events_html(playback: dict) -> str:
+    """Standalone, server-rendered match timeline -- the 'history of events' the
+    owner likes, decoupled from the (removed) ball-replay engine: no JS, no
+    seek. Goals carry a running score; every name is escaped (attacker-
+    controllable). Reuses the shared .pb-event* classes (also used by the live
+    feed)."""
     rows = []
-    for i, ev in enumerate(playback["events"]):
-        t = ev["t"]
-        mm, ss = int(t // 60), int(t % 60)
-        ts = f"{mm}:{ss:02d}"
+    b = o = 0  # running score, blue-orange
+    for ev in (playback.get("events") or []):
+        t = ev.get("t", 0)
+        ts = f"{int(t // 60)}:{int(t % 60):02d}"
         team = ev.get("team")
-        team_cls = ("team-blue" if team == 0 else
-                    "team-orng" if team == 1 else "")
+        team_cls = "team-blue" if team == 0 else "team-orng" if team == 1 else ""
         kind = ev.get("kind", "")
         label = ev.get("label", "")
         player = ev.get("player") or ""
-        body = f"<b>{player}</b>" if player else ""
+        body = f"<b>{html.escape(player)}</b>" if player else ""
         if kind == "goal":
-            extra = f" <span class='pb-event-meta'>{ev['speed']:.0f} kph</span>"
+            if team == 0:
+                b += 1
+            elif team == 1:
+                o += 1
+            meta = []
+            if ev.get("speed"):
+                meta.append(f"{ev['speed']:.0f} km/h")
             if ev.get("assister"):
-                extra += f" <span class='pb-event-meta'>assist: <b>{ev['assister']}</b></span>"
-            body += extra
+                meta.append(f"assist: <b>{html.escape(ev['assister'])}</b>")
+            meta_html = (" <span class='pb-event-meta'>" + " &middot; ".join(meta)
+                         + "</span>") if meta else ""
+            body = (f"<span class='pb-event-score tnum'>{b}&ndash;{o}</span> "
+                    f"{body}{meta_html}")
         elif kind == "demo" and ev.get("secondary"):
-            body += f" demolished <b>{ev['secondary']}</b>"
+            body += f" demolished <b>{html.escape(ev['secondary'])}</b>"
         icon_html = _rl_icon_html(ev.get("event") or "", size=20, alt=label)
         rows.append(
-            f'<li class="pb-event pb-event-{kind} {team_cls}" '
-            f'data-idx="{i}" data-t="{t}">'
+            f'<li class="pb-event pb-event-{kind} {team_cls}">'
             f'<span class="pb-event-time tnum">{ts}</span>'
             f'<span class="pb-event-tag">{icon_html}{label}</span>'
             f'<span class="pb-event-body">{body}</span>'
             f'</li>'
         )
-
     if not rows:
         rows = ['<li class="pb-event-empty">No events recorded for this match.</li>']
-
-    json_blob = _json.dumps(playback, separators=(",", ":"))
-
     return f"""
-      <div class="card pb-card">
+      <section id="timeline" class="card">
         <div class="section-title">
-          <span>Match map</span>
+          <span>Match timeline</span>
           <span class="dim" style="text-transform:none;letter-spacing:0">
-            One pitch, two views. Press play for the ball-by-ball replay
-            or flip to the heatmap to see where the ball spent its time.
+            Every goal, save, demo and crossbar hit, in order.
           </span>
         </div>
-        <div class="pb-grid" data-mode="playback">
-          <div class="pb-left">
-            <div class="pb-mode-toggle">
-              <button type="button" data-pb-mode="playback" class="active">Playback</button>
-              <button type="button" data-pb-mode="goals">Goals</button>
-              <button type="button" data-pb-mode="heatmap">Heatmap</button>
-            </div>
-            <div class="pb-pitch-wrap">{pitch_svg}</div>
-            <div class="pb-controls">
-              <button id="playback-play" type="button" class="pb-play" aria-label="Play / pause">&#9654;</button>
-              <span class="pb-time">
-                <span id="playback-elapsed" class="tnum">0:00</span>
-                <span class="pb-time-sep">/</span>
-                <span class="tnum">{int(playback['duration'] // 60)}:{int(playback['duration'] % 60):02d}</span>
-              </span>
-              <input type="range" id="playback-scrub" class="pb-scrub"
-                     min="0" max="1000" value="0" step="1" />
-              <span class="pb-speed">
-                <button type="button" data-playback-speed="0.5">0.5x</button>
-                <button type="button" data-playback-speed="1">1x</button>
-                <button type="button" data-playback-speed="2" class="active">2x</button>
-                <button type="button" data-playback-speed="4">4x</button>
-              </span>
-              <span class="pb-clock">
-                <span class="pb-clock-label">Game clock</span>
-                <span id="playback-clock" class="tnum">--</span>
-                <span class="pb-clock-sep">·</span>
-                <span class="pb-clock-label">Score</span>
-                <span id="playback-score" class="tnum">0 - 0</span>
-              </span>
-            </div>
-          </div>
-          <div class="pb-right">
-            <ol class="pb-events">{"".join(rows)}</ol>
-          </div>
-        </div>
-        <script type="application/json" id="playback-data">{json_blob}</script>
-        <script>{_PLAYBACK_JS}</script>
-      </div>
+        <ol class="pb-events pb-events-full">{"".join(rows)}</ol>
+      </section>
     """
 
 
-# Vanilla-JS playback engine. Lives as a module-level string so we can inline
-# it once per match-detail render. Kept terse on purpose - one file, no deps.
-# Vanilla-JS live page engine. Subscribes to /ws and updates the scoreboard,
-# rosters, and event feed in real time. Inlined so the page is one round trip.
 _LIVE_JS = r"""
 (function() {
   var root = document.getElementById('live-root');
@@ -3973,354 +3702,6 @@ _LIVE_BOOST_TOGGLE_JS = r"""
     try { savedExclude = localStorage.getItem('ballshark-boost-exclude-self'); } catch (e) {}
     if (savedExclude === '1') setExcludeSelf(true);
   }
-})();
-"""
-
-
-_PLAYBACK_JS = r"""
-(function() {
-  var dataEl = document.getElementById('playback-data');
-  if (!dataEl) return;
-  var data = JSON.parse(dataEl.textContent);
-  var grid = document.querySelector('.pb-grid');
-  var ballGroup = document.getElementById('playback-ball-group');
-  var altLine = document.getElementById('playback-altitude');
-  var labelGroup = document.getElementById('playback-label');
-  var labelText = labelGroup ? labelGroup.querySelector('.pb-label-text') : null;
-  var labelBg = labelGroup ? labelGroup.querySelector('.pb-label-bg') : null;
-  var trailEl = document.getElementById('playback-trail');
-  var pulsesEl = document.getElementById('playback-pulses');
-  var elapsedEl = document.getElementById('playback-elapsed');
-  var clockEl = document.getElementById('playback-clock');
-  var scoreEl = document.getElementById('playback-score');
-  var scrubEl = document.getElementById('playback-scrub');
-  var playBtn = document.getElementById('playback-play');
-  var speedBtns = document.querySelectorAll('[data-playback-speed]');
-  var modeBtns = document.querySelectorAll('[data-pb-mode]');
-  var eventEls = document.querySelectorAll('.pb-event');
-  var chainEls = document.querySelectorAll('.pb-chain');
-
-  var SVG_NS = 'http://www.w3.org/2000/svg';
-  var ball = data.ball_track || [];
-  var events = data.events || [];
-  var duration = data.duration || 1;
-  var playing = false, speed = 2, t = 0, lastRaf = 0;
-  var lastEventIdx = -1;
-
-  function fmtClock(secs) {
-    if (secs == null) return '--';
-    var ot = '';
-    if (secs < 0) { ot = ' OT'; secs = -secs; }
-    var mm = Math.floor(secs / 60), ss = Math.floor(secs % 60);
-    return mm + ':' + (ss < 10 ? '0' : '') + ss + ot;
-  }
-  function fmtTime(secs) {
-    var mm = Math.floor(secs / 60), ss = Math.floor(secs % 60);
-    return mm + ':' + (ss < 10 ? '0' : '') + ss;
-  }
-
-  // Find the BallHit pair surrounding `time` so we can interpolate position.
-  function ballSegmentAt(time) {
-    if (ball.length === 0) return null;
-    if (time <= ball[0].t) return { a: ball[0], b: ball[0], k: 0 };
-    var last = ball[ball.length - 1];
-    if (time >= last.t) return { a: last, b: last, k: 0 };
-    var lo = 0, hi = ball.length - 1;
-    while (lo + 1 < hi) {
-      var mid = (lo + hi) >> 1;
-      if (ball[mid].t <= time) lo = mid; else hi = mid;
-    }
-    var a = ball[lo], b = ball[hi];
-    var k = (time - a.t) / Math.max(0.001, b.t - a.t);
-    return { a: a, b: b, k: k };
-  }
-
-  function gameClockAt(time) {
-    var cm = data.clock_map || [];
-    if (!cm.length) return null;
-    var prev = cm[0][1];
-    for (var i = 0; i < cm.length; i++) {
-      if (cm[i][0] > time) break;
-      prev = cm[i][1];
-    }
-    return prev;
-  }
-
-  function scoreAt(time) {
-    var b = 0, o = 0;
-    for (var i = 0; i < events.length; i++) {
-      if (events[i].t > time) break;
-      if (events[i].kind === 'goal') {
-        if (events[i].team === 0) b++; else o++;
-      }
-    }
-    return [b, o];
-  }
-
-  function eventIdxAt(time) {
-    var idx = -1;
-    for (var i = 0; i < events.length; i++) {
-      if (events[i].t > time) break;
-      idx = i;
-    }
-    return idx;
-  }
-
-  function spawnPulse(ev) {
-    if (ev.sx == null) return;
-    var teamCls = ev.team === 0 ? ' team-blue' : ev.team === 1 ? ' team-orng' : '';
-    // Ring pulse for visual emphasis.
-    var ring = document.createElementNS(SVG_NS, 'circle');
-    ring.setAttribute('cx', ev.sx);
-    ring.setAttribute('cy', ev.sy);
-    ring.setAttribute('r', '6');
-    ring.setAttribute('class', 'pb-pulse pb-pulse-' + (ev.kind || 'event') + teamCls);
-    pulsesEl.appendChild(ring);
-    setTimeout(function() { ring.remove(); }, 1600);
-    // Big floating event icon. Drops in, fades out.
-    if (ev.icon) {
-      var img = document.createElementNS(SVG_NS, 'image');
-      img.setAttributeNS('http://www.w3.org/1999/xlink', 'href', ev.icon);
-      img.setAttribute('href', ev.icon);
-      img.setAttribute('width', '40');
-      img.setAttribute('height', '40');
-      img.setAttribute('x', ev.sx - 20);
-      img.setAttribute('y', ev.sy - 40);
-      img.setAttribute('class', 'pb-pulse-icon' + teamCls);
-      pulsesEl.appendChild(img);
-      setTimeout(function() { img.remove(); }, 2000);
-    }
-  }
-
-  // Persistent icon overlay nodes (rendered server-side); cache them once.
-  var staticIcons = document.querySelectorAll('.pb-static-icon');
-
-  function updateStaticIcons(time) {
-    // Icons that haven't happened yet stay dim; once their moment passes
-    // they snap to full opacity. Gives the user a story-at-a-glance even
-    // without pressing play (all icons are visible from the start, just
-    // dimmer).
-    staticIcons.forEach(function(el) {
-      var t = parseFloat(el.dataset.t);
-      el.style.opacity = (t <= time + 0.05) ? '1' : '0.32';
-    });
-  }
-
-  function updateTrail(time) {
-    // Trail shows the live ball motion: scaled-up car silhouettes for plain
-    // touches that haven't been matched to an event, plus a player-name pill
-    // on the most recent few so you can see who just hit it. Iconed touches
-    // are already rendered as a static overlay (see #playback-static-icons),
-    // so we skip them here to avoid double-drawing.
-    while (trailEl.firstChild) trailEl.removeChild(trailEl.firstChild);
-    for (var i = 0; i < ball.length; i++) {
-      var bh = ball[i];
-      if (bh.t > time) break;
-      if (bh.icon) continue;  // covered by the static overlay
-      var age = time - bh.t;
-      if (age > 10) continue;
-      var op = Math.max(0.12, 1 - age / 10);
-      var team = bh.team === 0 ? 'team-blue' : bh.team === 1 ? 'team-orng' : 'team-neutral';
-
-      // Altitude shadow line (only for aerial touches).
-      if (bh.aerial) {
-        var alt = document.createElementNS(SVG_NS, 'line');
-        alt.setAttribute('x1', bh.sx); alt.setAttribute('x2', bh.sx);
-        alt.setAttribute('y1', bh.sy); alt.setAttribute('y2', bh.esy);
-        alt.setAttribute('class', 'pb-touch-altitude ' + team);
-        alt.setAttribute('opacity', op * 0.6);
-        trailEl.appendChild(alt);
-      }
-
-      var g = document.createElementNS(SVG_NS, 'g');
-      g.setAttribute('class', 'pb-touch ' + team
-                  + (bh.aerial ? ' pb-touch-aerial' : ''));
-      g.setAttribute('transform', 'translate(' + bh.sx + ',' + bh.esy + ')');
-      g.setAttribute('opacity', op);
-
-      var car = document.createElementNS(SVG_NS, 'use');
-      car.setAttributeNS('http://www.w3.org/1999/xlink', 'href', '#rl-car');
-      car.setAttribute('href', '#rl-car');
-      car.setAttribute('width', '20');
-      car.setAttribute('height', '12');
-      car.setAttribute('x', '-10');
-      car.setAttribute('y', '-6');
-      g.appendChild(car);
-
-      // Player-name pill on the most recent touches.
-      if (age < 3.0 && bh.player) {
-        var name = bh.player;
-        var padX = 5, h = 15;
-        var w = Math.max(28, name.length * 6.6 + padX * 2);
-        var bg = document.createElementNS(SVG_NS, 'rect');
-        bg.setAttribute('class', 'pb-touch-name-bg ' + team);
-        bg.setAttribute('x', (-w / 2).toFixed(1));
-        bg.setAttribute('y', '18');
-        bg.setAttribute('width', w);
-        bg.setAttribute('height', h);
-        g.appendChild(bg);
-        var lbl = document.createElementNS(SVG_NS, 'text');
-        lbl.setAttribute('class', 'pb-touch-name ' + team);
-        lbl.setAttribute('y', '29');
-        lbl.setAttribute('x', '0');
-        lbl.setAttribute('text-anchor', 'middle');
-        lbl.textContent = name;
-        g.appendChild(lbl);
-      }
-      trailEl.appendChild(g);
-    }
-  }
-
-  function updateChains(time) {
-    chainEls.forEach(function(g) {
-      var gt = parseFloat(g.dataset.chainT);
-      g.style.opacity = (time >= gt - 0.05) ? '1' : '0';
-    });
-  }
-
-  function render(time) {
-    var seg = ballSegmentAt(time);
-    if (seg) {
-      var k = seg.k;
-      var bx = seg.a.sx + (seg.b.sx - seg.a.sx) * k;
-      // Elevated Y (esy) gives the 3D-ish lift for aerial states.
-      var by = seg.a.esy + (seg.b.esy - seg.a.esy) * k;
-      var ground = seg.a.sy + (seg.b.sy - seg.a.sy) * k;
-      var lift = seg.a.lift + (seg.b.lift - seg.a.lift) * k;
-      // Add a parabolic arc between hits so the ball appears to lift and fall
-      // rather than tracking a flat line. Arc height scales with segment
-      // duration so quick exchanges stay flatter and long travels arc more.
-      var segDur = seg.b.t - seg.a.t;
-      if (segDur > 0.15) {
-        var arcLift = Math.min(35, segDur * 9); // px above linear path
-        var arc = Math.sin(k * Math.PI) * arcLift;
-        by -= arc;
-        lift += arc;
-      }
-      ballGroup.setAttribute('transform', 'translate(' + bx.toFixed(1) + ',' + by.toFixed(1) + ')');
-      // Altitude shadow line (only when the ball is in the air).
-      if (lift > 6 && altLine) {
-        altLine.setAttribute('x1', bx.toFixed(1));
-        altLine.setAttribute('x2', bx.toFixed(1));
-        altLine.setAttribute('y1', ground.toFixed(1));
-        altLine.setAttribute('y2', by.toFixed(1));
-        altLine.style.display = '';
-      } else if (altLine) {
-        altLine.style.display = 'none';
-      }
-      // Current player label: floats above the ball, fades out after 2.5s.
-      if (labelGroup && labelText && labelBg) {
-        var since = time - seg.a.t;
-        if (since < 2.5 && seg.a.player) {
-          var name = seg.a.player;
-          labelText.textContent = name;
-          var pad = 6;
-          var nameLen = name.length;
-          var labelW = Math.max(40, nameLen * 7.2 + pad * 2);
-          var labelX = bx - labelW / 2;
-          var labelY = by - 24;
-          labelBg.setAttribute('x', labelX);
-          labelBg.setAttribute('y', labelY);
-          labelBg.setAttribute('width', labelW);
-          labelBg.setAttribute('height', 18);
-          labelText.setAttribute('x', bx);
-          labelText.setAttribute('y', labelY + 12);
-          labelGroup.setAttribute('class', 'pb-current-label ' +
-            (seg.a.team === 0 ? 'team-blue' : seg.a.team === 1 ? 'team-orng' : ''));
-          labelGroup.style.opacity = Math.max(0, 1 - since / 2.5);
-          labelGroup.style.display = '';
-        } else {
-          labelGroup.style.display = 'none';
-        }
-      }
-    }
-
-    elapsedEl.textContent = fmtTime(time);
-    clockEl.textContent = fmtClock(gameClockAt(time));
-
-    var sc = scoreAt(time);
-    scoreEl.textContent = sc[0] + ' - ' + sc[1];
-
-    updateTrail(time);
-    updateChains(time);
-
-    var idx = eventIdxAt(time);
-    if (idx > lastEventIdx) {
-      for (var i = lastEventIdx + 1; i <= idx; i++) spawnPulse(events[i]);
-    }
-    lastEventIdx = idx;
-
-    eventEls.forEach(function(el) {
-      var i = parseInt(el.dataset.idx, 10);
-      el.classList.toggle('pb-current', i === idx);
-      el.classList.toggle('pb-past', i < idx);
-    });
-    var cur = document.querySelector('.pb-event.pb-current');
-    if (cur && cur.scrollIntoView) {
-      cur.scrollIntoView({ block: 'nearest' });
-    }
-
-    scrubEl.value = String(Math.round((time / duration) * 1000));
-  }
-
-  // Mode toggle (playback / goals / heatmap). The static modes leave the
-  // controls visible but styled inert.
-  modeBtns.forEach(function(btn) {
-    btn.addEventListener('click', function() {
-      var mode = btn.dataset.pbMode;
-      grid.setAttribute('data-mode', mode);
-      modeBtns.forEach(function(b) {
-        b.classList.toggle('active', b === btn);
-      });
-      if (mode !== 'playback' && playing) pause();
-    });
-  });
-
-  function tick(ts) {
-    if (!playing) return;
-    if (lastRaf) {
-      t += (ts - lastRaf) / 1000 * speed;
-      if (t >= duration) { t = duration; playing = false; playBtn.innerHTML = '&#9654;'; }
-      render(t);
-    }
-    lastRaf = ts;
-    if (playing) requestAnimationFrame(tick);
-  }
-
-  function play() {
-    if (t >= duration - 0.05) { t = 0; lastEventIdx = -1; }
-    playing = true;
-    playBtn.innerHTML = '&#10074;&#10074;';
-    lastRaf = 0;
-    requestAnimationFrame(tick);
-  }
-  function pause() { playing = false; playBtn.innerHTML = '&#9654;'; }
-  function seek(newT) {
-    t = Math.max(0, Math.min(duration, newT));
-    lastEventIdx = eventIdxAt(t) - 1; // so a re-pulse fires on play-through
-    render(t);
-  }
-
-  playBtn.addEventListener('click', function() { playing ? pause() : play(); });
-  scrubEl.addEventListener('input', function() {
-    var target = (parseFloat(scrubEl.value) / 1000) * duration;
-    seek(target);
-  });
-  speedBtns.forEach(function(btn) {
-    btn.addEventListener('click', function() {
-      speed = parseFloat(btn.dataset.playbackSpeed);
-      speedBtns.forEach(function(b) {
-        b.classList.toggle('active', b === btn);
-      });
-    });
-  });
-  eventEls.forEach(function(el) {
-    el.addEventListener('click', function() {
-      seek(parseFloat(el.dataset.t));
-    });
-  });
-
-  render(0);
 })();
 """
 
