@@ -261,7 +261,11 @@ def make_app(broadcaster: Broadcaster, *, store=None,
     @app.get("/")
     async def root_redirect():
         from fastapi.responses import RedirectResponse
-        return RedirectResponse(url="/overlay-picker" if friend_mode else "/dashboard")
+        if friend_mode:
+            return RedirectResponse(url="/overlay-picker")
+        # Central host: a neutral landing splash with quick-jump player chips,
+        # not a redirect straight into the owner's profile.
+        return HTMLResponse(_splash_html(store, self_primary_id))
 
     @app.get("/overlay.html")
     async def overlay_legacy() -> FileResponse:
@@ -9588,6 +9592,97 @@ body.live-mode-boost .boost-hud-percent {
 
 </style>
 """
+
+
+def _featured_players(store, *, limit: int = 8) -> list[dict]:
+    """Most-active real players, for the splash quick-jump chips. Auto-derived
+    from match counts so any deployment surfaces its own crew; override with the
+    BALLSHARK_FEATURED_PIDS env var (comma-separated primary_ids) for a curated
+    list. No account ids are baked into the code."""
+    if store is None:
+        return []
+    import os
+    override = [p.strip() for p in os.environ.get("BALLSHARK_FEATURED_PIDS", "").split(",") if p.strip()]
+    try:
+        with store._conn() as con:
+            rows = con.execute("""
+                SELECT mps.primary_id AS pid, MAX(mps.name) AS name,
+                       COUNT(DISTINCT mps.match_id) AS n, MIN(mps.platform) AS platform
+                FROM match_player_stats mps
+                WHERE COALESCE(mps.is_bot, 0) = 0
+                  AND mps.primary_id NOT LIKE 'Unknown%'
+                GROUP BY mps.primary_id
+                ORDER BY n DESC
+            """).fetchall()
+    except Exception:
+        return []
+    by_pid = {r["pid"]: dict(r) for r in rows}
+    if override:
+        return [by_pid[p] for p in override if p in by_pid]
+    # Prefer players with real activity so the featured list reads as a crew, not
+    # a list of one-off opponents; fall back to the top-N on a fresh deployment.
+    meaningful = [dict(r) for r in rows if (r["n"] or 0) >= 3]
+    return (meaningful or [dict(r) for r in rows])[:limit]
+
+
+_SPLASH_STYLE = """<style>
+.splash { max-width: 860px; margin: 0 auto; padding: 28px 20px 64px; }
+.splash-hero { text-align: center; padding: 20px 0 30px; }
+.splash-logo { width: 76px; height: 76px; }
+.splash-hero h1 { font-size: 40px; margin: 12px 0 6px; letter-spacing: -0.02em; }
+.splash-tagline { color: var(--muted, #9aa3b2); max-width: 560px; margin: 0 auto 22px; font-size: 15px; line-height: 1.5; }
+.splash-cta { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+.splash-cta a { padding: 9px 17px; border-radius: 10px; font-weight: 600; text-decoration: none; font-size: 14px; }
+.splash-cta .btn-primary { background: var(--accent, #ff7a18); color: #0a0d14; }
+.splash-cta .btn-ghost { border: 1px solid var(--accent-line, rgba(255,122,24,.32)); color: var(--text, #e8edf6); }
+.splash-friends { margin-top: 30px; }
+.splash-friends h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .09em; color: var(--muted, #9aa3b2); margin: 0 0 12px; }
+.splash-chips { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
+.splash-chip { display: flex; flex-direction: column; gap: 3px; padding: 12px 15px; border-radius: 12px; background: var(--card, #131826); border: 1px solid rgba(255,255,255,.06); text-decoration: none; color: var(--text, #e8edf6); transition: border-color .15s, transform .15s; }
+.splash-chip:hover { border-color: var(--accent, #ff7a18); transform: translateY(-1px); }
+.splash-chip.self { border-color: var(--accent-line, rgba(255,122,24,.45)); }
+.splash-chip-name { font-weight: 700; }
+.splash-chip-meta { font-size: 12px; color: var(--muted, #9aa3b2); }
+</style>"""
+
+
+def _splash_html(store, self_primary_id: str | None = None) -> str:
+    """Neutral chumstats landing page: brand, one-line pitch, get-started CTA,
+    and quick-jump chips for the most-active players (the owner is just one of
+    them). Every interpolated name is escaped (public, multi-user page)."""
+    chips = []
+    for p in _featured_players(store):
+        name = p.get("name") or "Player"
+        is_self = bool(self_primary_id and p.get("pid") == self_primary_id)
+        meta = f"{p.get('n', 0)} matches" + (" · you" if is_self else "")
+        chips.append(
+            f'<a class="splash-chip{" self" if is_self else ""}" '
+            f'href="/player/{quote(name, safe="")}">'
+            f'<span class="splash-chip-name">{html.escape(name)}</span>'
+            f'<span class="splash-chip-meta">{html.escape(meta)}</span></a>'
+        )
+    chips_html = ("".join(chips)
+                  or '<p class="dim">No players yet &mdash; upload a match to get started.</p>')
+    body = f"""
+      {_SPLASH_STYLE}
+      <section class="splash">
+        <div class="splash-hero">
+          <img class="splash-logo" src="/static/brand/chum-logo.png" alt="Ballshark" />
+          <h1>Ballshark</h1>
+          <p class="splash-tagline">Rocket League match stats for you and your crew &mdash;
+            goals, boost, positioning, and the story of every game, from everyone who plays.</p>
+          <div class="splash-cta">
+            <a class="btn-primary" href="/players">Browse all players</a>
+            <a class="btn-ghost" href="/about">How it works</a>
+          </div>
+        </div>
+        <div class="splash-friends">
+          <h2>Jump to a player</h2>
+          <div class="splash-chips">{chips_html}</div>
+        </div>
+      </section>
+    """
+    return _page_wrap("Home", body, active="", with_sidebar=False)
 
 
 def _overlay_picker_html(host: str, friend_mode: bool = False) -> str:
