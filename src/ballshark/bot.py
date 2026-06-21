@@ -217,7 +217,8 @@ def _last_n_stats(store, primary_id: str | None, n: int = 10) -> dict | None:
     try:
         with store._conn() as con:
             rows = con.execute("""
-                SELECT mps.team_num, m.winner_team_num,
+                SELECT m.id AS match_id,
+                       mps.team_num, m.winner_team_num,
                        mps.goals, mps.assists, mps.saves, mps.shots, mps.demos
                 FROM match_player_stats mps
                 JOIN matches m ON m.id = mps.match_id
@@ -255,6 +256,11 @@ def _last_n_stats(store, primary_id: str | None, n: int = 10) -> dict | None:
         "demos":   sum(r["demos"]   for r in rows),
         # Oldest -> newest so the dots read left-to-right like a timeline.
         "form": "".join("🟢" if won(r) else "🔴" for r in reversed(rows)),
+        # Per-game (won, match_id) in the same oldest->newest order, so the embed
+        # can turn each dot into a link to that game's match page.
+        "form_games": [
+            {"won": won(r), "match_id": r["match_id"]} for r in reversed(rows)
+        ],
     }
 
 
@@ -378,11 +384,14 @@ def build_match_embed(
                                   me, mvp_ids)
     description = "```ansi\n" + "\n".join(sb_lines) + "\n```"
 
-    # If we have a public URL configured, make the title a clickable link to
-    # the match-detail page.
+    # If we have a public URL configured, make the title a clickable link to the
+    # match-detail page, and surface the same link as a visible line at the top
+    # of the description (an embed title-link alone is easy to miss).
     embed_url = None
     if public_url and s.match_id:
         embed_url = f"{public_url.rstrip('/')}/match/{s.match_id}"
+        host = public_url.split("://", 1)[-1].rstrip("/")
+        description = f"🔗 [View full match → {host}]({embed_url})\n" + description
 
     embed = discord.Embed(
         title=f"{title_icon} {title_text}".strip(),
@@ -433,10 +442,20 @@ def build_match_embed(
 
     if recent:
         field_name = f"Last {recent['count']}" if recent["count"] < 10 else "Last 10"
+        # Turn each form dot into a link to that game's match page when we have a
+        # public URL; _form_box joins the tokens with spaces either way.
+        form = recent["form"]
+        if public_url and recent.get("form_games"):
+            base = public_url.rstrip("/")
+            form = [
+                f"[{'🟢' if g['won'] else '🔴'}]({base}/match/{g['match_id']})"
+                if g.get("match_id") else ("🟢" if g["won"] else "🔴")
+                for g in recent["form_games"]
+            ]
         value = _form_box(
             recent["wins"], recent["losses"], recent["win_rate"],
             recent["streak_label"], recent["goals"], recent["assists"],
-            recent["saves"], recent["shots"], recent["demos"], recent["form"],
+            recent["saves"], recent["shots"], recent["demos"], form,
         )
     else:
         field_name = "Session"
