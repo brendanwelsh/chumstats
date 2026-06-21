@@ -1234,7 +1234,10 @@ def _lifetime_touch_data(store, name: str | None, match_ids: set | None = None) 
         except Exception:
             continue
         players_arr = d.get("Players") or []
-        if not any((pp.get("Name") or "") == name for pp in players_arr):
+        # Credit the touch only to the actual toucher (Players[0]), matching the
+        # per-match path. The old `any(name in Players)` over-credited a teammate's
+        # hit to this player.
+        if (players_arr[0].get("Name") if players_arr else "") != name:
             continue
         loc = (d.get("Ball") or {}).get("Location") or {}
         x = float(loc.get("X") or 0)
@@ -1951,7 +1954,9 @@ def _history_page_html(store, primary_id, name, *,
         # when the match was offline.
         offline_chip = ('' if r["is_online"]
                         else '<span class="chip">Offline</span>')
-        ts = r["team_size"] or 0
+        # Cap at 4: a mid-match sub/extra in the feed can push MAX(roster) past
+        # the real playlist size, producing an impossible "5v5"/"6v6".
+        ts = min(r["team_size"] or 0, 4)
         size_chip = (f'<span class="chip mode-chip">{ts}v{ts}</span>' if ts else '')
         mvp_html = _mvp_cell_html(mvps.get(r["id"]), viewer_is_mvp=bool(r["is_mvp"]))
         t0_winner = "winner" if r["winner_team_num"] == 0 else ""
