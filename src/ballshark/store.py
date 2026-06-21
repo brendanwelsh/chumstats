@@ -168,7 +168,7 @@ class Store:
             c.execute("DELETE FROM match_player_stats WHERE match_id = ?", (s.match_id,))
             c.executemany(
                 """
-                INSERT INTO match_player_stats
+                INSERT OR IGNORE INTO match_player_stats
                 (match_id, primary_id, name, team_num, goals, shots, assists, saves,
                  demos, touches, score, is_bot, is_mvp, platform,
                  ticks_total, ticks_on_wall, ticks_on_ground, ticks_in_air,
@@ -363,7 +363,7 @@ class Store:
     def _insert_player_row(c, match_id: str, r: dict, is_mvp_override: bool) -> None:
         c.execute(
             """
-            INSERT INTO match_player_stats
+            INSERT OR IGNORE INTO match_player_stats
             (match_id, primary_id, name, team_num, goals, shots, assists, saves,
              demos, touches, score, is_bot, is_mvp, platform,
              ticks_total, ticks_on_wall, ticks_on_ground, ticks_in_air,
