@@ -100,6 +100,17 @@ class MatchSummaryUpload(BaseModel):
     # First-writer-wins per match — server skips if any raw_events exist.
     raw_events: list[dict] = Field(default_factory=list)
 
+
+class RegisterRequest(BaseModel):
+    """Self-registration with the shared friend-group join password. The friend's
+    own detected RL identity is registered and the server issues them a personal
+    API key bound to that primary_id (one password to share; per-friend keys
+    under the hood)."""
+    join_password: str
+    primary_id: str
+    display_name: str = ""
+
+
 log = logging.getLogger("ballshark.server")
 
 
@@ -574,6 +585,36 @@ def make_app(broadcaster: Broadcaster, *, store=None,
         return {
             "ok": True,
             "user_id": user["user_id"],
+            "display_name": user["display_name"],
+            "primary_id": user["primary_id"],
+        }
+
+    @_gated_post("/api/v1/register")
+    async def api_register(payload: RegisterRequest) -> dict:
+        """Self-registration with the shared friend-group join password. A friend
+        installs the app, enters ONE shared password, and the server issues them a
+        personal API key bound to their detected RL account (created on first
+        join; returning friends get their existing key back). Enable by setting
+        BALLSHARK_JOIN_PASSWORD on the central host."""
+        import os as _os
+        if store is None:
+            raise HTTPException(status_code=503, detail="server has no store configured")
+        join_pw = _os.environ.get("BALLSHARK_JOIN_PASSWORD", "").strip()
+        if not join_pw:
+            raise HTTPException(status_code=403,
+                                detail="self-registration is disabled (no join password set on the server)")
+        if payload.join_password.strip() != join_pw:
+            raise HTTPException(status_code=403, detail="wrong join password")
+        if not payload.primary_id or payload.primary_id.startswith("Unknown"):
+            raise HTTPException(status_code=400,
+                                detail="couldn't detect your Rocket League account yet -- play a match first, then retry")
+        user = store.get_user_by_primary_id(payload.primary_id)
+        if not user:
+            user = store.create_user(payload.primary_id,
+                                     payload.display_name or payload.primary_id)
+        return {
+            "ok": True,
+            "api_key": user["api_key"],
             "display_name": user["display_name"],
             "primary_id": user["primary_id"],
         }
