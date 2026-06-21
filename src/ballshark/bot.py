@@ -139,7 +139,7 @@ def _match_compare_block(s, me) -> str | None:
     us_poss = round(us_touch / total_touch * 100) if total_touch else 0
 
     rows = [
-        ("Possession", f"{us_poss}%", f"{100 - us_poss if total_touch else 0}%"),
+        ("Touch share", f"{us_poss}%", f"{100 - us_poss if total_touch else 0}%"),
         ("Shots", tot(up, "shots"), tot(tp, "shots")),
         ("Saves", tot(up, "saves"), tot(tp, "saves")),
         ("Demos", tot(up, "demos"), tot(tp, "demos")),

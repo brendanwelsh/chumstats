@@ -1956,11 +1956,11 @@ def _history_page_html(store, primary_id, name, *,
             dom_side = 0 if t0_pct > t1_pct else 1 if t1_pct > t0_pct else None
             diff = abs(t0_pct - t1_pct)
             if dom_side is None or diff < 5:
-                tag_html = '<span class="poss-tag even" title="Possession was roughly even">EVEN</span>'
+                tag_html = '<span class="poss-tag even" title="Touch share was roughly even">EVEN</span>'
             elif dom_side == r["winner_team_num"]:
-                tag_html = '<span class="poss-tag aligned" title="Possession-dominant side won">ON FORM</span>'
+                tag_html = '<span class="poss-tag aligned" title="Touch-share leader won">ON FORM</span>'
             else:
-                tag_html = '<span class="poss-tag upset" title="Possession-dominant side LOST">AGAINST RUN</span>'
+                tag_html = '<span class="poss-tag upset" title="Touch-share leader LOST">AGAINST RUN</span>'
             poss_html = (
                 '<div class="poss-row">'
                 f'<span class="poss-pct blue tnum">{t0_pct:.0f}%</span>'

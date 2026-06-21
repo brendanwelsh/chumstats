@@ -574,7 +574,10 @@ class SessionTotals:
     def streak_label(self) -> str:
         if self.current_streak == 0:
             return "—"
-        return f"{abs(self.current_streak)}{'W' if self.current_streak > 0 else 'L'}"
+        # Letter-first ("W3"/"L2"), matching _last_n_stats, so the bot's
+        # streak.startswith("W") win-streak coloring works on this path too
+        # (the old "3W" never matched and colored real win streaks red).
+        return f"{'W' if self.current_streak > 0 else 'L'}{abs(self.current_streak)}"
 
 
 class SessionTracker:
