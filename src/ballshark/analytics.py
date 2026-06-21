@@ -818,9 +818,14 @@ def build_comparison(store, a_primary_id: str | None = None, a_name: str | None 
         add_adv("On ground %",
             (a.get("ticks_ground") or 0) / a_ticks if a_ticks else None,
             (b.get("ticks_ground") or 0) / b_ticks if b_ticks else None, kind="pct")
+        # Absolute boost/match is sample-dependent (a mostly-opponent player has
+        # only ~10% of ticks), unlike the ratio stats above. Suppress it unless
+        # we have near-full per-match coverage (~6000 of a ~9000-tick game).
+        _cov_a = bool(am) and a_ticks / am >= 6000
+        _cov_b = bool(bm) and b_ticks / bm >= 6000
         add_adv("Boost used/match",
-            (a.get("boost_used") or 0) / am if a_ticks else None,
-            (b.get("boost_used") or 0) / bm if b_ticks else None, kind="f1")
+            (a.get("boost_used") or 0) / am if (a_ticks and _cov_a) else None,
+            (b.get("boost_used") or 0) / bm if (b_ticks and _cov_b) else None, kind="f1")
         add_adv("At 0 boost %",
             (a.get("ticks_zero") or 0) / a_ticks if a_ticks else None,
             (b.get("ticks_zero") or 0) / b_ticks if b_ticks else None, kind="pct")
