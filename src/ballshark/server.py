@@ -2546,7 +2546,7 @@ def _match_detail_html(store, match_id: str, viewer_pid: str | None, viewer_name
           <div class="team-stripe"></div>
           <div class="team-meta">
             <div class="team-tag">Blue &middot; Team 0</div>
-            <div class="team-name" title="{t0_name}">{t0_name}</div>
+            <div class="team-name" title="{html.escape(t0_name)}">{html.escape(t0_name)}</div>
             <span class="result-pill {blue_result}">{"Win" if winner_is_0 else "Loss"}</span>
           </div>
           <div class="score-display tnum {blue_loss_class}" style="margin-left:auto">{t0_score}</div>
@@ -2572,7 +2572,7 @@ def _match_detail_html(store, match_id: str, viewer_pid: str | None, viewer_name
           <div class="team-stripe"></div>
           <div class="team-meta">
             <div class="team-tag">Orange &middot; Team 1</div>
-            <div class="team-name" title="{t1_name}">{t1_name}</div>
+            <div class="team-name" title="{html.escape(t1_name)}">{html.escape(t1_name)}</div>
             <span class="result-pill {orng_result}">{"Loss" if winner_is_0 else "Win"}</span>
           </div>
           <div class="score-display tnum {orng_loss_class}" style="margin-right:auto">{t1_score}</div>
@@ -2607,7 +2607,7 @@ def _match_detail_html(store, match_id: str, viewer_pid: str | None, viewer_name
         </div>
         <div class="eyebrow team-eyebrow team-blue">
           <span class="team-swatch"></span>
-          <span class="team-name-truncate" title="{t0_name}">{t0_name}</span>
+          <span class="team-name-truncate" title="{html.escape(t0_name)}">{html.escape(t0_name)}</span>
           {_team_coverage_note(blue_players, duration)}
         </div>
         <div class="radar-grid" style="margin-bottom:18px">
@@ -2615,7 +2615,7 @@ def _match_detail_html(store, match_id: str, viewer_pid: str | None, viewer_name
         </div>
         <div class="eyebrow team-eyebrow team-orng">
           <span class="team-swatch"></span>
-          <span class="team-name-truncate" title="{t1_name}">{t1_name}</span>
+          <span class="team-name-truncate" title="{html.escape(t1_name)}">{html.escape(t1_name)}</span>
           {_team_coverage_note(orng_players, duration)}
         </div>
         <div class="radar-grid">
@@ -4099,7 +4099,7 @@ def _personal_insights_card_html(store, players, viewer_pid: str | None,
             tone = "good" if delta >= 0 else "bad"
             insights.append((
                 "goals",
-                f"Shooting {my_pct:.0f}% ({me_row['goals']}/{me_row['shots']})",
+                f"Shooting {min(my_pct, 100):.0f}% ({me_row['goals']}/{me_row['shots']})",
                 f'<span class="{tone}">{sign}{delta:.0f}%</span> vs your career {career_pct:.0f}%',
             ))
 
@@ -4310,8 +4310,8 @@ def _match_insights_html(playback: dict, t0_name: str, t1_name: str) -> str:
               </div>
             </div>
             <div class="dual-bar-foot">
-              <span class="team-blue team-name-truncate" title="{t0_name}">{t0_name}</span>
-              <span class="team-orng team-name-truncate" title="{t1_name}">{t1_name}</span>
+              <span class="team-blue team-name-truncate" title="{html.escape(t0_name)}">{html.escape(t0_name)}</span>
+              <span class="team-orng team-name-truncate" title="{html.escape(t1_name)}">{html.escape(t1_name)}</span>
             </div>
 
             <div class="insights-subtitle" style="margin-top:14px">
@@ -4326,8 +4326,8 @@ def _match_insights_html(playback: dict, t0_name: str, t1_name: str) -> str:
               </div>
             </div>
             <div class="dual-bar-foot">
-              <span class="team-blue team-name-truncate" title="{t0_name}">{t0_name} attacking</span>
-              <span class="team-orng team-name-truncate" title="{t1_name}">{t1_name} attacking</span>
+              <span class="team-blue team-name-truncate" title="{html.escape(t0_name)}">{html.escape(t0_name)} attacking</span>
+              <span class="team-orng team-name-truncate" title="{html.escape(t1_name)}">{html.escape(t1_name)} attacking</span>
             </div>
           </div>
 
