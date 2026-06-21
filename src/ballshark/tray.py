@@ -380,7 +380,7 @@ class TrayApp:
     def _build_menu(self) -> pystray.Menu:
         return pystray.Menu(
             pystray.MenuItem("Open Web UI", self._on_open_live, default=True),
-            pystray.MenuItem("Open BOOST VIEW", self._on_open_boost),
+            pystray.MenuItem("Open Boost View", self._on_open_boost),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("Pause tracking",
                              self._on_toggle_pause,

@@ -415,7 +415,7 @@ def make_app(broadcaster: Broadcaster, *, store=None,
 
     @app.get("/live")
     async def live_page():
-        return HTMLResponse(_live_page_html(self_name=self_name))
+        return HTMLResponse(_live_page_html(self_name=self_name, friend_mode=friend_mode))
 
     @_gated_get("/clan")
     async def clan_page(
@@ -455,7 +455,7 @@ def make_app(broadcaster: Broadcaster, *, store=None,
     @app.get("/overlay")
     async def overlay_picker(request: Request):
         host = request.headers.get("host", "127.0.0.1:5050")
-        return HTMLResponse(_overlay_picker_html(host))
+        return HTMLResponse(_overlay_picker_html(host, friend_mode=friend_mode))
 
     @app.get("/overlay/{mode}")
     async def overlay_mode(mode: str):
@@ -5422,12 +5422,20 @@ def _compare_heatmap_row(slots: list, touch_data: list) -> str:
     """
 
 
-def _live_page_html(*, self_name: str | None = None) -> str:
+def _live_page_html(*, self_name: str | None = None, friend_mode: bool = False) -> str:
     """Real-time match view. Subscribes to /ws and renders a match-detail
     style scoreboard + roster table that updates on every tick. When idle
     (no live socket / no active match), shows a placeholder + link to the
     most recent finished match."""
     self_attr = f'data-self-name="{self_name}"' if self_name else ""
+    # The friend's local server doesn't serve the analytical pages, so skip the
+    # idle-state links that would 404 there.
+    idle_links = "" if friend_mode else (
+        '<p class="caption dim" style="margin:0">'
+        '<a href="/history">View match history</a>'
+        ' &middot; <a href="/about">How it works</a>'
+        '</p>'
+    )
     body = f"""
       <div id="live-root" class="live-page" {self_attr}>
         <div class="live-status">
@@ -5496,10 +5504,7 @@ def _live_page_html(*, self_name: str | None = None) -> str:
                 in tick by tick. Make sure <code>PacketSendRate</code> is set
                 in <code>DefaultStatsAPI.ini</code>.
               </p>
-              <p class="caption dim" style="margin:0">
-                <a href="/history">View match history</a>
-                &middot; <a href="/about">How it works</a>
-              </p>
+              {idle_links}
             </div>
           </div>
         </div>
@@ -5513,7 +5518,7 @@ def _live_page_html(*, self_name: str | None = None) -> str:
       <script>{_BOOST_JS}</script>
       <script>{_LIVE_BOOST_TOGGLE_JS}</script>
     """
-    return _page_wrap("Live", body, active="live")
+    return _page_wrap("Live", body, active="live", friend_mode=friend_mode)
 
 
 def _boost_view_markup() -> str:
@@ -6538,7 +6543,7 @@ _SIDEBAR_FILTER_JS = """<script>
 
 
 def _page_wrap(title: str, body_html: str, *, status: int = 200, active: str = "",
-               with_sidebar: bool = True) -> str:
+               with_sidebar: bool = True, friend_mode: bool = False) -> str:
     """Common HTML chrome. Pages can pass with_sidebar=False to opt out of the
     global filter rail (used by /match/<id> which is a single-match snapshot)."""
     sidebar = _filter_sidebar(active, force_hidden=not with_sidebar)
@@ -6550,7 +6555,7 @@ def _page_wrap(title: str, body_html: str, *, status: int = 200, active: str = "
 {_STYLE_TAG}
 </head><body class="{body_cls}">
 <div class="wrapper">
-  {_nav(active)}
+  {_nav(active, friend_mode=friend_mode)}
   <div class="page-layout">
     {sidebar}
     {main_html}
@@ -6612,7 +6617,7 @@ _LOGO_SVG = '''<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-
   <circle cx="20" cy="17.4" r="0.7" fill="#fff" opacity="0.6"/>
 </svg>'''
 
-def _nav(active: str = "") -> str:
+def _nav(active: str = "", friend_mode: bool = False) -> str:
     items = [
         ("live",      "/live",          "Live"),
         ("dashboard", "/dashboard",     "Me"),
@@ -6624,14 +6629,21 @@ def _nav(active: str = "") -> str:
         ("overlay",   "/overlay",       "Overlay"),
         ("about",     "/about",         "How it works"),
     ]
-    nav_keys = [k for k, *_ in items]
+    if friend_mode:
+        # The friend's local server only serves the live view + OBS overlay
+        # picker; every analytical page 404s here (those live on the central
+        # host), so don't surface nav links to them.
+        items = [it for it in items if it[0] in ("live", "overlay")]
+    # In friend mode the brand can't point at /dashboard (it 404s); send it home
+    # to the live view instead.
+    brand_href = "/live" if friend_mode else "/dashboard"
     parts = []
     for key, href, label in items:
         klass = "navlink active" if key == active else "navlink"
         parts.append(f'<a class="{klass}" href="{href}">{label}</a>')
     return f'''
 <nav class="topnav">
-  <a class="brand" href="/dashboard">
+  <a class="brand" href="{brand_href}">
     <span class="brand-logo"><img src="/static/brand/chum-logo.png" alt="Ballshark" /></span>
     <span>
       <div class="brand-name">Ballshark</div>
@@ -9626,7 +9638,7 @@ body.live-mode-boost .boost-hud-percent {
 """
 
 
-def _overlay_picker_html(host: str) -> str:
+def _overlay_picker_html(host: str, friend_mode: bool = False) -> str:
     """Picker page with LIVE iframe previews + copy URLs for each overlay mode."""
     modes = [
         ("live",    "Live HUD",
@@ -9699,7 +9711,7 @@ def _overlay_picker_html(host: str) -> str:
         }});
       </script>
     """
-    return _page_wrap("Browser overlay", body, active="overlay")
+    return _page_wrap("Browser overlay", body, active="overlay", friend_mode=friend_mode)
 
 
 def _dashboard_html(d, store=None, primary_id: str | None = None,
