@@ -2,9 +2,9 @@
 REM First-time installer. Run once after cloning / extracting.
 REM Idempotent - safe to re-run.
 cd /d "%~dp0"
-title ballshark setup
+title chumstats setup
 
-echo === ballshark setup ===
+echo === chumstats setup ===
 echo.
 
 where python >nul 2>&1
@@ -27,7 +27,7 @@ if not exist .venv (
   )
 )
 
-echo Installing ballshark and dependencies...
+echo Installing chumstats and dependencies...
 ".venv\Scripts\python.exe" -m pip install --upgrade pip -q
 ".venv\Scripts\python.exe" -m pip install -e .[dev,server,bot] -q
 if errorlevel 1 (
@@ -38,7 +38,7 @@ if errorlevel 1 (
 
 echo.
 echo === enabling Stats API in Rocket League ===
-".venv\Scripts\python.exe" -m ballshark.cli setup
+".venv\Scripts\python.exe" -m chumstats.cli setup
 
 echo.
 if not exist .env (
@@ -48,5 +48,5 @@ if not exist .env (
 )
 
 echo.
-echo Setup done. Launch the tray (ballshark-tray.pyw), or run:  ballshark.bat run
+echo Setup done. Launch the tray (chumstats-tray.pyw), or run:  chumstats.bat run
 pause

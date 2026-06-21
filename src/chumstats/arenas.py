@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import logging
 
-log = logging.getLogger("ballshark.arenas")
+log = logging.getLogger("chumstats.arenas")
 
 # Keys MUST be lower-case (lookup lower-cases the incoming id).
 ARENA_NICE = {

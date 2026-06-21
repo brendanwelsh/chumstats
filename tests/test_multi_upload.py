@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from ballshark.store import Store
+from chumstats.store import Store
 
 CHUM = "Steam|chum|0"
 BLAZE = "Steam|blaze|0"

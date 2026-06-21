@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ballshark.config_wizard import read_ini, write_packet_rate
+from chumstats.config_wizard import read_ini, write_packet_rate
 
 
 SAMPLE_INI = """\

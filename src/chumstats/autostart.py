@@ -1,7 +1,7 @@
 """Windows 'start on login' via the per-user Run registry key.
 
 No admin rights needed — HKCU\\...\\Run is user-scoped. The tray exposes this as
-a checkbox; we point the Run entry at the frozen Ballshark.exe (or, in a dev
+a checkbox; we point the Run entry at the frozen Chumstats.exe (or, in a dev
 checkout, pythonw + the tray launcher) so the app comes up on login.
 """
 
@@ -12,7 +12,8 @@ import sys
 from pathlib import Path
 
 _RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
-_VALUE_NAME = "Ballshark"
+_VALUE_NAME = "Chumstats"
+_LEGACY_VALUE_NAMES = ("Ballshark",)  # pre-rename Run entries to clean up
 
 
 def is_supported() -> bool:
@@ -22,12 +23,12 @@ def is_supported() -> bool:
 def _command() -> str:
     """The command Windows runs at login.
 
-    Frozen (PyInstaller bundle): sys.executable *is* Ballshark.exe.
-    Dev checkout: launch ballshark-tray.pyw with pythonw.exe (no console window).
+    Frozen (PyInstaller bundle): sys.executable *is* Chumstats.exe.
+    Dev checkout: launch chumstats-tray.pyw with pythonw.exe (no console window).
     """
     if getattr(sys, "frozen", False):
         return f'"{sys.executable}"'
-    launcher = Path(__file__).resolve().parents[2] / "ballshark-tray.pyw"
+    launcher = Path(__file__).resolve().parents[2] / "chumstats-tray.pyw"
     pyw = Path(sys.executable).with_name("pythonw.exe")
     exe = pyw if pyw.exists() else Path(sys.executable)
     return f'"{exe}" "{launcher}"'
@@ -45,10 +46,23 @@ def is_enabled() -> bool:
         return False
 
 
+def _delete_value(name: str) -> None:
+    import winreg  # type: ignore
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _RUN_KEY, 0,
+                            winreg.KEY_SET_VALUE) as k:
+            winreg.DeleteValue(k, name)
+    except (FileNotFoundError, OSError):
+        pass
+
+
 def enable() -> None:
     if not is_supported():
         return
     import winreg  # type: ignore
+    # Drop any pre-rename Run entry so we don't double-launch from two names.
+    for legacy in _LEGACY_VALUE_NAMES:
+        _delete_value(legacy)
     with winreg.CreateKey(winreg.HKEY_CURRENT_USER, _RUN_KEY) as k:
         winreg.SetValueEx(k, _VALUE_NAME, 0, winreg.REG_SZ, _command())
 
@@ -56,15 +70,9 @@ def enable() -> None:
 def disable() -> None:
     if not is_supported():
         return
-    import winreg  # type: ignore
-    try:
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _RUN_KEY, 0,
-                            winreg.KEY_SET_VALUE) as k:
-            winreg.DeleteValue(k, _VALUE_NAME)
-    except FileNotFoundError:
-        pass
-    except OSError:
-        pass
+    _delete_value(_VALUE_NAME)
+    for legacy in _LEGACY_VALUE_NAMES:
+        _delete_value(legacy)
 
 
 def set_enabled(on: bool) -> None:

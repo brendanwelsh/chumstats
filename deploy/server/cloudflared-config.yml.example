@@ -1,20 +1,20 @@
-# Cloudflare Tunnel config for the ballshark central server.
+# Cloudflare Tunnel config for the chumstats central server.
 # Path on macOS: ~/.cloudflared/config.yml
 #
 # Setup (one-time):
 #   brew install cloudflared
 #   cloudflared tunnel login                              # opens browser
-#   cloudflared tunnel create ballshark                     # writes ~/.cloudflared/<uuid>.json
+#   cloudflared tunnel create chumstats                     # writes ~/.cloudflared/<uuid>.json
 #   # add a CNAME for stats.your-domain.com -> <uuid>.cfargotunnel.com
-#   cloudflared tunnel route dns ballshark stats.your-domain.com
+#   cloudflared tunnel route dns chumstats stats.your-domain.com
 #   cp deploy/server/cloudflared-config.yml.example ~/.cloudflared/config.yml
 #   # edit the file, set `tunnel:` to the UUID from `cloudflared tunnel list`
 #   cloudflared service install                           # autostart at boot
 #
 # Restrict /admin* and write endpoints to Tailscale (or Cloudflare Access).
-# The ballshark server itself does NOT auth `/dashboard`, `/player/<name>`, etc.
+# The chumstats server itself does NOT auth `/dashboard`, `/player/<name>`, etc.
 # — anyone reaching the hostname can read stats. Match-summary upload is
-# protected by X-Ballshark-Key; provisioning is CLI-only (no HTTP /admin route).
+# protected by X-Chumstats-Key; provisioning is CLI-only (no HTTP /admin route).
 
 tunnel: REPLACE_WITH_TUNNEL_UUID
 credentials-file: /Users/REPLACE_WITH_USERNAME/.cloudflared/REPLACE_WITH_TUNNEL_UUID.json

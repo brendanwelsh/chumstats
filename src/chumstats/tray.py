@@ -1,12 +1,12 @@
-"""Windows system tray app for the Ballshark server.
+"""Windows system tray app for the Chumstats server.
 
-Spawns the ballshark server as a subprocess and surfaces a tray icon whose color
+Spawns the chumstats server as a subprocess and surfaces a tray icon whose color
 reflects status: red (server down / problem), yellow (waiting for Rocket League
 to open), green (connected + hooked to Rocket League). Hover the icon for the
 exact state.
 
 On first launch the setup wizard appears to collect server URL + API key.
-After that config lives at %LOCALAPPDATA%\\ballshark\\config.json and friends
+After that config lives at %LOCALAPPDATA%\\chumstats\\config.json and friends
 never have to touch a .env file.
 
 Single-click opens the live overlay. Right-click: Open Web UI / Settings /
@@ -35,7 +35,7 @@ from . import autostart, tray_config
 
 SERVER_HOST = "127.0.0.1"
 SERVER_PORT = 5050
-PREFERRED_HOST = "ballshark.local"
+PREFERRED_HOST = "chumstats.local"
 HEALTH_URL = f"http://{SERVER_HOST}:{SERVER_PORT}/healthz"
 WS_URL = f"ws://{SERVER_HOST}:{SERVER_PORT}/ws"
 LIVE_PATH = "/live"
@@ -56,7 +56,7 @@ _COLORS = {
     "yellow": (235, 180, 40),   # up, but waiting for Rocket League to open
     "green":  (45, 185, 85),    # connected + hooked to Rocket League
 }
-_START_TITLE = "Ballshark - starting..."
+_START_TITLE = "Chumstats - starting..."
 
 
 def _log_dir() -> Path:
@@ -79,7 +79,7 @@ def _setup_logger(name: str, filename: str, with_ts: bool) -> logging.Logger:
     return logger
 
 
-log = _setup_logger("ballshark.tray", "tray.log", with_ts=True)
+log = _setup_logger("chumstats.tray", "tray.log", with_ts=True)
 
 
 def _make_icon(color_name: str) -> Image.Image:
@@ -119,11 +119,11 @@ def open_boost() -> None:
 
 
 class ServerProcess:
-    """Owns the ``python -m ballshark.cli ... run`` subprocess and tees output."""
+    """Owns the ``python -m chumstats.cli ... run`` subprocess and tees output."""
 
     def __init__(self) -> None:
         self.proc: subprocess.Popen | None = None
-        self._log_path = _log_dir() / "ballshark-server.log"
+        self._log_path = _log_dir() / "chumstats-server.log"
         self._stop = threading.Event()
         self._tee_thread: threading.Thread | None = None
 
@@ -136,26 +136,26 @@ class ServerProcess:
         db = str(tray_config.db_path())
         me = cfg.rl_player_name or "(unknown)"
         if getattr(sys, "frozen", False):
-            # PyInstaller bundle: sys.executable IS Ballshark.exe.
+            # PyInstaller bundle: sys.executable IS Chumstats.exe.
             # Re-exec ourselves with the --cli sentinel handled in
-            # ballshark-tray.pyw to route into the CLI entry point.
+            # chumstats-tray.pyw to route into the CLI entry point.
             return [sys.executable, "--cli", "--me", me, "--db", db, "run"]
-        return [sys.executable, "-m", "ballshark.cli", "--me", me, "--db", db, "run"]
+        return [sys.executable, "-m", "chumstats.cli", "--me", me, "--db", db, "run"]
 
     def _env(self) -> dict[str, str]:
         """Subprocess env: take parent env, overlay the tray's persisted config
-        so the cli picks up BALLSHARK_REMOTE_URL / BALLSHARK_API_KEY / primary_id
+        so the cli picks up CHUMSTATS_REMOTE_URL / CHUMSTATS_API_KEY / primary_id
         without the user ever editing a .env."""
         cfg = tray_config.load()
         env = dict(os.environ)
-        if cfg.remote_url:           env["BALLSHARK_REMOTE_URL"] = cfg.remote_url
-        if cfg.api_key:              env["BALLSHARK_API_KEY"]    = cfg.api_key
+        if cfg.remote_url:           env["CHUMSTATS_REMOTE_URL"] = cfg.remote_url
+        if cfg.api_key:              env["CHUMSTATS_API_KEY"]    = cfg.api_key
         if cfg.rl_player_primary_id: env["RL_PLAYER_PRIMARY_ID"] = cfg.rl_player_primary_id
         if cfg.rl_player_name:       env["RL_PLAYER_NAME"]       = cfg.rl_player_name
-        env["BALLSHARK_DB"] = str(tray_config.db_path())
+        env["CHUMSTATS_DB"] = str(tray_config.db_path())
         # Friend mode: lock the local server to LIVE + OBS overlay only.
         # All analytical pages live on the central host.
-        env["BALLSHARK_FRIEND_MODE"] = "1"
+        env["CHUMSTATS_FRIEND_MODE"] = "1"
         return env
 
     def start(self) -> None:
@@ -163,7 +163,7 @@ class ServerProcess:
             log.info("server already running pid=%s", self.proc.pid)
             return
         argv = self._argv()
-        log.info("starting ballshark server: %s", " ".join(argv))
+        log.info("starting chumstats server: %s", " ".join(argv))
         creationflags = 0
         if os.name == "nt":
             creationflags = (getattr(subprocess, "CREATE_NO_WINDOW", 0)
@@ -175,12 +175,12 @@ class ServerProcess:
         )
         self._stop.clear()
         self._tee_thread = threading.Thread(
-            target=self._tee, name="ballshark-tee", daemon=True
+            target=self._tee, name="chumstats-tee", daemon=True
         )
         self._tee_thread.start()
 
     def _tee(self) -> None:
-        srv_log = _setup_logger("ballshark.tray.server", "ballshark-server.log",
+        srv_log = _setup_logger("chumstats.tray.server", "chumstats-server.log",
                                 with_ts=False)
         try:
             assert self.proc and self.proc.stdout
@@ -195,7 +195,7 @@ class ServerProcess:
         self._stop.set()
         if not self.proc or self.proc.poll() is not None:
             return
-        log.info("stopping ballshark server pid=%s", self.proc.pid)
+        log.info("stopping chumstats server pid=%s", self.proc.pid)
         try:
             self.proc.terminate()
             self.proc.wait(timeout=timeout)
@@ -222,7 +222,7 @@ class StateMonitor(threading.Thread):
     """Background thread; maintains grey/orange/green state via /healthz + /ws."""
 
     def __init__(self, server: ServerProcess, on_change) -> None:
-        super().__init__(name="ballshark-monitor", daemon=True)
+        super().__init__(name="chumstats-monitor", daemon=True)
         self._server = server
         self._on_change = on_change
         self._stop = threading.Event()
@@ -237,7 +237,7 @@ class StateMonitor(threading.Thread):
         self._stop.set()
 
     def run(self) -> None:
-        threading.Thread(target=self._ws_loop, name="ballshark-ws", daemon=True).start()
+        threading.Thread(target=self._ws_loop, name="chumstats-ws", daemon=True).start()
         while not self._stop.is_set():
             self._server_up = self._probe_health()
             self._update_state()
@@ -342,19 +342,19 @@ class StateMonitor(threading.Thread):
         now = time.time()
         if self._paused:
             color = "red"
-            title = "Ballshark - paused (transmission off)"
+            title = "Chumstats - paused (transmission off)"
         elif not self._server_up:
             color = "red"
-            title = "Ballshark - not running (starting up, or crashed - check logs)"
+            title = "Chumstats - not running (starting up, or crashed - check logs)"
         elif not self._rl_connected:
             color = "yellow"
-            title = "Ballshark - waiting for Rocket League to open"
+            title = "Chumstats - waiting for Rocket League to open"
         elif (now - self._last_tick) <= TICK_FRESH_SECONDS:
             color = "green"
-            title = "Ballshark - connected - match in progress"
+            title = "Chumstats - connected - match in progress"
         else:
             color = "green"
-            title = "Ballshark - connected to Rocket League (waiting for a match)"
+            title = "Chumstats - connected to Rocket League (waiting for a match)"
         if color != self._state or title != self._title:
             self._state = color
             self._title = title
@@ -370,7 +370,7 @@ class TrayApp:
         self.server = ServerProcess()
         self._paused = False
         self.icon = pystray.Icon(
-            "ballshark",
+            "chumstats",
             icon=_make_icon("red"),
             title=_START_TITLE,
             menu=self._build_menu(),
@@ -448,7 +448,7 @@ class TrayApp:
         except Exception:
             log.exception("set_paused failed")
         if self._paused:
-            self._on_state_change("red", "Ballshark - paused (transmission off)")
+            self._on_state_change("red", "Chumstats - paused (transmission off)")
             threading.Thread(target=self.server.stop, daemon=True).start()
         else:
             threading.Thread(target=self.server.start, daemon=True).start()
@@ -486,9 +486,9 @@ def _acquire_single_instance() -> bool:
 
     The tray can be launched from more than one place — the HKCU ``Run``
     autostart entry (which points at the venv's pythonw) and a manual
-    double-click of ``ballshark-tray.pyw`` (which the OS opens with the *system*
+    double-click of ``chumstats-tray.pyw`` (which the OS opens with the *system*
     Python via the .pyw file association). Without a guard you end up with two
-    trays, two ``ballshark run`` subprocesses, and two servers fighting over
+    trays, two ``chumstats run`` subprocesses, and two servers fighting over
     port 5050.
 
     We grab an exclusive bind on a fixed loopback port. Without SO_REUSEADDR a
@@ -512,7 +512,7 @@ def _acquire_single_instance() -> bool:
 
 def main() -> int:
     if not _acquire_single_instance():
-        log.info("another Ballshark tray instance is already running; exiting")
+        log.info("another Chumstats tray instance is already running; exiting")
         return 0
     try:
         # First-run wizard: blocks the main thread until the user closes it.

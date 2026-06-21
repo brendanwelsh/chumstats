@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ballshark.identity import resolve_self_in_match
+from chumstats.identity import resolve_self_in_match
 
 STEAM = "Steam|76561197985273611|0"
 

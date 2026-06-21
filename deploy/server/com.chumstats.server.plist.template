@@ -3,11 +3,11 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.ballshark.server</string>
+    <string>com.chumstats.server</string>
 
     <key>ProgramArguments</key>
     <array>
-        <string>@VENV_DIR@/bin/ballshark</string>
+        <string>@VENV_DIR@/bin/chumstats</string>
         <string>--db</string>
         <string>@DATA_DIR@/central.db</string>
         <string>serve</string>

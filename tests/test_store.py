@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from ballshark.replay import iter_for_aggregator
-from ballshark.session import run_aggregation
-from ballshark.store import Store
+from chumstats.replay import iter_for_aggregator
+from chumstats.session import run_aggregation
+from chumstats.store import Store
 
 
 def test_store_roundtrip(tmp_path, online_capture, exhibition_capture):

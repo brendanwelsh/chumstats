@@ -18,8 +18,8 @@ from pathlib import Path
 
 import pytest
 
-from ballshark.replay import iter_for_aggregator
-from ballshark.session import run_aggregation
+from chumstats.replay import iter_for_aggregator
+from chumstats.session import run_aggregation
 
 GOLDEN = Path(__file__).resolve().parent / "golden"
 

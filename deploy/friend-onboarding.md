@@ -1,11 +1,11 @@
-# Friend onboarding — joining the ballshark network
+# Friend onboarding — joining the chumstats network
 
 ## What the host does
 
 1. On the central server, provision them:
 
    ```bash
-   ballshark --db ~/ballshark/data/central.db admin create-user \
+   chumstats --db ~/chumstats/data/central.db admin create-user \
      --primary-id 'Steam|76561...|0' \
      --name '@TheirIngameName'
    ```
@@ -16,12 +16,12 @@
    - **Server URL** (e.g. `https://stats.your-domain.com`, or `http://<server-host>:5050` on a VPN/LAN)
    - **API key** (the 64-char string)
 
-3. Send them the **Ballshark.zip** (built via `deploy/windows/build.ps1`).
+3. Send them the **Chumstats.zip** (built via `deploy/windows/build.ps1`).
 
 ## What the friend does
 
-1. **Unzip Ballshark.zip** anywhere (Documents / Desktop).
-2. **Double-click `Ballshark.exe`**.
+1. **Unzip Chumstats.zip** anywhere (Documents / Desktop).
+2. **Double-click `Chumstats.exe`**.
 3. **Wizard pops up.** Walk through 4 short steps:
    - Welcome
    - Paste the server URL + API key, click **Test Connection** to verify
@@ -41,12 +41,12 @@ Right-click tray icon → **Settings…** to change server URL, API key, or name
 
 ## Backfill existing local matches (optional)
 
-If the friend ran an earlier dev install of ballshark locally, their previous
+If the friend ran an earlier dev install of chumstats locally, their previous
 matches live in their old DB. To push them into the central server:
 
 ```powershell
-# From wherever their old data\ballshark.db is
-.\Ballshark.exe --cli --db data\ballshark.db push-history `
+# From wherever their old data\chumstats.db is
+.\Chumstats.exe --cli --db data\chumstats.db push-history `
   --primary-id Steam|76561...|0 --dry-run
 # review count, re-run without --dry-run
 ```

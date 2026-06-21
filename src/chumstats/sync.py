@@ -1,4 +1,4 @@
-"""Client-side sync: POST each finalized MatchSummary to a central ballshark server.
+"""Client-side sync: POST each finalized MatchSummary to a central chumstats server.
 
 Hooked into the live pipeline alongside the Discord bot and overlay broadcaster.
 Failures are logged but never crash the ingest — local DB stays authoritative
@@ -19,7 +19,7 @@ from urllib.request import Request, urlopen
 
 from .session import MatchSummary, AGGREGATOR_VERSION
 
-log = logging.getLogger("ballshark.sync")
+log = logging.getLogger("chumstats.sync")
 
 RETRY_DELAYS = (1.0, 2.0, 4.0)  # seconds between attempts
 
@@ -157,7 +157,7 @@ class MatchSyncer:
                           f"others+{body_json.get('others_inserted', 0)})")
                     return
                 if status in (401, 403):
-                    log.error("sync rejected (status %s): %s — check BALLSHARK_API_KEY", status, resp.get("body"))
+                    log.error("sync rejected (status %s): %s — check CHUMSTATS_API_KEY", status, resp.get("body"))
                     return  # don't retry auth failures
                 last_err = RuntimeError(f"HTTP {status}: {resp.get('body')}")
             except (URLError, OSError) as e:
@@ -197,7 +197,7 @@ class MatchSyncer:
             self.remote_url, data=body, method="POST",
             headers={
                 "Content-Type": "application/json",
-                "X-Ballshark-Key": self.api_key,
+                "X-Chumstats-Key": self.api_key,
             },
         )
         try:

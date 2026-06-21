@@ -21,7 +21,7 @@ import discord
 from .goalmap import render_goal_map_png
 from .session import MatchSummary, SessionTotals
 
-log = logging.getLogger("ballshark.bot")
+log = logging.getLogger("chumstats.bot")
 
 
 ICON_WIN  = "🏆"

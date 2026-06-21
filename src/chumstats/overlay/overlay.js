@@ -1,11 +1,11 @@
-// Ballshark overlay client. Connects to /ws and renders one of four
+// Chumstats overlay client. Connects to /ws and renders one of four
 // modes based on the URL path:
 //   /overlay/live    full BARL-style scoreboard during a match (live ticks)
 //   /overlay/last    BARL scoreboard frozen on last match's final state
 //   /overlay/session session totals + last-10 form (no in-match data)
 //   /overlay/me      tiny pill with just your stat line
 (() => {
-  const SELF_NAME = (window.BALLSHARK_SELF_NAME || "").toLowerCase();
+  const SELF_NAME = (window.CHUMSTATS_SELF_NAME || "").toLowerCase();
   const path = window.location.pathname;
   const mode = (path.match(/\/overlay\/(\w+)/) || [, "last"])[1];
   document.body.classList.add("mode-" + mode);

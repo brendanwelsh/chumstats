@@ -1,4 +1,4 @@
-# ballshark
+# chumstats
 
 > 🚧 **Work in progress** — a personal project I'm actively building. Expect rough edges and breaking changes.
 
@@ -16,7 +16,7 @@ After every match:
 
 ## Pages and views
 
-Ballshark serves two surfaces: a **live overlay** (OBS-ready) and a full **analytics dashboard**. On a single machine both are served locally at `http://127.0.0.1:5050/`. In a multi-machine setup the analytics pages are served by the central server while each player's machine runs the overlay locally — see [Deployment](#deployment-single-machine-or-central-server).
+Chumstats serves two surfaces: a **live overlay** (OBS-ready) and a full **analytics dashboard**. On a single machine both are served locally at `http://127.0.0.1:5050/`. In a multi-machine setup the analytics pages are served by the central server while each player's machine runs the overlay locally — see [Deployment](#deployment-single-machine-or-central-server).
 
 > Screenshots below are from a live instance with real match data. They are refreshed as the UI changes.
 
@@ -100,7 +100,7 @@ Ballshark serves two surfaces: a **live overlay** (OBS-ready) and a full **analy
 
 ## What's out of scope (by design)
 
-These exist in other tools but require external services or replay-file parsing — neither of which ballshark does.
+These exist in other tools but require external services or replay-file parsing — neither of which chumstats does.
 
 - MMR / rank / season standings (Psyonix doesn't emit them on this socket)
 - Per-tick player XYZ positions (the API gives booleans and speed but not coordinates per player, so no positioning heatmaps from this data source)
@@ -120,7 +120,7 @@ python -m venv .venv
 ### 2. Enable the Stats API
 
 ```powershell
-.\.venv\Scripts\python.exe -m ballshark.cli setup
+.\.venv\Scripts\python.exe -m chumstats.cli setup
 ```
 
 Detects your RL install (Steam via registry + `libraryfolders.vdf`, or Epic via `Manifests\*.item`), backs up `DefaultStatsAPI.ini`, writes `PacketSendRate=30`. Idempotent — re-runs are no-ops if it's already enabled. Restart Rocket League afterward — the ini is only read on launch.
@@ -139,12 +139,12 @@ RL_PLAYER_PRIMARY_ID=Steam|7656...|0
 Setup pointers:
 - **Discord bot**: create at https://discord.com/developers/applications → New Application → Bot → Reset Token. Invite to your server with `bot` scope and `Send Messages` + `Embed Links` permission.
 - **Channel ID**: enable Developer Mode in Discord (User Settings → Advanced), right-click the channel → Copy Channel ID.
-- **Your primary_id**: easiest path — play one match with `ballshark run`, look at `data/ballshark.db` → `match_player_stats`, find your name, copy the `primary_id` field. Or pull it from any `UpdateState` row in a `.jsonl` capture.
+- **Your primary_id**: easiest path — play one match with `chumstats run`, look at `data/chumstats.db` → `match_player_stats`, find your name, copy the `primary_id` field. Or pull it from any `UpdateState` row in a `.jsonl` capture.
 
 ### 4. Run
 
 ```powershell
-.\.venv\Scripts\python.exe -m ballshark.cli run
+.\.venv\Scripts\python.exe -m chumstats.cli run
 ```
 
 Three things start:
@@ -157,26 +157,26 @@ Three things start:
 ## CLI
 
 ```
-ballshark setup [--rate 30 | --disable] [--rl-path C:\...\rocketleague]
-ballshark run [--no-bot] [--no-server] [--host ...] [--port 49123]
-ballshark replay <file...>                # backfill captures into the DB
-ballshark post-test <file...>             # one-shot Discord embed sanity check
-ballshark stats --primary-id "Steam|...|0"   # lifetime aggregates from the DB
+chumstats setup [--rate 30 | --disable] [--rl-path C:\...\rocketleague]
+chumstats run [--no-bot] [--no-server] [--host ...] [--port 49123]
+chumstats replay <file...>                # backfill captures into the DB
+chumstats post-test <file...>             # one-shot Discord embed sanity check
+chumstats stats --primary-id "Steam|...|0"   # lifetime aggregates from the DB
 ```
 
 ## Deployment: single machine or central server
 
-Ballshark runs in one of two shapes.
+Chumstats runs in one of two shapes.
 
-**Single machine (default).** `ballshark run` on your gaming PC does everything: ingest from the Stats API, local SQLite, Discord embed, local overlay, and the full dashboard at `http://127.0.0.1:5050/`. Nothing leaves your machine except the Discord post.
+**Single machine (default).** `chumstats run` on your gaming PC does everything: ingest from the Stats API, local SQLite, Discord embed, local overlay, and the full dashboard at `http://127.0.0.1:5050/`. Nothing leaves your machine except the Discord post.
 
-**Central server (friend group).** An always-on host (a spare Mac/Linux box, NAS, or mini PC) runs `ballshark serve` — the same FastAPI app with no RL ingest. Each player's machine runs `ballshark run` and uploads finalized match summaries to it; the server dedupes by RL `MatchGuid` and serves one unified dashboard for the whole group.
+**Central server (friend group).** An always-on host (a spare Mac/Linux box, NAS, or mini PC) runs `chumstats serve` — the same FastAPI app with no RL ingest. Each player's machine runs `chumstats run` and uploads finalized match summaries to it; the server dedupes by RL `MatchGuid` and serves one unified dashboard for the whole group.
 
 ```
  your gaming PC                       friends' PCs
- ballshark run ── upload ─┐          ┌─ ballshark run
+ chumstats run ── upload ─┐          ┌─ chumstats run
                           ▼          ▼
-                  central server (ballshark serve)
+                  central server (chumstats serve)
                   /dashboard /history /players /clan ...
                           │
               VPN / LAN  (<server-host>:5050)
@@ -185,29 +185,29 @@ Ballshark runs in one of two shapes.
 
 What works **today** (implemented, not just spec):
 
-- `ballshark serve` — central FastAPI app + match-summary upload endpoint (`src/ballshark/server.py`).
-- `src/ballshark/sync.py` — client uploads each finalized match, auth via `X-Ballshark-Key`; the server rejects rows that claim a primary_id the key doesn't own.
-- `ballshark admin create-user` / `list-users` — provision one API key per friend.
-- `ballshark push-history` — backfill an existing local DB to the central server.
+- `chumstats serve` — central FastAPI app + match-summary upload endpoint (`src/chumstats/server.py`).
+- `src/chumstats/sync.py` — client uploads each finalized match, auth via `X-Chumstats-Key`; the server rejects rows that claim a primary_id the key doesn't own.
+- `chumstats admin create-user` / `list-users` — provision one API key per friend.
+- `chumstats push-history` — backfill an existing local DB to the central server.
 - Reachable over Tailscale (`http://<host>:5050`) with no public DNS.
 
 To stand up the central server, see [`deploy/server/README.md`](deploy/server/README.md). To make a client upload, set in its `.env`:
 
 ```env
-BALLSHARK_REMOTE_URL=http://<central-host>:5050
-BALLSHARK_API_KEY=<key from `ballshark admin create-user`>
+CHUMSTATS_REMOTE_URL=http://<central-host>:5050
+CHUMSTATS_API_KEY=<key from `chumstats admin create-user`>
 ```
 
-**Public domain (optional).** For access beyond your LAN/VPN, put the server behind a Cloudflare Tunnel and point a domain at it (see [deploy/server/README.md](deploy/server/README.md#cloudflare-tunnel-public-access)), then set `BALLSHARK_PUBLIC_URL=https://<your-domain>` so shared links (the Discord "view match" link) use it.
+**Public domain (optional).** For access beyond your LAN/VPN, put the server behind a Cloudflare Tunnel and point a domain at it (see [deploy/server/README.md](deploy/server/README.md#cloudflare-tunnel-public-access)), then set `CHUMSTATS_PUBLIC_URL=https://<your-domain>` so shared links (the Discord "view match" link) use it.
 
 ### Start on Windows login
 
-The owner's machine launches the tray app (which runs `ballshark run`) from a per-user `Run` registry entry — no admin rights, no Task Scheduler service. The tray's **Start with Windows** toggle writes/removes that entry (`src/ballshark/autostart.py`), and a single-instance lock (a loopback bind on port 5051) stops a second launch from spawning a duplicate server.
+The owner's machine launches the tray app (which runs `chumstats run`) from a per-user `Run` registry entry — no admin rights, no Task Scheduler service. The tray's **Start with Windows** toggle writes/removes that entry (`src/chumstats/autostart.py`), and a single-instance lock (a loopback bind on port 5051) stops a second launch from spawning a duplicate server.
 
 ## Project layout
 
 ```
-src/ballshark/
+src/chumstats/
   models.py           pydantic types for every observed Stats API event
   ingest.py           TCP client + brace-aware JSON splitter + reconnect
   session.py          MatchAggregator + SessionTracker (W/L, streak, derived metrics)
@@ -217,7 +217,7 @@ src/ballshark/
   bot.py              discord.py poster + embed builder
   server.py           FastAPI + WS overlay backend
   overlay/            HTML / CSS / JS for the browser overlay
-  cli.py              `ballshark` entry point
+  cli.py              `chumstats` entry point
 captures/             .jsonl + .bin raw socket dumps from capture.ps1
 data/                 SQLite DB - gitignored
 tests/                pytest suite against the real captures
@@ -236,7 +236,7 @@ Four tables. Everything stays — we can re-derive new metrics from `raw_events`
 
 ## Capturing raw data without the pipeline
 
-If you want to record a session without `ballshark run` (to share fixture data or develop offline):
+If you want to record a session without `chumstats run` (to share fixture data or develop offline):
 
 ```powershell
 .\capture.ps1
@@ -264,7 +264,7 @@ PacketSendRate=30
 
 `PacketSendRate=0` disables the API entirely; `1-120` sets the periodic UpdateState frequency. Configuration is read at launch — change the ini, restart RL.
 
-> **If RL ever stutters or freezes while ingesting:** the Stats API streams over a single loopback TCP socket, and if the client stops draining it, RL's game thread can block on `send()` (Windows logs this as `AppHangXProcB1`, a cross-process hang). The ingest client guards against this — a dedicated reader thread keeps the socket drained no matter how slow disk/upload work is (see `src/ballshark/ingest.py`) — plus it requests a large `SO_RCVBUF`. As a further safety margin you can lower `PacketSendRate` (e.g. `15`) to reduce the packet pressure; `30` is plenty for live stats.
+> **If RL ever stutters or freezes while ingesting:** the Stats API streams over a single loopback TCP socket, and if the client stops draining it, RL's game thread can block on `send()` (Windows logs this as `AppHangXProcB1`, a cross-process hang). The ingest client guards against this — a dedicated reader thread keeps the socket drained no matter how slow disk/upload work is (see `src/chumstats/ingest.py`) — plus it requests a large `SO_RCVBUF`. As a further safety margin you can lower `PacketSendRate` (e.g. `15`) to reduce the packet pressure; `30` is plenty for live stats.
 
 The socket emits concatenated UTF-8 JSON envelopes:
 ```

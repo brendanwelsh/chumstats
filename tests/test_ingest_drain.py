@@ -21,8 +21,8 @@ import json
 import socket
 import threading
 
-from ballshark import ingest
-from ballshark.session import SessionTracker
+from chumstats import ingest
+from chumstats.session import SessionTracker
 
 GUID = "test-guid-0001"
 
@@ -210,8 +210,8 @@ def _wait_for(pred, timeout: float) -> bool:
 
 # --- _drain_buffer parser (the brace-scanner + inline payload parse) ---------
 
-from ballshark.ingest import _drain_buffer
-from ballshark.models import MatchEnded, UpdateState
+from chumstats.ingest import _drain_buffer
+from chumstats.models import MatchEnded, UpdateState
 
 
 def test_drain_buffer_parses_concatenated_envelopes():
@@ -254,7 +254,7 @@ def test_live_ingest_persists_every_raw_event_batched(tmp_path):
     """End-to-end against a REAL Store: the batched raw_events path must persist
     every envelope (in order) and save the match — i.e. batching changes timing,
     not content."""
-    from ballshark.store import Store
+    from chumstats.store import Store
 
     listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)

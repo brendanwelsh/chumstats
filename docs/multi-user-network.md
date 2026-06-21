@@ -1,6 +1,6 @@
 # Multi-user Stats Network
 
-Architecture for syncing every friend's local Ballshark tracker to a central
+Architecture for syncing every friend's local Chumstats tracker to a central
 server. **The core is implemented and running**, not a spec — this doc is now
 both the design rationale and a status record.
 
@@ -8,9 +8,9 @@ both the design rationale and a status record.
 
 | Piece | Status | Where |
 |---|---|---|
-| Central server (`ballshark serve`) | ✅ done, runs on an always-on host | `src/ballshark/server.py`, `cmd_serve` |
+| Central server (`chumstats serve`) | ✅ done, runs on an always-on host | `src/chumstats/server.py`, `cmd_serve` |
 | Upload endpoint `POST /api/v1/match-summary` (key-auth, anti-impersonation) | ✅ done | `server.py`, `MatchSummaryUpload` |
-| Client uploader | ✅ done | `src/ballshark/sync.py` (`MatchSyncer`) |
+| Client uploader | ✅ done | `src/chumstats/sync.py` (`MatchSyncer`) |
 | Provisioning (`admin create-user` / `list-users`) | ✅ done | `cmd_admin_*` |
 | Backfill (`push-history`) | ✅ done | `cmd_push_history` |
 | Dedup by `MatchGuid` (first-writer-wins matches, per-user stat rows) | ✅ done | `store.py` upsert |
@@ -26,7 +26,7 @@ the rest as describing what actually ships.
 
 ## Goal
 
-Every friend who runs `ballshark` locally automatically uploads their match
+Every friend who runs `chumstats` locally automatically uploads their match
 data to a central server. The central server:
 
 - Dedupes matches when multiple friends played the same game.
@@ -48,11 +48,11 @@ data to a central server. The central server:
 ```
 ┌────────────────┐  ┌────────────────┐  ┌────────────────┐
 │ Friend A laptop │  │ Friend B laptop │  │ Friend C laptop │
-│  ballshark run    │  │  ballshark run    │  │  ballshark run    │
+│  chumstats run    │  │  chumstats run    │  │  chumstats run    │
 └─────────┬───────┘  └─────────┬───────┘  └─────────┬───────┘
           │                    │                    │
           │   HTTPS POST  /api/v1/match-summary    │
-          │   X-Ballshark-Key: <api_key>             │
+          │   X-Chumstats-Key: <api_key>             │
           └────────────────────┴────────────────────┘
                                 │
                                 ▼
@@ -73,11 +73,11 @@ data to a central server. The central server:
 
 ## Identity & auth
 
-- Owner runs `ballshark admin create-user <discord_id>` on the server.
+- Owner runs `chumstats admin create-user <discord_id>` on the server.
 - Server returns an **API key** (UUIDv4) and a **user_id**.
-- User adds it to their local `.env` as `BALLSHARK_API_KEY=...` and
-  `BALLSHARK_REMOTE_URL=https://stats.yourdomain.com`.
-- Every upload carries `X-Ballshark-Key: <api_key>`.
+- User adds it to their local `.env` as `CHUMSTATS_API_KEY=...` and
+  `CHUMSTATS_REMOTE_URL=https://stats.yourdomain.com`.
+- Every upload carries `X-Chumstats-Key: <api_key>`.
 - Server stores `(user_id, primary_id_steam_or_epic)` — so when an upload
   carries a `match_player_stats` row for `primary_id = "Steam|765...|0"`,
   the server checks the API key's owner matches the primary_id.
@@ -169,7 +169,7 @@ CREATE TABLE users (
 1. Buy domain, point at a small VPS (Hetzner / Linode, $5/mo).
 2. Deploy a thin FastAPI server with just the two endpoints
    (`/api/v1/match-summary`, `/api/v1/auth`).
-3. Local client gets a new module `ballshark/sync.py` that hooks the
+3. Local client gets a new module `chumstats/sync.py` that hooks the
    existing `on_match` callback and POSTs to the remote.
 4. New unified web frontend (likely reuse 90% of the existing templates
    but the data layer is now the central DB).
@@ -180,7 +180,7 @@ CREATE TABLE users (
 
 - **Schema migrations.** If we evolve the local schema, how do clients
   with older versions upload?
-- **Backfill from older laptops.** A friend installing ballshark today
+- **Backfill from older laptops.** A friend installing chumstats today
   loses their prior matches forever. Worth supporting an
   `import-jsonl-capture` migration tool.
 - **Real-time sync of in-progress matches.** Out of scope for v1 - only

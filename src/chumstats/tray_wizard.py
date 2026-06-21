@@ -1,14 +1,14 @@
-"""First-run setup wizard for the Ballshark tray app.
+"""First-run setup wizard for the Chumstats tray app.
 
 Pure tkinter — bundles cleanly with PyInstaller, no extra deps.
 Walks a friend through:
     1. Welcome
     2. Server URL + API key (with [Test Connection] hitting /api/v1/whoami)
     3. Their in-game name (auto-filled from the whoami response)
-    4. Enable Rocket League's Stats API (runs `ballshark setup` via the
+    4. Enable Rocket League's Stats API (runs `chumstats setup` via the
        same-process function, so no subprocess shell-out)
 
-On Finish, writes the config to %LOCALAPPDATA%\\ballshark\\config.json and
+On Finish, writes the config to %LOCALAPPDATA%\\chumstats\\config.json and
 calls back to the tray.
 """
 
@@ -27,7 +27,7 @@ from tkinter import ttk, messagebox
 from . import autostart
 from .tray_config import TrayConfig, load, save
 
-log = logging.getLogger("ballshark.tray.wizard")
+log = logging.getLogger("chumstats.tray.wizard")
 
 WINDOW_W = 560
 WINDOW_H = 420
@@ -37,7 +37,7 @@ def _whoami(remote_url: str, api_key: str, timeout: float = 6.0) -> dict:
     """Call /api/v1/whoami. Returns the JSON on 200, raises with a friendly
     message otherwise."""
     url = remote_url.rstrip("/") + "/api/v1/whoami"
-    req = Request(url, headers={"X-Ballshark-Key": api_key})
+    req = Request(url, headers={"X-Chumstats-Key": api_key})
     try:
         with urlopen(req, timeout=timeout) as r:
             data = json.loads(r.read().decode("utf-8") or "{}")
@@ -59,7 +59,7 @@ class WizardApp:
         self._step = 1
         self._whoami_data: dict | None = None  # filled in after Test Connection succeeds
         self.root = tk.Tk()
-        self.root.title("Ballshark — Setup")
+        self.root.title("Chumstats — Setup")
         self.root.geometry(f"{WINDOW_W}x{WINDOW_H}")
         self.root.resizable(False, False)
         self._render()
@@ -97,12 +97,12 @@ class WizardApp:
     # ---- step 1: welcome -------------------------------------------------
 
     def _render_welcome(self) -> None:
-        self._header("Welcome to Ballshark",
+        self._header("Welcome to Chumstats",
                      "We'll get you set up to share match stats with your friend group. "
                      "Takes about 30 seconds.")
         body = ttk.Frame(self.root); body.pack(fill="both", expand=True, padx=24)
         ttk.Label(body, text=(
-            "You can use Ballshark two ways:\n\n"
+            "You can use Chumstats two ways:\n\n"
             "    •  Track locally on this PC — no server needed.\n\n"
             "    •  Connect to a friend's server to share your matches.\n"
             "        (You'll need the server URL + API key they sent you.)\n\n"
@@ -113,7 +113,7 @@ class WizardApp:
     # ---- step 2: server --------------------------------------------------
 
     def _render_server(self) -> None:
-        self._header("How do you want to use Ballshark?",
+        self._header("How do you want to use Chumstats?",
                      "Track just on this PC, or connect to a friend's server to share "
                      "your matches.")
         body = ttk.Frame(self.root); body.pack(fill="x", expand=False, padx=24)
@@ -243,7 +243,7 @@ class WizardApp:
             self.cfg.rl_player_name = self.var_name.get().strip()
             # Proceed if we have EITHER a detected account or a typed name.
             if not self.cfg.rl_player_name and not self.cfg.rl_player_primary_id:
-                messagebox.showwarning("Ballshark", "Enter your in-game name to continue.")
+                messagebox.showwarning("Chumstats", "Enter your in-game name to continue.")
                 return
             self._goto(4)
 
@@ -254,7 +254,7 @@ class WizardApp:
     def _render_rl_setup(self) -> None:
         self._header("Enable Rocket League's Stats API",
                      "This writes a small change to your RL config (PacketSendRate=30) so "
-                     "ballshark can read your match data while you play.")
+                     "chumstats can read your match data while you play.")
         body = ttk.Frame(self.root); body.pack(fill="x", expand=False, padx=24)
 
         status = ttk.Label(body, text="", foreground="#666", wraplength=WINDOW_W - 48, justify="left")
@@ -269,7 +269,7 @@ class WizardApp:
         skip_lbl.pack(anchor="w", pady=(20, 0))
 
         self.var_autostart = tk.BooleanVar(value=True)
-        ttk.Checkbutton(body, text="Start Ballshark automatically when Windows starts",
+        ttk.Checkbutton(body, text="Start Chumstats automatically when Windows starts",
                         variable=self.var_autostart).pack(anchor="w", pady=(18, 0))
 
         bar = ttk.Frame(self.root); bar.pack(side="bottom", fill="x", padx=24, pady=14)
@@ -342,7 +342,7 @@ class SettingsDialog:
         self.cfg = load()
         self.on_saved = on_saved
         self.root = tk.Tk()
-        self.root.title("Ballshark — Settings")
+        self.root.title("Chumstats — Settings")
         self.root.geometry(f"{WINDOW_W}x{WINDOW_H - 60}")
         self.root.resizable(False, False)
         self._build()

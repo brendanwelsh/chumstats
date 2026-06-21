@@ -1,4 +1,4 @@
-BALLSHARK TRACKER
+CHUMSTATS TRACKER
 ===============
 
 What it is
@@ -12,7 +12,7 @@ friends hosts.
 Install
 -------
 1. Unzip this folder anywhere you like (Documents, Desktop, etc.).
-2. Double-click Ballshark.exe.
+2. Double-click Chumstats.exe.
 3. The setup wizard opens. Paste the server URL and API key your friend
    sent you, choose your in-game name, and click "Enable Stats API"
    when prompted (writes one line to your Rocket League config).
@@ -28,7 +28,7 @@ Tray icon colors (hover the icon for the exact state)
 Auto-start on login
 -------------------
 Press Win+R, type "shell:startup", press Enter. Drag a shortcut to
-Ballshark.exe into that folder. Now it starts when you log in.
+Chumstats.exe into that folder. Now it starts when you log in.
 
 Changing settings later
 -----------------------
@@ -37,9 +37,9 @@ API key, or in-game name without re-running the full setup.
 
 Where data lives
 ----------------
-Local DB:  %LOCALAPPDATA%\ballshark\ballshark.db
-Config:    %LOCALAPPDATA%\ballshark\config.json
-Logs:      %LOCALAPPDATA%\ballshark\logs\
+Local DB:  %LOCALAPPDATA%\chumstats\chumstats.db
+Config:    %LOCALAPPDATA%\chumstats\config.json
+Logs:      %LOCALAPPDATA%\chumstats\logs\
 
 To completely uninstall, quit the tray app and delete those files.
 

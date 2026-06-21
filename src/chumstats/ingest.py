@@ -36,7 +36,7 @@ So the socket drain is fully decoupled from all slow work:
 
 Defense in depth: we also request a large SO_RCVBUF so the kernel itself buffers
 a burst even before our queue sees it, and the RL Stats API `PacketSendRate` can
-be lowered (see `ballshark setup --rate`) to reduce the packet pressure.
+be lowered (see `chumstats setup --rate`) to reduce the packet pressure.
 
 This module is the lone owner of socket lifecycle: it reconnects on close
 (useful because RL closes the socket between sessions / on quit).
@@ -347,7 +347,7 @@ def run_live(
             sock.settimeout(READER_RECV_TIMEOUT)
             reader = threading.Thread(
                 target=_socket_reader, args=(sock, q, stop, recv_bytes),
-                name="ballshark-recv", daemon=True,
+                name="chumstats-recv", daemon=True,
             )
             reader.start()
 

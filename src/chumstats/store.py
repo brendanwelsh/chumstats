@@ -11,7 +11,7 @@ Design:
   fell inside a finalized match. For events outside any match (between matches,
   before MatchCreated, etc.) it's NULL.
 - We don't store binary blobs - everything is text JSON. Disk is cheap and it
-  makes inspection trivial (just `sqlite3 ballshark.db` and read).
+  makes inspection trivial (just `sqlite3 chumstats.db` and read).
 """
 
 from __future__ import annotations

@@ -51,9 +51,9 @@ _load_env()
 
 
 def _env(*names: str, default: str | None = None) -> str | None:
-    """First non-empty env var among `names`. New BALLSHARK_* names are passed
-    first, legacy CARBALL_* names as fallback so pre-rename `.env` files and
-    already-deployed friend installs keep working."""
+    """First non-empty env var among `names`. New CHUMSTATS_* names are passed
+    first, legacy BALLSHARK_* / CARBALL_* names as fallback so pre-rename `.env`
+    files and already-deployed installs keep working."""
     for n in names:
         v = os.environ.get(n)
         if v:
@@ -62,30 +62,34 @@ def _env(*names: str, default: str | None = None) -> str | None:
 
 
 def _migrate_legacy_home_dir() -> None:
-    """One-time rename of the dev data dir ~/.carball -> ~/.ballshark.
-    No-op if the new dir already exists or the old one doesn't. (The tray's
-    friend bundle migrates its own %LOCALAPPDATA% dir in tray_config.app_dir.)"""
-    old = Path.home() / ".carball"
-    new = Path.home() / ".ballshark"
-    try:
-        if old.is_dir() and not new.exists():
-            old.rename(new)
-    except OSError:
-        pass
-    # Rename the DB file (+ SQLite WAL/SHM sidecars) inside the dir.
-    for suffix in ("", "-wal", "-shm", "-journal"):
-        o = new / ("carball.db" + suffix)
-        n = new / ("ballshark.db" + suffix)
+    """One-time rename of the dev data dir to ~/.chumstats, walking the rename
+    history (~/.carball -> ~/.ballshark -> ~/.chumstats). No-op if the new dir
+    already exists or no legacy dir does. (The tray's friend bundle migrates its
+    own %LOCALAPPDATA% dir in tray_config.app_dir.)"""
+    new = Path.home() / ".chumstats"
+    for legacy in (".ballshark", ".carball"):
+        old = Path.home() / legacy
         try:
-            if o.exists() and not n.exists():
-                o.rename(n)
+            if old.is_dir() and not new.exists():
+                old.rename(new)
+                break
         except OSError:
             pass
+    # Rename the DB file (+ SQLite WAL/SHM sidecars) inside the dir.
+    for old_stem in ("ballshark.db", "carball.db"):
+        for suffix in ("", "-wal", "-shm", "-journal"):
+            o = new / (old_stem + suffix)
+            n = new / ("chumstats.db" + suffix)
+            try:
+                if o.exists() and not n.exists():
+                    o.rename(n)
+            except OSError:
+                pass
 
 
 @dataclass
 class Settings:
-    db_path: str = str(Path.home() / ".ballshark" / "ballshark.db")
+    db_path: str = str(Path.home() / ".chumstats" / "chumstats.db")
     rl_host: str = "127.0.0.1"
     rl_port: int = 49123
 
@@ -99,15 +103,15 @@ class Settings:
 
     # Bind to all interfaces by default so phones / other devices on the
     # same LAN can hit the dashboard + overlay. Loopback-only behaviour can
-    # be restored by setting BALLSHARK_SERVER_HOST=127.0.0.1.
+    # be restored by setting CHUMSTATS_SERVER_HOST=127.0.0.1.
     server_host: str = "0.0.0.0"
     server_port: int = 5050
     # Public URL used when generating links to share (e.g., Discord "View
-    # match" link). Defaults to http://ballshark.local:<port> — add a hosts
-    # file entry mapping ballshark.local -> 127.0.0.1 to make the alias
-    # resolve. Override with BALLSHARK_PUBLIC_URL when hosting on a real
-    # domain.
-    public_url: str = "http://ballshark.local:5050"
+    # match" link). Defaults to http://chumstats.local:<port> — add a hosts
+    # file entry mapping chumstats.local -> 127.0.0.1 to make the alias
+    # resolve. Override with CHUMSTATS_PUBLIC_URL when hosting on a real
+    # domain (e.g. https://chumstats.com).
+    public_url: str = "http://chumstats.local:5050"
 
     # Multi-user sync: when both remote_url and api_key are set, finalized
     # matches are POSTed to the central server. Locally this is harmless;
@@ -129,15 +133,15 @@ class Settings:
 
     @classmethod
     def from_env(cls) -> "Settings":
-        db_override = _env("BALLSHARK_DB", "CARBALL_DB")
+        db_override = _env("CHUMSTATS_DB", "BALLSHARK_DB", "CARBALL_DB")
         if not db_override:
-            # Only migrate the default ~/.ballshark dir when we'll actually use
+            # Only migrate the default ~/.chumstats dir when we'll actually use
             # it. Never move data out from under an explicit DB path (e.g. the
             # central server pointing at a fixed file).
             _migrate_legacy_home_dir()
-        port = int(_env("BALLSHARK_SERVER_PORT", "CARBALL_SERVER_PORT", default="5050"))
+        port = int(_env("CHUMSTATS_SERVER_PORT", "BALLSHARK_SERVER_PORT", "CARBALL_SERVER_PORT", default="5050"))
         return cls(
-            db_path=db_override or str(Path.home() / ".ballshark" / "ballshark.db"),
+            db_path=db_override or str(Path.home() / ".chumstats" / "chumstats.db"),
             rl_host=os.environ.get("RL_HOST", "127.0.0.1"),
             rl_port=int(os.environ.get("RL_PORT", "49123")),
             discord_token=os.environ.get("DISCORD_TOKEN") or None,
@@ -146,13 +150,13 @@ class Settings:
             player_name=os.environ.get("RL_PLAYER_NAME") or None,
             player_primary_id=os.environ.get("RL_PLAYER_PRIMARY_ID") or None,
             friends=[s.strip() for s in (os.environ.get("RL_FRIENDS") or "").split(",") if s.strip()],
-            server_host=_env("BALLSHARK_SERVER_HOST", "CARBALL_SERVER_HOST", default="0.0.0.0"),
+            server_host=_env("CHUMSTATS_SERVER_HOST", "BALLSHARK_SERVER_HOST", "CARBALL_SERVER_HOST", default="0.0.0.0"),
             server_port=port,
-            public_url=(_env("BALLSHARK_PUBLIC_URL", "CARBALL_PUBLIC_URL")
-                        or f"http://ballshark.local:{port}").rstrip("/"),
-            remote_url=_env("BALLSHARK_REMOTE_URL", "CARBALL_REMOTE_URL") or None,
-            api_key=_env("BALLSHARK_API_KEY", "CARBALL_API_KEY") or None,
-            sync_full_raw=(_env("BALLSHARK_SYNC_FULL_RAW", "CARBALL_SYNC_FULL_RAW", default="")
+            public_url=(_env("CHUMSTATS_PUBLIC_URL", "BALLSHARK_PUBLIC_URL", "CARBALL_PUBLIC_URL")
+                        or f"http://chumstats.local:{port}").rstrip("/"),
+            remote_url=_env("CHUMSTATS_REMOTE_URL", "BALLSHARK_REMOTE_URL", "CARBALL_REMOTE_URL") or None,
+            api_key=_env("CHUMSTATS_API_KEY", "BALLSHARK_API_KEY", "CARBALL_API_KEY") or None,
+            sync_full_raw=(_env("CHUMSTATS_SYNC_FULL_RAW", "BALLSHARK_SYNC_FULL_RAW", "CARBALL_SYNC_FULL_RAW", default="")
                            or "").strip().lower() in ("1", "true", "yes", "full"),
-            tick_keep_days=int(_env("BALLSHARK_TICK_KEEP_DAYS", "CARBALL_TICK_KEEP_DAYS", default="14")),
+            tick_keep_days=int(_env("CHUMSTATS_TICK_KEEP_DAYS", "BALLSHARK_TICK_KEEP_DAYS", "CARBALL_TICK_KEEP_DAYS", default="14")),
         )

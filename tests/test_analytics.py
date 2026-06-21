@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from ballshark.analytics import build_analytics, build_dashboard
-from ballshark.replay import iter_for_aggregator
-from ballshark.session import run_aggregation
-from ballshark.store import Store
+from chumstats.analytics import build_analytics, build_dashboard
+from chumstats.replay import iter_for_aggregator
+from chumstats.session import run_aggregation
+from chumstats.store import Store
 
 
 ME_PID = "Steam|76561197985273611|0"

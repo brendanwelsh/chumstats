@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "ballshark"
+name = "chumstats"
 version = "0.0.1"
 description = "Rocket League Stats API ingest, session/lifetime tracker, and overlay backend."
 requires-python = ">=3.11"
@@ -33,10 +33,10 @@ dev = [
 ]
 
 [project.scripts]
-ballshark = "ballshark.cli:main"
+chumstats = "chumstats.cli:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/ballshark"]
+packages = ["src/chumstats"]
 
 [tool.ruff]
 line-length = 110

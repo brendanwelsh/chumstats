@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from ballshark.models import (
+from chumstats.models import (
     EVENT_MODEL,
     Envelope,
     GoalScored,

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from ballshark.replay import iter_for_aggregator
-from ballshark.session import MatchAggregator, SessionTracker, run_aggregation
+from chumstats.replay import iter_for_aggregator
+from chumstats.session import MatchAggregator, SessionTracker, run_aggregation
 
 
 def test_online_match_summary(online_capture):

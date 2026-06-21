@@ -2,13 +2,13 @@
 
 The tray needs settings that survive across PyInstaller re-installs and
 don't live next to the executable (which may be in Program Files / read-only).
-We put everything under ``%LOCALAPPDATA%\\ballshark\\``:
+We put everything under ``%LOCALAPPDATA%\\chumstats\\``:
 
     config.json   — wizard-collected: server URL, API key, name, primary_id
-    ballshark.db    — local match database
+    chumstats.db    — local match database
     logs/         — tray + server log files
 
-On macOS/Linux this falls back to ~/.local/share/ballshark/ (not currently
+On macOS/Linux this falls back to ~/.local/share/chumstats/ (not currently
 shipped, but keeps the module portable for dev use).
 """
 
@@ -22,22 +22,23 @@ from pathlib import Path
 
 
 def app_dir() -> Path:
-    """Per-user writable directory for ballshark state. Migrates the pre-rename
-    `carball` dir to `ballshark` once, so friends who installed the old build
-    keep their local DB + config."""
+    """Per-user writable directory for chumstats state. Migrates a pre-rename
+    dir (`ballshark`, or older `carball`) to `chumstats` once, so anyone who
+    installed an old build keeps their local DB + config."""
     if platform.system() == "Windows":
         base = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
-        p = Path(base) / "ballshark"
-        legacy = Path(base) / "carball"
+        root = Path(base)
     else:
         root = Path(os.environ.get("XDG_DATA_HOME") or (Path.home() / ".local" / "share"))
-        p = root / "ballshark"
-        legacy = root / "carball"
-    try:
-        if legacy.is_dir() and not p.exists():
-            legacy.rename(p)
-    except OSError:
-        pass
+    p = root / "chumstats"
+    for legacy_name in ("ballshark", "carball"):
+        legacy = root / legacy_name
+        try:
+            if legacy.is_dir() and not p.exists():
+                legacy.rename(p)
+                break
+        except OSError:
+            pass
     p.mkdir(parents=True, exist_ok=True)
     return p
 
@@ -47,24 +48,27 @@ def config_path() -> Path:
 
 
 def db_path() -> Path:
-    """Friend bundle default: %LOCALAPPDATA%\\ballshark\\ballshark.db. Dev override:
-    set BALLSHARK_DB (or legacy CARBALL_DB) to your checkout's DB and the tray
-    respects it."""
-    override = os.environ.get("BALLSHARK_DB") or os.environ.get("CARBALL_DB")
+    """Friend bundle default: %LOCALAPPDATA%\\chumstats\\chumstats.db. Dev override:
+    set CHUMSTATS_DB (or legacy BALLSHARK_DB / CARBALL_DB) to your checkout's DB
+    and the tray respects it."""
+    override = (os.environ.get("CHUMSTATS_DB")
+                or os.environ.get("BALLSHARK_DB")
+                or os.environ.get("CARBALL_DB"))
     if override:
         return Path(override)
     d = app_dir()
-    new = d / "ballshark.db"
+    new = d / "chumstats.db"
     if not new.exists():
-        # Migrate the pre-rename DB file (+ WAL/SHM sidecars) if present.
-        for suffix in ("", "-wal", "-shm", "-journal"):
-            o = d / ("carball.db" + suffix)
-            n = d / ("ballshark.db" + suffix)
-            try:
-                if o.exists() and not n.exists():
-                    o.rename(n)
-            except OSError:
-                pass
+        # Migrate a pre-rename DB file (+ WAL/SHM sidecars) if present.
+        for old_stem in ("ballshark.db", "carball.db"):
+            for suffix in ("", "-wal", "-shm", "-journal"):
+                o = d / (old_stem + suffix)
+                n = d / ("chumstats.db" + suffix)
+                try:
+                    if o.exists() and not n.exists():
+                        o.rename(n)
+                except OSError:
+                    pass
     return new
 
 
@@ -75,7 +79,7 @@ class TrayConfig:
     rl_player_primary_id: str = ""      # auto-filled after first match if blank
     remote_url: str = ""                # e.g. https://stats.your-domain.com
     api_key: str = ""
-    rl_setup_done: bool = False         # have we ever run ballshark setup?
+    rl_setup_done: bool = False         # have we ever run chumstats setup?
 
     @property
     def is_configured(self) -> bool:
@@ -111,9 +115,11 @@ def load() -> TrayConfig:
     if not cfg.rl_player_primary_id:
         cfg.rl_player_primary_id = os.environ.get("RL_PLAYER_PRIMARY_ID") or ""
     if not cfg.remote_url:
-        cfg.remote_url = os.environ.get("BALLSHARK_REMOTE_URL") or ""
+        cfg.remote_url = (os.environ.get("CHUMSTATS_REMOTE_URL")
+                          or os.environ.get("BALLSHARK_REMOTE_URL") or "")
     if not cfg.api_key:
-        cfg.api_key = os.environ.get("BALLSHARK_API_KEY") or ""
+        cfg.api_key = (os.environ.get("CHUMSTATS_API_KEY")
+                       or os.environ.get("BALLSHARK_API_KEY") or "")
     return cfg
 
 

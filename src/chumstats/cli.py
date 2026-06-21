@@ -1,4 +1,4 @@
-"""ballshark command-line entry point."""
+"""chumstats command-line entry point."""
 
 from __future__ import annotations
 
@@ -81,10 +81,11 @@ def cmd_run(args: argparse.Namespace) -> int:
         if enable_server:
             from .server import Broadcaster, make_app, serve
             # Friend mode: lock down the local server to only LIVE + OBS overlay.
-            # Set by the tray bundle. Defaults to False so dev `ballshark run` keeps
+            # Set by the tray bundle. Defaults to False so dev `chumstats run` keeps
             # its full local dashboard for the user developing this.
             friend_mode = (
-                os.environ.get("BALLSHARK_FRIEND_MODE", "").strip().lower()
+                (os.environ.get("CHUMSTATS_FRIEND_MODE")
+                 or os.environ.get("BALLSHARK_FRIEND_MODE") or "").strip().lower()
                 in ("1", "true", "yes")
             )
             broadcaster = Broadcaster()
@@ -234,7 +235,7 @@ def cmd_run(args: argparse.Namespace) -> int:
                 on_status=on_status,
             )
 
-        t = threading.Thread(target=run_thread, daemon=True, name="ballshark-ingest")
+        t = threading.Thread(target=run_thread, daemon=True, name="chumstats-ingest")
         t.start()
         print("[ingest] started")
         print("press Ctrl+C to stop.")
@@ -261,11 +262,11 @@ def cmd_run(args: argparse.Namespace) -> int:
 def cmd_push_history(args: argparse.Namespace) -> int:
     """Backfill: push every match from a local DB to the central server.
 
-    Reads matches from --db (or BALLSHARK_DB), reconstructs each MatchSummary,
-    and POSTs via MatchSyncer to BALLSHARK_REMOTE_URL. Skips matches the owner
+    Reads matches from --db (or CHUMSTATS_DB), reconstructs each MatchSummary,
+    and POSTs via MatchSyncer to CHUMSTATS_REMOTE_URL. Skips matches the owner
     didn't play in (offline practice, friend-only matches).
 
-    Requires BALLSHARK_REMOTE_URL + BALLSHARK_API_KEY + --primary-id (or
+    Requires CHUMSTATS_REMOTE_URL + CHUMSTATS_API_KEY + --primary-id (or
     RL_PLAYER_PRIMARY_ID env).
     """
     from .session import MatchSummary, PlayerLine
@@ -276,7 +277,7 @@ def cmd_push_history(args: argparse.Namespace) -> int:
     owner_pid = args.primary_id or settings.player_primary_id
 
     if not (settings.remote_url and settings.api_key and owner_pid):
-        print("missing one of: BALLSHARK_REMOTE_URL, BALLSHARK_API_KEY, --primary-id")
+        print("missing one of: CHUMSTATS_REMOTE_URL, CHUMSTATS_API_KEY, --primary-id")
         return 1
 
     with store._conn() as con:
@@ -376,7 +377,7 @@ def cmd_reprocess(args: argparse.Namespace) -> int:
           f"window; left {res['skipped_pruned']} older match(es) untouched "
           f"(ticks pruned — outside the reprocess window).")
     if res["replaced"]:
-        print("[reprocess] run `ballshark push-history` to re-sync the corrected "
+        print("[reprocess] run `chumstats push-history` to re-sync the corrected "
               "matches to the central server.")
     return 0
 
@@ -407,7 +408,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
         )
         print(f"[serve] central server on http://{settings.server_host}:{settings.server_port}")
         print(f"[serve] upload endpoint: POST /api/v1/match-summary")
-        print(f"[serve] dashboard: /dashboard  |  admin lives in CLI (ballshark admin ...)")
+        print(f"[serve] dashboard: /dashboard  |  admin lives in CLI (chumstats admin ...)")
 
         bot_task = None
         if enable_bot:
@@ -442,7 +443,7 @@ def cmd_replay(args: argparse.Namespace) -> int:
     store = Store(args.db) if args.db else None
     session = SessionTracker(self_name=args.me)
 
-    # Optional sync: when BALLSHARK_REMOTE_URL + BALLSHARK_API_KEY are set, also push
+    # Optional sync: when CHUMSTATS_REMOTE_URL + CHUMSTATS_API_KEY are set, also push
     # each replayed match to the central server. Useful for backfilling.
     use_sync = (not getattr(args, "no_sync", False)
                 and bool(settings.remote_url and settings.api_key
@@ -590,7 +591,7 @@ def cmd_player(args: argparse.Namespace) -> int:
     d = build_dashboard(store, name=args.name)
     if not d.overview.lines:
         print(f"no matches found for player named '{args.name}'.")
-        print("try `ballshark replay <captures>` first or check the name spelling.")
+        print("try `chumstats replay <captures>` first or check the name spelling.")
         return 1
     print(render_dashboard_text(d))
     return 0
@@ -610,7 +611,7 @@ def cmd_players(args: argparse.Namespace) -> int:
             ORDER BY n DESC, name
         """).fetchall()
     if not rows:
-        print("no players in the DB. play a match or run `ballshark replay`.")
+        print("no players in the DB. play a match or run `chumstats replay`.")
         return 0
     print(f"{'PLAYER':<22} {'PLATFORM':<10} {'MATCHES':>7} {'GOALS':>6} {'SAVES':>6}")
     print("-" * 60)
@@ -692,7 +693,7 @@ def cmd_post_test(args: argparse.Namespace) -> int:
         store = Store(args.db or s.db_path)
         rows = store.recent_matches(primary_id=me_id, limit=5)
         if not rows:
-            print("no captures provided and no matches in DB - run `ballshark replay <file>` first.")
+            print("no captures provided and no matches in DB - run `chumstats replay <file>` first.")
             return 1
         print(f"(no --files given, posting {len(rows)} most recent match(es) from DB)")
         # Crude: re-build MatchSummary from store query would be ugly; for the
@@ -735,7 +736,7 @@ def cmd_post_test(args: argparse.Namespace) -> int:
 
 def cmd_admin_create_user(args: argparse.Namespace) -> int:
     """Provision a new friend on the central server. Returns an API key the
-    friend pastes into their local .env as BALLSHARK_API_KEY."""
+    friend pastes into their local .env as CHUMSTATS_API_KEY."""
     s = Settings.from_env()
     store = Store(args.db or s.db_path)
     if store.get_user_by_primary_id(args.primary_id):
@@ -752,7 +753,7 @@ def cmd_admin_create_user(args: argparse.Namespace) -> int:
     if u['discord_id']:
         print(f"  discord_id   : {u['discord_id']}")
     print()
-    print(f"API key (give to the friend, they paste into .env as BALLSHARK_API_KEY):")
+    print(f"API key (give to the friend, they paste into .env as CHUMSTATS_API_KEY):")
     print(f"  {u['api_key']}")
     return 0
 
@@ -763,7 +764,7 @@ def cmd_admin_list_users(args: argparse.Namespace) -> int:
     store = Store(args.db or s.db_path)
     rows = store.list_users()
     if not rows:
-        print("no users yet. provision one with `ballshark admin create-user`.")
+        print("no users yet. provision one with `chumstats admin create-user`.")
         return 0
     print(f"{'DISPLAY NAME':<22} {'PRIMARY_ID':<36} {'DISCORD':<20} {'CREATED':<19}")
     print("-" * 100)
@@ -775,8 +776,8 @@ def cmd_admin_list_users(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(prog="ballshark")
-    p.add_argument("--db", default=str(Path.home() / ".ballshark" / "ballshark.db"),
+    p = argparse.ArgumentParser(prog="chumstats")
+    p.add_argument("--db", default=str(Path.home() / ".chumstats" / "chumstats.db"),
                    help="SQLite DB path")
     p.add_argument("--me", default=None, help="Your in-game name (e.g. @ChumtheWaters)")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -801,7 +802,7 @@ def main(argv: list[str] | None = None) -> int:
     p_run.add_argument("--primary-id", default=None, help="Your primary_id (e.g. Steam|765...|0)")
     p_run.add_argument("--no-bot", action="store_true", help="Disable Discord bot")
     p_run.add_argument("--no-server", action="store_true", help="Disable overlay server")
-    p_run.add_argument("--no-sync", action="store_true", help="Disable upload to central server (BALLSHARK_REMOTE_URL)")
+    p_run.add_argument("--no-sync", action="store_true", help="Disable upload to central server (CHUMSTATS_REMOTE_URL)")
     p_run.add_argument("--no-prune", action="store_true", help="Skip startup prune of old tick events")
     p_run.set_defaults(func=cmd_run)
 

@@ -22,7 +22,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-log = logging.getLogger("ballshark.config_wizard")
+log = logging.getLogger("chumstats.config_wizard")
 
 
 @dataclass

@@ -111,7 +111,7 @@ class RegisterRequest(BaseModel):
     display_name: str = ""
 
 
-log = logging.getLogger("ballshark.server")
+log = logging.getLogger("chumstats.server")
 
 
 OVERLAY_DIR = Path(__file__).resolve().parent / "overlay"
@@ -263,7 +263,7 @@ def make_app(broadcaster: Broadcaster, *, store=None,
     """
     global _LIVE_AVAILABLE
     _LIVE_AVAILABLE = live_enabled
-    app = FastAPI(title="ballshark")
+    app = FastAPI(title="chumstats")
 
     if OVERLAY_DIR.is_dir():
         app.mount("/static", StaticFiles(directory=str(OVERLAY_DIR)), name="static")
@@ -571,15 +571,15 @@ def make_app(broadcaster: Broadcaster, *, store=None,
 
     @_gated_get("/api/v1/whoami")
     async def api_whoami(
-        x_ballshark_key: str | None = Header(default=None, alias="X-Ballshark-Key"),
+        x_chumstats_key: str | None = Header(default=None, alias="X-Chumstats-Key"),
     ) -> dict:
         """Validate an API key. Used by the friend tray's setup wizard to check
         the URL+key combo before saving config."""
         if store is None:
             raise HTTPException(status_code=503, detail="server has no store configured")
-        if not x_ballshark_key:
-            raise HTTPException(status_code=401, detail="missing X-Ballshark-Key header")
-        user = store.get_user_by_api_key(x_ballshark_key)
+        if not x_chumstats_key:
+            raise HTTPException(status_code=401, detail="missing X-Chumstats-Key header")
+        user = store.get_user_by_api_key(x_chumstats_key)
         if not user:
             raise HTTPException(status_code=401, detail="invalid api key")
         return {
@@ -595,11 +595,11 @@ def make_app(broadcaster: Broadcaster, *, store=None,
         installs the app, enters ONE shared password, and the server issues them a
         personal API key bound to their detected RL account (created on first
         join; returning friends get their existing key back). Enable by setting
-        BALLSHARK_JOIN_PASSWORD on the central host."""
+        CHUMSTATS_JOIN_PASSWORD on the central host."""
         import os as _os
         if store is None:
             raise HTTPException(status_code=503, detail="server has no store configured")
-        join_pw = _os.environ.get("BALLSHARK_JOIN_PASSWORD", "").strip()
+        join_pw = _os.environ.get("CHUMSTATS_JOIN_PASSWORD", "").strip()
         if not join_pw:
             raise HTTPException(status_code=403,
                                 detail="self-registration is disabled (no join password set on the server)")
@@ -622,14 +622,14 @@ def make_app(broadcaster: Broadcaster, *, store=None,
     @_gated_post("/api/v1/match-summary")
     async def api_match_summary_upload(
         payload: MatchSummaryUpload,
-        x_ballshark_key: str | None = Header(default=None, alias="X-Ballshark-Key"),
+        x_chumstats_key: str | None = Header(default=None, alias="X-Chumstats-Key"),
     ) -> dict:
         """Friend-client → central-server match upload. See docs/multi-user-network.md."""
         if store is None:
             raise HTTPException(status_code=503, detail="server has no store configured")
-        if not x_ballshark_key:
-            raise HTTPException(status_code=401, detail="missing X-Ballshark-Key header")
-        user = store.get_user_by_api_key(x_ballshark_key)
+        if not x_chumstats_key:
+            raise HTTPException(status_code=401, detail="missing X-Chumstats-Key header")
+        user = store.get_user_by_api_key(x_chumstats_key)
         if not user:
             raise HTTPException(status_code=401, detail="invalid api key")
         if payload.my_row.primary_id != user["primary_id"]:
@@ -812,7 +812,7 @@ def _empty_derived() -> dict:
     }
 
 
-# RL point-icon catalog. Filenames sit in src/ballshark/overlay/icons/ and are
+# RL point-icon catalog. Filenames sit in src/chumstats/overlay/icons/ and are
 # served by the StaticFiles mount at /static/icons/. Keys here are the RL
 # StatfeedEvent.EventName values (plus a handful of synthesized kinds like
 # "Goal" from GoalScored). If a key isn't here we render no icon and fall
@@ -3912,7 +3912,7 @@ _LIVE_BOOST_TOGGLE_JS = r"""
       btn.classList.remove('is-active');
       document.body.classList.remove('live-mode-boost');
     }
-    try { localStorage.setItem('ballshark-live-mode', mode); } catch (e) {}
+    try { localStorage.setItem('chumstats-live-mode', mode); } catch (e) {}
   }
 
   btn.addEventListener('click', function() {
@@ -3922,7 +3922,7 @@ _LIVE_BOOST_TOGGLE_JS = r"""
   // Restore prior choice so refresh / new-tab stays in BOOST VIEW if that's
   // what the user had open.
   var saved = null;
-  try { saved = localStorage.getItem('ballshark-live-mode'); } catch (e) {}
+  try { saved = localStorage.getItem('chumstats-live-mode'); } catch (e) {}
   if (saved === 'boost') setMode('boost');
 
   // "HIDE ME" / "SHOW ME" toggle — only meaningful in boost mode. We just flip
@@ -3940,13 +3940,13 @@ _LIVE_BOOST_TOGGLE_JS = r"""
         selfLbl.textContent = 'HIDE ME';
         selfBtn.classList.remove('is-active');
       }
-      try { localStorage.setItem('ballshark-boost-exclude-self', exclude ? '1' : '0'); } catch (e) {}
+      try { localStorage.setItem('chumstats-boost-exclude-self', exclude ? '1' : '0'); } catch (e) {}
     }
     selfBtn.addEventListener('click', function() {
       setExcludeSelf(!document.body.classList.contains('boost-exclude-self'));
     });
     var savedExclude = null;
-    try { savedExclude = localStorage.getItem('ballshark-boost-exclude-self'); } catch (e) {}
+    try { savedExclude = localStorage.getItem('chumstats-boost-exclude-self'); } catch (e) {}
     if (savedExclude === '1') setExcludeSelf(true);
   }
 })();
@@ -4514,7 +4514,7 @@ def _match_insights_html(playback: dict, t0_name: str, t1_name: str) -> str:
 def _about_html() -> str:
     body = """
       <div class="prose prose-section">
-      <h1>How Ballshark works</h1>
+      <h1>How Chumstats works</h1>
       <p class="caption">A short explainer of where the numbers come from, what's possible,
         and what's intentionally out of reach.</p>
 
@@ -4523,8 +4523,8 @@ def _about_html() -> str:
         <p>Rocket League ships a built-in <b>Stats API</b>. When you set <code>PacketSendRate</code>
           to a non-zero value in <code>DefaultStatsAPI.ini</code>, the game opens a local TCP
           socket on <code>127.0.0.1:49123</code> and streams JSON events while you play.
-          Ballshark connects to that socket, persists everything to a local SQLite database
-          (<code>data/ballshark.db</code>), and turns the events into match summaries, lifetime
+          Chumstats connects to that socket, persists everything to a local SQLite database
+          (<code>data/chumstats.db</code>), and turns the events into match summaries, lifetime
           stats, and the OBS overlay.</p>
         <p>No remote services are involved. No third-party APIs (no ballchasing, no tracker.gg).
           The only network call out is your Discord bot posting embeds to your channel.</p>
@@ -4600,9 +4600,9 @@ PortNumber=49123</pre>
         <h2>Sharing the dashboard</h2>
         <p>The server binds to <code>0.0.0.0:5050</code> by default, so anyone on your LAN can
           hit the dashboard from their phone or laptop. To find your LAN URL, check the
-          console output when Ballshark starts - it prints something like
+          console output when Chumstats starts - it prints something like
           <code>http://192.168.1.42:5050/dashboard</code>. Lock it back down to loopback by
-          setting <code>BALLSHARK_SERVER_HOST=127.0.0.1</code> in <code>.env</code>.</p>
+          setting <code>CHUMSTATS_SERVER_HOST=127.0.0.1</code> in <code>.env</code>.</p>
       </section>
 
       <section>
@@ -4617,29 +4617,29 @@ PortNumber=49123</pre>
       </section>
 
       <section>
-        <h2>Sharing match links (ballshark.local alias)</h2>
+        <h2>Sharing match links (chumstats.local alias)</h2>
         <p>Discord match posts include a clickable link to the match detail
-          page. By default the link points at <code>http://ballshark.local:5050</code>
+          page. By default the link points at <code>http://chumstats.local:5050</code>
           so the URL stays the same when you switch laptops / network. To make
           the alias resolve, add one line to your Windows hosts file:</p>
-        <pre style="background:var(--bg);border:1px solid var(--border);padding:10px 14px;font-family:'JetBrains Mono',monospace;font-size:12.5px;overflow-x:auto">127.0.0.1   ballshark.local</pre>
+        <pre style="background:var(--bg);border:1px solid var(--border);padding:10px 14px;font-family:'JetBrains Mono',monospace;font-size:12.5px;overflow-x:auto">127.0.0.1   chumstats.local</pre>
         <p>Edit the hosts file at
           <code>C:\\Windows\\System32\\drivers\\etc\\hosts</code> as Administrator
           (right-click Notepad &rarr; Run as administrator &rarr; open the file).
           Append the line above and save. Test by opening
-          <code>http://ballshark.local:5050/live</code> in a browser.</p>
+          <code>http://chumstats.local:5050/live</code> in a browser.</p>
         <p>To hand-pick a different host (e.g., when you buy a real domain and
           host the server publicly), set the env var
-          <code>BALLSHARK_PUBLIC_URL=https://stats.yourdomain.com</code> and
-          restart ballshark.</p>
+          <code>CHUMSTATS_PUBLIC_URL=https://stats.yourdomain.com</code> and
+          restart chumstats.</p>
       </section>
 
       <section>
         <h2>What is a "session"?</h2>
         <p>The <em>Session</em> stats shown in Discord and on the dashboard
-          track everything since ballshark started running. Quit and relaunch
+          track everything since chumstats started running. Quit and relaunch
           the tracker and the counter resets. It does NOT roll on a 24-hour
-          window or reset at midnight - it's tied to the ballshark process
+          window or reset at midnight - it's tied to the chumstats process
           lifetime. Tip: launch the tracker once at the start of your gaming
           block and let it run; the session line will track that block.</p>
       </section>
@@ -6158,12 +6158,12 @@ _SIDEBAR_FILTER_JS = """<script>
     try { return new URLSearchParams(location.search).get(k); } catch (e) { return null; }
   }
   function getStored(k) {
-    try { return localStorage.getItem('ballshark-flt-' + k); } catch (e) { return null; }
+    try { return localStorage.getItem('chumstats-flt-' + k); } catch (e) { return null; }
   }
   function setStored(k, v) {
     try {
-      if (v === null || v === '') localStorage.removeItem('ballshark-flt-' + k);
-      else                        localStorage.setItem('ballshark-flt-' + k, v);
+      if (v === null || v === '') localStorage.removeItem('chumstats-flt-' + k);
+      else                        localStorage.setItem('chumstats-flt-' + k, v);
     } catch (e) {}
   }
   function effective(k) {
@@ -6208,7 +6208,7 @@ _SIDEBAR_FILTER_JS = """<script>
   // On first paint, if URL has NO filter params but localStorage DOES, redirect
   // once so the page actually applies the saved filters. Use a sentinel flag
   // to avoid loops.
-  if (!sessionStorage.getItem('ballshark-flt-applied')) {
+  if (!sessionStorage.getItem('chumstats-flt-applied')) {
     var url = new URL(location.href);
     var added = false;
     KEYS.forEach(function(k) {
@@ -6217,7 +6217,7 @@ _SIDEBAR_FILTER_JS = """<script>
         if (v) { url.searchParams.set(k, v); added = true; }
       }
     });
-    sessionStorage.setItem('ballshark-flt-applied', '1');
+    sessionStorage.setItem('chumstats-flt-applied', '1');
     if (added) { location.replace(url.toString()); }
   }
 })();
@@ -6232,7 +6232,7 @@ def _page_wrap(title: str, body_html: str, *, status: int = 200, active: str = "
     body_cls = "with-sidebar" if sidebar else "no-sidebar"
     main_html = f'<main class="page-main">{body_html}</main>' if sidebar else body_html
     return f"""<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>Ballshark - {html.escape(title)}</title>
+<html lang="en"><head><meta charset="utf-8"><title>Chumstats - {html.escape(title)}</title>
 <link rel="icon" type="image/png" href="/static/brand/chum-logo.png">
 {_STYLE_TAG}
 </head><body class="{body_cls}">
@@ -6342,9 +6342,9 @@ def _nav(active: str = "", friend_mode: bool = False) -> str:
     return f'''
 <nav class="topnav">
   <a class="brand" href="{brand_href}">
-    <span class="brand-logo"><img src="/static/brand/chum-logo.png" alt="Ballshark" /></span>
+    <span class="brand-logo"><img src="/static/brand/chum-logo.png" alt="Chumstats" /></span>
     <span>
-      <div class="brand-name">Ballshark</div>
+      <div class="brand-name">Chumstats</div>
     </span>
   </a>
   <div class="navlinks">{"".join(parts)}</div>
@@ -6372,11 +6372,11 @@ _THEME_SCRIPT = """
   }
   function set(t) {
     document.documentElement.setAttribute('data-theme', t);
-    try { localStorage.setItem('ballshark-theme', t); } catch (e) {}
+    try { localStorage.setItem('chumstats-theme', t); } catch (e) {}
     paint(t);
   }
   var saved = null;
-  try { saved = localStorage.getItem('ballshark-theme'); } catch (e) {}
+  try { saved = localStorage.getItem('chumstats-theme'); } catch (e) {}
   if (!saved) {
     var prefers = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches;
     saved = prefers ? 'light' : 'dark';
@@ -9407,12 +9407,12 @@ body.live-mode-boost .boost-hud-percent {
 def _featured_players(store, *, limit: int = 8) -> list[dict]:
     """Most-active real players, for the splash quick-jump chips. Auto-derived
     from match counts so any deployment surfaces its own crew; override with the
-    BALLSHARK_FEATURED_PIDS env var (comma-separated primary_ids) for a curated
+    CHUMSTATS_FEATURED_PIDS env var (comma-separated primary_ids) for a curated
     list. No account ids are baked into the code."""
     if store is None:
         return []
     import os
-    override = [p.strip() for p in os.environ.get("BALLSHARK_FEATURED_PIDS", "").split(",") if p.strip()]
+    override = [p.strip() for p in os.environ.get("CHUMSTATS_FEATURED_PIDS", "").split(",") if p.strip()]
     try:
         with store._conn() as con:
             rows = con.execute("""
@@ -9477,8 +9477,8 @@ def _splash_html(store, self_primary_id: str | None = None) -> str:
       {_SPLASH_STYLE}
       <section class="splash">
         <div class="splash-hero">
-          <img class="splash-logo" src="/static/brand/chum-logo.png" alt="Ballshark" />
-          <h1>Ballshark</h1>
+          <img class="splash-logo" src="/static/brand/chum-logo.png" alt="Chumstats" />
+          <h1>Chumstats</h1>
           <p class="splash-tagline">Rocket League match stats for you and your crew &mdash;
             goals, boost, positioning, and the story of every game, from everyone who plays.</p>
           <div class="splash-cta">
@@ -9550,7 +9550,7 @@ def _overlay_picker_html(host: str, friend_mode: bool = False) -> str:
           <li>Paste the URL into the URL field and set Width/Height to the recommended size.</li>
           <li>Check <b>Shutdown source when not visible</b> and <b>Refresh when scene activates</b>.</li>
           <li>Position the source over your gameplay capture, avoiding RL's own UI corners.</li>
-          <li>Ballshark must be running for the URL to respond.</li>
+          <li>Chumstats must be running for the URL to respond.</li>
         </ol>
       </section>
 

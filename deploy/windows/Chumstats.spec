@@ -1,11 +1,11 @@
-# PyInstaller spec for the Ballshark friend distributable.
+# PyInstaller spec for the Chumstats friend distributable.
 #
 # Build:
 #     ./deploy/windows/build.ps1
 # or:
-#     pyinstaller deploy/windows/Ballshark.spec --noconfirm
+#     pyinstaller deploy/windows/Chumstats.spec --noconfirm
 #
-# Output: dist/Ballshark/Ballshark.exe (one-folder mode)
+# Output: dist/Chumstats/Chumstats.exe (one-folder mode)
 # Why one-folder vs one-file: faster startup, easier to debug, antivirus is
 # less likely to flag it.
 
@@ -17,13 +17,13 @@ ROOT = Path(SPECPATH).resolve().parents[1]  # deploy/windows -> deploy -> repo r
 SRC  = ROOT / "src"
 
 a = Analysis(
-    [str(ROOT / "ballshark-tray.pyw")],
+    [str(ROOT / "chumstats-tray.pyw")],
     pathex=[str(SRC)],
     binaries=[],
     datas=[
         # Bundle the overlay HTML/CSS/JS + icon PNGs so the embedded server
         # can serve them.
-        (str(SRC / "ballshark" / "overlay"), "ballshark/overlay"),
+        (str(SRC / "chumstats" / "overlay"), "chumstats/overlay"),
     ],
     hiddenimports=[
         # pystray's platform backend selection is dynamic.
@@ -33,7 +33,7 @@ a = Analysis(
         # Pydantic v2 picks at runtime; PyInstaller's auto-detect usually finds
         # this, but list it to be safe.
         "pydantic", "pydantic_core",
-        # Uvicorn + websockets aren't on the import graph from ballshark-tray.pyw
+        # Uvicorn + websockets aren't on the import graph from chumstats-tray.pyw
         # directly (they're imported lazily by the subprocess), but the
         # subprocess invokes sys.executable which inside the bundle is the
         # bundled interpreter — so it needs them too.
@@ -45,14 +45,14 @@ a = Analysis(
         "websockets", "websockets.legacy", "websockets.legacy.server",
         # FastAPI internals
         "fastapi",
-        # The lazily-imported ballshark submodules the subprocess + tray use.
+        # The lazily-imported chumstats submodules the subprocess + tray use.
         # (Several are imported inside functions, which PyInstaller's static
         # graph can miss — list them so the frozen build doesn't crash.)
-        "ballshark.cli", "ballshark.server", "ballshark.ingest", "ballshark.session",
-        "ballshark.store", "ballshark.analytics", "ballshark.models",
-        "ballshark.bot", "ballshark.sync", "ballshark.replay",
-        "ballshark.identity", "ballshark.autostart", "ballshark.config_wizard",
-        "ballshark.tray_config", "ballshark.tray_wizard",
+        "chumstats.cli", "chumstats.server", "chumstats.ingest", "chumstats.session",
+        "chumstats.store", "chumstats.analytics", "chumstats.models",
+        "chumstats.bot", "chumstats.sync", "chumstats.replay",
+        "chumstats.identity", "chumstats.autostart", "chumstats.config_wizard",
+        "chumstats.tray_config", "chumstats.tray_wizard",
     ],
     hookspath=[],
     runtime_hooks=[],
@@ -71,7 +71,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name="Ballshark",
+    name="Chumstats",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -86,5 +86,5 @@ coll = COLLECT(
     a.datas,
     strip=False,
     upx=False,
-    name="Ballshark",
+    name="Chumstats",
 )

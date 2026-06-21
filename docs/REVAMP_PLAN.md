@@ -1,4 +1,4 @@
-# Ballshark revamp — RL-correctness + multi-user + UX pass
+# Chumstats revamp — RL-correctness + multi-user + UX pass
 
 Grounded in a 20-agent research/audit pass (real RL scoring/stat/boost/time rules
 from RLBot + ballchasing + RL wiki) cross-checked against the codebase. **Every
