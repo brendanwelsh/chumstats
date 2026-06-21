@@ -1439,6 +1439,8 @@ def _player_ball_section_html(store, name: str | None) -> str:
             Every BallHit this player has been on across
             {td['matches_with_touches']} stored match{'' if td['matches_with_touches'] == 1 else 'es'},
             rotated so they always attack &#8594; (right). Brighter = more touches.
+            Kickoff first-touches (always dead-centre) are excluded so they don't
+            skew the map.
           </span>
         </div>
         <div class="insights-heatmap">
@@ -1460,7 +1462,7 @@ def _player_ball_section_html(store, name: str | None) -> str:
     sd = _lifetime_shot_data(store, name)
     shot_card = ""
     if sd["shots"]:
-        shotmap = _ball_heatmap_svg(sd, key=f"shots-{name_slug}")
+        shotmap = _ball_heatmap_svg(sd, key=f"shots-{name_slug}", exclude_center=False)
         shot_card = f"""
       <div class="card insights-card">
         <div class="section-title">
@@ -2431,7 +2433,8 @@ def _match_detail_html(store, match_id: str, viewer_pid: str | None, viewer_name
                                    compact=True, key=name_slug, orient=False)
             mini_heatmap = (
                 f'<div class="rc-adv-section">'
-                f'<div class="rc-adv-title">Where they touched the ball</div>'
+                f'<div class="rc-adv-title">Where they touched the ball '
+                f'<span class="dim" style="font-weight:400">· kickoffs excluded</span></div>'
                 f'<div class="rc-mini-heatmap">{hm}</div>'
                 f'</div>'
             )
@@ -3909,8 +3912,15 @@ _LIVE_BOOST_TOGGLE_JS = r"""
 """
 
 
+# Kickoff first-touches always land at dead centre (the ball spawns at 0,0), so
+# ~15% of all touches pile into one cell and saturate the density map. Drop
+# touches inside this centre box from touch heatmaps so they read true.
+_KICKOFF_CENTER_UU = 256
+
+
 def _ball_heatmap_svg(playback: dict, player_filter: str | None = None,
-                     compact: bool = False, key: str = "", orient: bool = True) -> str:
+                     compact: bool = False, key: str = "", orient: bool = True,
+                     exclude_center: bool = True) -> str:
     """Top-down ball-touch *density* heatmap on ONE pitch.
 
     Every BallHit is splatted as a soft point, Gaussian-blurred into a
@@ -3931,6 +3941,10 @@ def _ball_heatmap_svg(playback: dict, player_filter: str | None = None,
     ball = playback.get("ball_track") or []
     if player_filter:
         ball = [bh for bh in ball if bh["player"] == player_filter]
+    if exclude_center:
+        R = _KICKOFF_CENTER_UU
+        ball = [bh for bh in ball
+                if abs(bh.get("x", 0)) > R or abs(bh.get("y", 0)) > R]
     if not ball:
         return ""
 
