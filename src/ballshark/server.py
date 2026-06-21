@@ -5644,7 +5644,7 @@ def _opponents_page_html(store, self_primary_id, self_name, *,
             )
             cells.append(f"""
               <tr class="row">
-                <td>{link_open}<b>{opp_name}</b>{link_close}{bot_chip}</td>
+                <td>{link_open}<b>{html.escape(opp_name)}</b>{link_close}{bot_chip}</td>
                 <td>{plat_cell}</td>
                 <td class="num tnum"><b>{r['matches']}</b></td>
                 <td class="num tnum">
@@ -5688,7 +5688,7 @@ def _opponents_page_html(store, self_primary_id, self_name, *,
             wr = (wins / r["matches"] * 100) if r["matches"] else 0.0
             roster = (r["roster"] or "").split(",")
             roster_chips = " ".join(
-                f'<span class="chip" style="font-size:10.5px">{n}</span>'
+                f'<span class="chip" style="font-size:10.5px">{html.escape(n)}</span>'
                 for n in roster[:6]
             )
             if len(roster) > 6:
@@ -5697,7 +5697,7 @@ def _opponents_page_html(store, self_primary_id, self_name, *,
             last_fallback = datetime.fromtimestamp(r["last_played"]).strftime("%b %d")
             team_cells.append(f"""
               <tr class="row click" onclick="window.location='/club/{quote(r['opp_team'], safe='')}'">
-                <td><a class="player-link" href="/club/{quote(r['opp_team'], safe='')}"><span class="club-name" title="{r['opp_team']}"><b>{r['opp_team']}</b></span></a></td>
+                <td><a class="player-link" href="/club/{quote(r['opp_team'], safe='')}"><span class="club-name" title="{html.escape(r['opp_team'])}"><b>{html.escape(r['opp_team'])}</b></span></a></td>
                 <td class="num tnum"><b>{r['matches']}</b></td>
                 <td class="num tnum">
                   <span class="{'good' if wins > losses else 'bad' if losses > wins else 'dim'}">
