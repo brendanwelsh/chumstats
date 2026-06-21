@@ -344,7 +344,7 @@ def build_dashboard(store, *, primary_id: str | None = None,
                     window_days: int | None = None) -> Dashboard:
     """Aggregate everything we know about one player from all stored matches."""
     d = Dashboard()
-    d.player_label = primary_id or name or "(unknown player)"
+    d.player_label = name or primary_id or "(unknown player)"
     if not store or (not primary_id and not name):
         return d
 

@@ -312,20 +312,25 @@ def make_app(broadcaster: Broadcaster, *, store=None,
     async def player_page(name: str, include_bots: int = 0,
                           mode: int | None = None,
                           platform: str | None = None,
-                          window: str | None = None):
-        """Career dashboard for an arbitrary player name from the DB."""
+                          window: str | None = None,
+                          pid: str | None = None):
+        """Career dashboard for an arbitrary player. Prefer the stable primary_id
+        (?pid=) so two players who share a display name don't merge into one
+        record; fall back to name-only for id-less links."""
         if store is None:
             return HTMLResponse("<p>No DB configured</p>")
         from .analytics import build_dashboard
         mode_filter = mode if mode in (1, 2, 3, 4) else None
         window_days = {"today": 1, "7d": 7, "30d": 30}.get(window or "", None)
-        d = build_dashboard(store, name=name, include_bots=bool(include_bots),
+        d = build_dashboard(store, primary_id=pid or None, name=name,
+                            include_bots=bool(include_bots),
                             mode_filter=mode_filter,
                             platform_filter=platform or None,
                             window_days=window_days)
         if not d.overview.lines:
             return HTMLResponse(_not_found_html(name), status_code=404)
-        return HTMLResponse(_dashboard_html(d, store=store, name=name, is_self=False,
+        return HTMLResponse(_dashboard_html(d, store=store, name=name,
+                                            primary_id=pid or None, is_self=False,
                                             include_bots=bool(include_bots)))
 
     @_gated_get("/players")
@@ -1813,7 +1818,12 @@ def _players_directory_html(store, self_primary_id: str | None = None,
     def _row(r) -> str:
         is_bot = bool(r["is_bot"])
         tag = "<span class='tag'>BOT</span>" if is_bot else ""
+        _pid = r["primary_id"] if "primary_id" in r.keys() else ""
         href = f"/player/{quote(r['name'], safe='')}"
+        # Route by the stable primary_id so a shared display name doesn't merge
+        # two distinct accounts.
+        if _pid and not _pid.startswith("Unknown") and not is_bot:
+            href += f"?pid={quote(_pid, safe='')}"
         n = r["n"] or 1
         wins = r["wins"] or 0
         winpct = (wins / n) * 100
