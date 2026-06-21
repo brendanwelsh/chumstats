@@ -789,7 +789,7 @@ _PRO_BENCHMARKS: dict[str, str] = {
     "Time on ground %":            "55%",
     "Avg speed":                   "1400",
     "Boost used":                  "1400 / match",
-    "Time at 0 boost %":           "8%",
+    "Time near-empty %":           "8%",
     "Time at 100 boost %":         "5%",
     "BPM (boost used per minute)": "400",
     "Defensive third %":           "30%",
@@ -2343,7 +2343,7 @@ def _match_detail_html(store, match_id: str, viewer_pid: str | None, viewer_name
                 {boost_bar}
                 <ul class="rc-stat-line">
                   <li><b>{boost:.0f}</b> <span>used</span></li>
-                  <li><b>{zero_pct:.0f}%</b> <span>at 0 boost</span></li>
+                  <li><b>{zero_pct:.0f}%</b> <span>near-empty boost</span></li>
                   <li><b>{full_pct:.0f}%</b> <span>at 100 boost</span></li>
                 </ul>
               </div>
@@ -5265,7 +5265,7 @@ def _compare_page_html(store, slots: list[str], *, self_name: str | None = None,
         ("Boost timing", "single", [
             ("BPM (boost used per minute)", lambda v: f"{v:.0f}",
              bpm_vals, True),
-            ("Time at 0 boost %",   lambda v: f"{v*100:.1f}%",
+            ("Time near-empty %",   lambda v: f"{v*100:.1f}%",
              [pct_if(r.get("ticks"), r.get("ticks_zero")) for r in rows], False),
             ("Time at 100 boost %", lambda v: f"{v*100:.1f}%",
              [pct_if(r.get("ticks"), r.get("ticks_full")) for r in rows], True),

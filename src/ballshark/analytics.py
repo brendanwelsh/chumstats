@@ -323,7 +323,7 @@ class Dashboard:
     boost: MetricGroup = field(default_factory=lambda: MetricGroup("Boost (lifetime)"))
     records: MetricGroup = field(default_factory=lambda: MetricGroup("Single-match records"))
     arenas: MetricGroup = field(default_factory=lambda: MetricGroup("By arena"))
-    modes: MetricGroup = field(default_factory=lambda: MetricGroup("By mode"))
+    modes: MetricGroup = field(default_factory=lambda: MetricGroup("Online vs offline"))
     recent_form: MetricGroup = field(default_factory=lambda: MetricGroup("Recent form (last 10)"))
     teammates: MetricGroup = field(default_factory=lambda: MetricGroup("Best teammates"))
     opponents: MetricGroup = field(default_factory=lambda: MetricGroup("Toughest opponents"))
@@ -453,10 +453,10 @@ def build_dashboard(store, *, primary_id: str | None = None,
         # rather than show a misleading number.
         if matches and (ticks / matches) >= SPECTATOR_TICKS_PER_MATCH:
             d.movement.lines.extend([
-                MetricLine("Avg speed", f"{(row['speed_sum'] or 0) / ticks:.2f}",
-                           f"max {row['speed_max'] or 0:.1f} · relative scale, not km/h"),
+                MetricLine("Avg speed", f"{(row['speed_sum'] or 0) / ticks:.1f} km/h",
+                           f"max {row['speed_max'] or 0:.1f} km/h"),
                 MetricLine("Supersonic", _pct(row["ticks_super"] or 0, ticks, 1),
-                           "approx · speed-threshold heuristic"),
+                           "time at 2200+ uu/s (79.2 km/h)"),
                 MetricLine("In air",     _pct(row["ticks_air"] or 0, ticks, 1), ""),
                 MetricLine("On wall",    _pct(row["ticks_wall"] or 0, ticks, 1), ""),
                 MetricLine("On ground",  _pct(row["ticks_ground"] or 0, ticks, 1), ""),
