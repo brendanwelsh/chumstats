@@ -16,6 +16,7 @@ from .replay import iter_for_aggregator
 from .session import (
     MatchSummary, SessionTracker, SUPERSONIC_THRESHOLD, run_aggregation,
 )
+from .arenas import arena_nice
 from .store import Store
 
 
@@ -156,7 +157,8 @@ def cmd_run(args: argparse.Namespace) -> int:
                 return
 
             if event_name == "MatchCreated":
-                broadcaster.push_match_start({"arena": last_arena}, loop)
+                broadcaster.push_match_start(
+                    {"arena": last_arena, "arena_nice": arena_nice(last_arena)}, loop)
             elif event_name == "UpdateState":
                 game = raw.get("Game") or {}
                 teams = game.get("Teams") or []
@@ -180,6 +182,7 @@ def cmd_run(args: argparse.Namespace) -> int:
                     "time_seconds": game.get("TimeSeconds", 0),
                     "is_overtime":  game.get("bOvertime", False),
                     "arena":        last_arena,
+                    "arena_nice":   arena_nice(last_arena),
                     "ball_speed":   ball.get("Speed", 0),
                     "ball_team":    ball.get("TeamNum"),
                     "has_winner":   game.get("bHasWinner", False),

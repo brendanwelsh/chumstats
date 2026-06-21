@@ -38,6 +38,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .session import MatchSummary, SessionTotals
+from .arenas import arena_nice as _arena_nice
 
 
 # ---- Multi-user sync wire models (POST /api/v1/match-summary body) ----
@@ -606,64 +607,6 @@ def make_app(broadcaster: Broadcaster, *, store=None,
 
 
 # ---- shared helpers ----
-
-ARENA_NICE = {
-    # Standard
-    "stadium_p":              "DFH Stadium",
-    "stadium_day_p":          "DFH Stadium (Day)",
-    "stadium_winter_p":       "Snowy Stadium (Snow Day)",
-    # Urban Central
-    "trainstation_p":         "Urban Central",
-    "trainstation_night_p":   "Urban Central (Night)",
-    "trainstation_dawn_p":    "Urban Central (Dawn)",
-    # Mannfield
-    "eurostadium_p":          "Mannfield",
-    "eurostadium_night_p":    "Mannfield (Night)",
-    "eurostadium_rainy_p":    "Mannfield (Stormy)",
-    "eurostadium_dusk_p":     "Mannfield (Dusk)",
-    # Beckwith Park
-    "park_p":                 "Beckwith Park",
-    "park_night_p":           "Beckwith Park (Night)",
-    "park_rainy_p":           "Beckwith Park (Stormy)",
-    # Champions Field / Wasteland / Throwback / themed
-    "cs_p":                   "Champions Field",
-    "wasteland_p":            "Wasteland",
-    "wasteland_grs_p":        "Wasteland (Standard)",
-    "wasteland_night_p":      "Wasteland (Night)",
-    "street_p":               "Throwback Stadium",
-    # Estadio Vida
-    "mall_p":                 "Estadio Vida",
-    "mall_day_p":             "Estadio Vida (Day)",
-    "mall_night_p":           "Estadio Vida (Night)",
-    "mall_storm_p":           "Estadio Vida (Stormy)",
-    # Aqua / Outlaw / Forbidden / NeoTokyo
-    "underwater_p":           "AquaDome",
-    "underwater_grs_p":       "AquaDome (Standard)",
-    "outlaw_oasis_p":         "Deadeye Canyon (Outlaw)",
-    "chinastadium_p":         "Forbidden Temple",
-    "chn_stadium_p":          "Forbidden Temple",
-    "neotokyo_standard_p":    "Neo Tokyo",
-    # Extra modes
-    "hoopsstadium_p":         "Dunk House (Hoops)",
-    "shattershot_p":          "Core 707 (Dropshot)",
-}
-
-
-def _arena_nice(arena: str) -> str:
-    """Map RL's internal arena codes to friendly names. Fall back to a clean
-    title-cased version of the code (stripping trailing _P and underscores)."""
-    if not arena:
-        return "Unknown arena"
-    key = arena.lower()
-    if key in ARENA_NICE:
-        return ARENA_NICE[key]
-    cleaned = arena
-    if cleaned.lower().endswith("_p"):
-        cleaned = cleaned[:-2]
-    cleaned = cleaned.replace("_", " ").strip()
-    parts = [p.capitalize() if not p.isupper() else p for p in cleaned.split()]
-    return " ".join(parts) or "Unknown arena"
-
 
 def _form_string(results: list[bool]) -> str:
     """Render last-N form like '✓ ✓ ✗ ✓ ✓' instead of 'WWLWW'."""
@@ -3418,7 +3361,7 @@ _LIVE_JS = r"""
       periodEl.textContent = 'Regulation';
       otPill.style.display = 'none';
     }
-    arenaEl.textContent = arenaNice(data.arena);
+    arenaEl.textContent = data.arena_nice || arenaNice(data.arena);
     ballSpeedEl.textContent = Math.round(data.ball_speed || 0);
 
     var players = data.players || [];
@@ -3483,7 +3426,7 @@ _LIVE_JS = r"""
     inMatch = true;
     idle.style.display = 'none';
     setPipState('on', 'LIVE');
-    meta.textContent = 'New match starting on ' + arenaNice(data.arena || '');
+    meta.textContent = 'New match starting on ' + (data.arena_nice || arenaNice(data.arena || ''));
     // Pre-match scouting card: fetch each player's recent form + career
     // averages from local DB and render above the hero.
     var matchPlayers = (data.players || []).filter(function(p) { return p && p.name; });
