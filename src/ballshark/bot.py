@@ -385,13 +385,13 @@ def build_match_embed(
     description = "```ansi\n" + "\n".join(sb_lines) + "\n```"
 
     # If we have a public URL configured, make the title a clickable link to the
-    # match-detail page, and surface the same link as a visible line at the top
-    # of the description (an embed title-link alone is easy to miss).
+    # match-detail page, and surface the same link as a clean masked link at the
+    # top of the description (the URL stays hidden behind the text; an embed
+    # title-link alone is easy to miss).
     embed_url = None
     if public_url and s.match_id:
         embed_url = f"{public_url.rstrip('/')}/match/{s.match_id}"
-        host = public_url.split("://", 1)[-1].rstrip("/")
-        description = f"🔗 [View full match → {host}]({embed_url})\n" + description
+        description = f"🔗 [View full match details]({embed_url})\n" + description
 
     embed = discord.Embed(
         title=f"{title_icon} {title_text}".strip(),
