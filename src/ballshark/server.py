@@ -5118,6 +5118,7 @@ def _opponents_page_html(store, self_primary_id, self_name, *,
         return _page_wrap("Opponents", '<div class="empty">No player configured.</div>', active="opponents")
 
     self_clause = "x.primary_id = ?" if self_primary_id else "x.name = ?"
+    self_clause_me = "me.primary_id = ?" if self_primary_id else "me.name = ?"
     self_arg = self_primary_id or self_name
     bots_clause = "" if include_bots else " AND opp.is_bot = 0"
     mode_clause = ""
@@ -5160,32 +5161,52 @@ def _opponents_page_html(store, self_primary_id, self_name, *,
             LIMIT ?
         """, (self_arg, *mode_args, limit)).fetchall()
 
-        # Opposing TEAMS: aggregate by the opposing team's name in each match.
-        # Only counts matches where their team name isn't the default
-        # "Blue"/"Orange" (so we focus on actual clans / named teams).
+        # Opposing TEAMS: aggregate per MATCH (one row per match, via me's single
+        # row) so the match count isn't multiplied by the opponent roster size.
+        # goals_for/against are the team scoreline -> real GA / goal difference.
         team_rows = con.execute(f"""
             SELECT
-                CASE
-                    WHEN me.team_num = 0 THEN m.team1_name
-                    ELSE m.team0_name
-                END                                AS opp_team,
-                COUNT(*)                           AS matches,
-                SUM(CASE WHEN me.team_num = m.winner_team_num THEN 1 ELSE 0 END) AS wins,
-                MAX(m.started_at)                  AS last_played,
-                GROUP_CONCAT(DISTINCT opp.name)    AS roster
-            FROM match_player_stats me
-            JOIN matches m              ON m.id = me.match_id
-            JOIN match_player_stats opp ON opp.match_id = m.id
-                                        AND opp.team_num != me.team_num
-            JOIN match_player_stats x   ON x.match_id = me.match_id
-                                        AND x.primary_id = me.primary_id
-            WHERE {self_clause}{bots_clause}{mode_clause}
-              AND CASE WHEN me.team_num = 0 THEN m.team1_name ELSE m.team0_name END NOT IN ('Blue', 'Orange', 'Home', 'Away', '')
+                opp_team,
+                COUNT(*)         AS matches,
+                SUM(won)         AS wins,
+                SUM(gf)          AS goals_for,
+                SUM(ga)          AS goals_against,
+                MAX(last_played) AS last_played
+            FROM (
+                SELECT
+                    CASE WHEN me.team_num = 0 THEN m.team1_name ELSE m.team0_name END AS opp_team,
+                    CASE WHEN me.team_num = m.winner_team_num THEN 1 ELSE 0 END AS won,
+                    CASE WHEN me.team_num = 0 THEN m.team0_score ELSE m.team1_score END AS gf,
+                    CASE WHEN me.team_num = 0 THEN m.team1_score ELSE m.team0_score END AS ga,
+                    m.started_at AS last_played
+                FROM match_player_stats me
+                JOIN matches m ON m.id = me.match_id
+                WHERE {self_clause_me}{mode_clause}
+            )
+            WHERE opp_team NOT IN ('Blue', 'Orange', 'Home', 'Away', '')
             GROUP BY opp_team
             HAVING matches >= 1
             ORDER BY matches DESC, last_played DESC
             LIMIT ?
         """, (self_arg, *mode_args, limit)).fetchall()
+
+        # Rosters they fielded, fetched separately (the opponent join would
+        # otherwise re-inflate the per-match aggregation above).
+        roster_map: dict[str, str] = {}
+        if team_rows:
+            for rr in con.execute(f"""
+                SELECT
+                    CASE WHEN me.team_num = 0 THEN m.team1_name ELSE m.team0_name END AS opp_team,
+                    GROUP_CONCAT(DISTINCT opp.name) AS roster
+                FROM match_player_stats me
+                JOIN matches m ON m.id = me.match_id
+                JOIN match_player_stats opp ON opp.match_id = m.id
+                                            AND opp.team_num != me.team_num
+                WHERE {self_clause_me}{bots_clause}{mode_clause}
+                  AND CASE WHEN me.team_num = 0 THEN m.team1_name ELSE m.team0_name END NOT IN ('Blue', 'Orange', 'Home', 'Away', '')
+                GROUP BY opp_team
+            """, (self_arg, *mode_args)).fetchall():
+                roster_map[rr["opp_team"]] = rr["roster"] or ""
 
     if not rows:
         body_rows_html = '<div class="empty">No opponents yet.</div>'
@@ -5254,7 +5275,12 @@ def _opponents_page_html(store, self_primary_id, self_name, *,
             wins = r["wins"] or 0
             losses = (r["matches"] or 0) - wins
             wr = (wins / r["matches"] * 100) if r["matches"] else 0.0
-            roster = (r["roster"] or "").split(",")
+            roster = [n for n in (roster_map.get(r["opp_team"]) or "").split(",") if n]
+            gf = r["goals_for"] or 0
+            ga = r["goals_against"] or 0
+            gd = gf - ga
+            gd_str = f"+{gd}" if gd > 0 else str(gd)
+            gd_cls = "good" if gd > 0 else "bad" if gd < 0 else "dim"
             roster_chips = " ".join(
                 f'<span class="chip" style="font-size:10.5px">{html.escape(n)}</span>'
                 for n in roster[:6]
@@ -5273,6 +5299,9 @@ def _opponents_page_html(store, self_primary_id, self_name, *,
                   </span>
                 </td>
                 <td class="num tnum">{wr:.0f}%</td>
+                <td class="num tnum">{gf}</td>
+                <td class="num tnum">{ga}</td>
+                <td class="num tnum"><span class="{gd_cls}">{gd_str}</span></td>
                 <td>{roster_chips}</td>
                 <td class="dim tnum"><time datetime="{last_iso}">{last_fallback}</time></td>
               </tr>
@@ -5291,6 +5320,9 @@ def _opponents_page_html(store, self_primary_id, self_name, *,
                 <th class="num">Matches</th>
                 <th class="num">W-L</th>
                 <th class="num">Win rate</th>
+                <th class="num" title="Goals for">GF</th>
+                <th class="num" title="Goals against">GA</th>
+                <th class="num" title="Goal difference">GD</th>
                 <th>Roster faced</th>
                 <th>Last played</th>
               </tr></thead>
