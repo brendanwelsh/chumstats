@@ -640,15 +640,19 @@ class ComparisonResult:
 
 def _lifetime_row(con, primary_id: str | None, name: str | None,
                   *, mode_filter: int | None = None,
-                  window_days: int | None = None) -> dict:
+                  window_days: int | None = None,
+                  match_ids: set | None = None) -> dict:
     """Aggregate stats for either primary_id (preferred) or name. Optional
-    filters narrow the result to matches that match playlist size / recency."""
+    filters narrow the result to matches that match playlist size / recency.
+    When `match_ids` is given (a per-player last-N-games scope), it supersedes
+    the time window so comparisons can be over an equal recent sample."""
     if primary_id and primary_id != "Unknown|0|0":
         where, arg = "primary_id = ?", primary_id
     elif name:
         where, arg = "name = ?", name
     else:
         return {}
+    params: list = [arg]
     extras = ""
     if mode_filter is not None:
         extras += f"""
@@ -657,7 +661,13 @@ def _lifetime_row(con, primary_id: str | None, name: str | None,
                 WHERE match_id = m.id GROUP BY team_num
             )) = {int(mode_filter)}
         """
-    if window_days and window_days > 0:
+    if match_ids is not None:
+        # Empty scope -> player has no matches in the chosen window.
+        if not match_ids:
+            return {}
+        extras += f" AND m.id IN ({','.join('?' * len(match_ids))})"
+        params.extend(match_ids)
+    elif window_days and window_days > 0:
         import time as _time
         cutoff = _time.time() - window_days * 86400
         extras += f" AND m.started_at >= {cutoff}"
@@ -686,7 +696,7 @@ def _lifetime_row(con, primary_id: str | None, name: str | None,
         FROM match_player_stats mps
         JOIN matches m ON m.id = mps.match_id
         WHERE mps.{where}{extras}
-    """, (arg,)).fetchone()
+    """, params).fetchone()
     return dict(row) if row else {}
 
 

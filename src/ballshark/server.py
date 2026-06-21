@@ -379,6 +379,7 @@ def make_app(broadcaster: Broadcaster, *, store=None,
         include_bots: int = 0,
         mode: int | None = None,
         window: str | None = None,
+        last: int = 20,
     ):
         if store is None:
             return HTMLResponse("<p>No DB configured</p>")
@@ -416,6 +417,7 @@ def make_app(broadcaster: Broadcaster, *, store=None,
             include_bots=bool(include_bots),
             mode_filter=mode_filter,
             window_days=window_days,
+            last_n=(last if last and last > 0 else None),
         ))
 
     @app.get("/live")
@@ -1092,29 +1094,41 @@ def _derive_match_extras(store, match_id: str) -> dict[str, dict]:
     return dict(out)
 
 
-def _lifetime_derived(store, name: str | None) -> dict:
-    """Aggregate derived stats across all matches a player appeared in.
-    Single bulk scan of raw_events filtered to those matches."""
+def _lifetime_derived(store, name: str | None, match_ids: set | None = None) -> dict:
+    """Aggregate derived stats across the matches a player appeared in. Single
+    bulk scan of raw_events filtered to those matches. When `match_ids` is given
+    (a last-N-games scope), the scan is restricted to it so the compare page can
+    window every section consistently."""
     import json as _json
     totals = _empty_derived()
     totals["goal_participation_num"] = 0
     totals["goal_participation_den"] = 0
     if not store or not name:
         return totals
+    if match_ids is not None and not match_ids:
+        return totals
+    scope_sql = "SELECT DISTINCT match_id FROM match_player_stats WHERE name = ?"
+    scope_args: list = [name]
+    gp_filter = ""
+    if match_ids is not None:
+        ph = ",".join("?" * len(match_ids))
+        scope_sql = f"SELECT match_id FROM match_player_stats WHERE name = ? AND match_id IN ({ph})"
+        scope_args = [name, *match_ids]
+        gp_filter = f" AND mps.match_id IN ({ph})"
     with store._conn() as con:
-        for row in con.execute("""
+        for row in con.execute(f"""
             SELECT mps.goals, mps.assists,
                    (SELECT SUM(goals) FROM match_player_stats x
                     WHERE x.match_id = mps.match_id AND x.team_num = mps.team_num) AS team_goals
-            FROM match_player_stats mps WHERE mps.name = ?
-        """, (name,)).fetchall():
+            FROM match_player_stats mps WHERE mps.name = ?{gp_filter}
+        """, ([name, *match_ids] if match_ids is not None else [name])).fetchall():
             totals["goal_participation_num"] += (row["goals"] or 0) + (row["assists"] or 0)
             totals["goal_participation_den"] += row["team_goals"] or 0
-        rows = con.execute("""
+        rows = con.execute(f"""
             SELECT event, payload FROM raw_events
             WHERE event IN ('GoalScored','CrossbarHit','StatfeedEvent')
-              AND match_id IN (SELECT DISTINCT match_id FROM match_player_stats WHERE name = ?)
-        """, (name,)).fetchall()
+              AND match_id IN ({scope_sql})
+        """, scope_args).fetchall()
     for r in rows:
         try:
             d = _json.loads(r["payload"])
@@ -1143,7 +1157,7 @@ def _lifetime_derived(store, name: str | None) -> dict:
     return totals
 
 
-def _lifetime_touch_data(store, name: str | None) -> dict:
+def _lifetime_touch_data(store, name: str | None, match_ids: set | None = None) -> dict:
     """Aggregate BallHit positions across every match the player appeared in,
     plus a defensive/neutral/offensive third breakdown using the team_num
     they played on in each individual match (so a player who switches sides
@@ -1173,23 +1187,31 @@ def _lifetime_touch_data(store, name: str | None) -> dict:
     }
     if not store or not name:
         return empty
+    if match_ids is not None and not match_ids:
+        return empty
 
+    team_filter = ""
+    base_args: list = [name]
+    if match_ids is not None:
+        ph = ",".join("?" * len(match_ids))
+        team_filter = f" AND match_id IN ({ph})"
+        base_args = [name, *match_ids]
     with store._conn() as con:
         team_by_match = {
             r["match_id"]: r["team_num"]
             for r in con.execute(
-                "SELECT match_id, team_num FROM match_player_stats WHERE name = ?",
-                (name,),
+                f"SELECT match_id, team_num FROM match_player_stats WHERE name = ?{team_filter}",
+                base_args,
             )
         }
         if not team_by_match:
             return empty
-        # Limit raw event scan to BallHits from this player's matches.
-        rows = con.execute("""
+        # Limit raw event scan to BallHits from this player's (in-scope) matches.
+        rows = con.execute(f"""
             SELECT match_id, payload FROM raw_events
             WHERE event = 'BallHit'
-              AND match_id IN (SELECT DISTINCT match_id FROM match_player_stats WHERE name = ?)
-        """, (name,)).fetchall()
+              AND match_id IN (SELECT match_id FROM match_player_stats WHERE name = ?{team_filter})
+        """, base_args).fetchall()
 
     touches: list[dict] = []
     thirds = {"def": 0, "neu": 0, "off": 0}
@@ -5015,10 +5037,15 @@ PortNumber=49123</pre>
 def _compare_page_html(store, slots: list[str], *, self_name: str | None = None,
                        include_bots: bool = False,
                        mode_filter: int | None = None,
-                       window_days: int | None = None) -> str:
+                       window_days: int | None = None,
+                       last_n: int | None = 20) -> str:
     """Side-by-side compare for up to 3 players (slot 0 defaults to self).
-    Pulls lifetime stats from match_player_stats and derives Combat/Highlights/
-    Goal-quality stats from raw_events on the fly."""
+    Pulls stats from match_player_stats and derives Combat/Highlights/Goal-
+    quality stats from raw_events on the fly.
+
+    By default each player is scoped to their most recent `last_n` games (20) so
+    a high-volume player's lifetime totals don't dominate the comparison; set
+    last_n falsy to compare full history (then the time window applies)."""
     from .analytics import _lifetime_row
 
     bot_filter = "" if include_bots else "WHERE COALESCE(max_bot, 0) = 0"
@@ -5030,28 +5057,48 @@ def _compare_page_html(store, slots: list[str], *, self_name: str | None = None,
         """).fetchall()
         all_players = sorted([dict(r) for r in all_players if include_bots or not r["max_bot"]],
                              key=lambda r: -r["n"])
+
+        def _scope(slot_name: str) -> set | None:
+            """The player's most-recent `last_n` match ids (equal-sample window).
+            None means 'no games window' (use full history / time filter)."""
+            if not slot_name or not last_n or last_n <= 0:
+                return None
+            return {r["match_id"] for r in con.execute(
+                """SELECT mps.match_id FROM match_player_stats mps
+                   JOIN matches m ON m.id = mps.match_id
+                   WHERE mps.name = ? ORDER BY m.started_at DESC LIMIT ?""",
+                (slot_name, last_n))}
+        scopes = [_scope(s) for s in slots]
+
         rows = []
         derived_rows: list[dict] = []
-        for slot_name in slots:
+        for i, slot_name in enumerate(slots):
             row = _lifetime_row(con, None, slot_name,
                                 mode_filter=mode_filter,
-                                window_days=window_days) if slot_name else {}
+                                window_days=window_days,
+                                match_ids=scopes[i]) if slot_name else {}
             rows.append(row)
-            derived_rows.append(_lifetime_derived(store, slot_name) if slot_name else _empty_derived() | {"goal_participation_num": 0, "goal_participation_den": 0})
+            derived_rows.append(_lifetime_derived(store, slot_name, scopes[i]) if slot_name else _empty_derived() | {"goal_participation_num": 0, "goal_participation_den": 0})
 
     # Lifetime touch data (heatmap + position thirds) is computed outside the
     # connection block since the helper manages its own connection.
     touch_data = [
-        _lifetime_touch_data(store, slot_name) if slot_name else None
-        for slot_name in slots
+        _lifetime_touch_data(store, slot_name, scopes[i]) if slot_name else None
+        for i, slot_name in enumerate(slots)
     ]
 
     def option_list(selected: str) -> str:
         opts = ['<option value="">(select a player)</option>']
         for r in all_players:
             sel = " selected" if r["name"] == selected else ""
-            opts.append(f'<option value="{r["name"]}"{sel}>{r["name"]} ({r["n"]})</option>')
+            nm = html.escape(r["name"] or "")  # names are attacker-controllable
+            opts.append(f'<option value="{nm}"{sel}>{nm} ({r["n"]})</option>')
         return "".join(opts)
+
+    # Equal-sample window: default to each player's most recent 20 games so a
+    # high-volume player's totals don't dominate. The control lives in the
+    # sidebar "Sample" filter; the player form carries it via a hidden field.
+    _cur_last = last_n or 0
 
     # Compose the row of selectors.
     selectors = []
@@ -5309,6 +5356,7 @@ def _compare_page_html(store, slots: list[str], *, self_name: str | None = None,
         <div class="compare-slots">
           {"".join(selectors)}
         </div>
+        <input type="hidden" name="last" value="{_cur_last}">
         <button type="submit" class="copy-btn" style="padding:8px 18px;font-size:12px">Compare</button>
       </form>
 
@@ -6405,9 +6453,23 @@ def _filter_sidebar(active: str, force_hidden: bool = False) -> str:
           </div>
         </div>
     """)
+    # Sample size is only meaningful on the head-to-head compare, where it keeps
+    # a high-volume player from skewing the result. Lives with the other filters.
+    sample = """
+        <div class="sf-section">
+          <div class="sf-title">Sample</div>
+          <div class="sf-tip">Most recent N games per player, so volume doesn't skew the compare.</div>
+          <div class="sf-group" data-filter="last">
+            <a class="sf-chip" data-val="20">Last 20</a>
+            <a class="sf-chip" data-val="50">Last 50</a>
+            <a class="sf-chip" data-val="100">Last 100</a>
+            <a class="sf-chip" data-val="0">All</a>
+          </div>
+        </div>
+    """ if active == "compare" else ""
     return f"""
       <aside class="side-filters" id="side-filters">
-        {mode}{platform}{window}{bots}
+        {mode}{platform}{window}{sample}{bots}
         <div class="sf-foot">
           <a class="sf-clear" id="sf-clear">Clear all</a>
         </div>
@@ -6419,7 +6481,7 @@ _SIDEBAR_FILTER_JS = """<script>
 (function() {
   var sb = document.getElementById('side-filters');
   if (!sb) return;
-  var KEYS = ['mode','include_bots','platform','window'];
+  var KEYS = ['mode','include_bots','platform','window','last'];
 
   function getUrlParam(k) {
     try { return new URLSearchParams(location.search).get(k); } catch (e) { return null; }
@@ -6444,7 +6506,7 @@ _SIDEBAR_FILTER_JS = """<script>
     var group = sb.querySelector('[data-filter="' + k + '"]');
     if (!group) return;
     var cur = effective(k);
-    var defaultMap = { include_bots: '0' };
+    var defaultMap = { include_bots: '0', last: '20' };
     if (cur === '' && defaultMap[k] !== undefined) cur = defaultMap[k];
     Array.prototype.forEach.call(group.querySelectorAll('.sf-chip'), function(chip) {
       chip.classList.toggle('active', chip.dataset.val === cur);
@@ -6457,7 +6519,9 @@ _SIDEBAR_FILTER_JS = """<script>
       var qs = p.toString();
       chip.href = location.pathname + (qs ? '?' + qs : '');
       chip.addEventListener('click', function(ev) {
-        setStored(k, chip.dataset.val);
+        // 'last' is compare-only; don't persist it so it can't leak onto other
+        // pages' URLs via the stored-filter redirect.
+        if (k !== 'last') setStored(k, chip.dataset.val);
       });
     });
   });
