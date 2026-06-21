@@ -6561,7 +6561,10 @@ _LOGO_SVG = '''<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-
 </svg>'''
 
 def _nav(active: str = "", friend_mode: bool = False) -> str:
-    items = [
+    # Stat pages live in the main nav row. Utility links (OBS overlay, How it
+    # works) move to the right-hand aside as separate buttons so they don't read
+    # like another stat page.
+    stat_items = [
         ("live",      "/live",          "Live"),
         ("dashboard", "/dashboard",     "Me"),
         ("history",   "/history",       "Matches"),
@@ -6569,21 +6572,26 @@ def _nav(active: str = "", friend_mode: bool = False) -> str:
         ("compare",   "/compare",       "Compare"),
         ("clan",      "/clan",          "Clubs"),
         ("opponents", "/opponents",     "Opponents"),
-        ("overlay",   "/overlay",       "Overlay"),
-        ("about",     "/about",         "How it works"),
+    ]
+    util_items = [
+        ("overlay", "/overlay", "OBS overlay"),
+        ("about",   "/about",   "How it works"),
     ]
     if friend_mode:
         # The friend's local server only serves the live view + OBS overlay
-        # picker; every analytical page 404s here (those live on the central
-        # host), so don't surface nav links to them.
-        items = [it for it in items if it[0] in ("live", "overlay")]
+        # picker; the analytical pages and /about 404 here, so drop them.
+        stat_items = [it for it in stat_items if it[0] == "live"]
+        util_items = [it for it in util_items if it[0] == "overlay"]
     # In friend mode the brand can't point at /dashboard (it 404s); send it home
     # to the live view instead.
     brand_href = "/live" if friend_mode else "/dashboard"
-    parts = []
-    for key, href, label in items:
-        klass = "navlink active" if key == active else "navlink"
-        parts.append(f'<a class="{klass}" href="{href}">{label}</a>')
+
+    def _navlink(key, href, label, base="navlink"):
+        klass = f"{base} active" if key == active else base
+        return f'<a class="{klass}" href="{href}">{label}</a>'
+
+    parts = [_navlink(*it) for it in stat_items]
+    util_parts = [_navlink(k, h, l, "navlink nav-util") for k, h, l in util_items]
     return f'''
 <nav class="topnav">
   <a class="brand" href="{brand_href}">
@@ -6594,6 +6602,7 @@ def _nav(active: str = "", friend_mode: bool = False) -> str:
   </a>
   <div class="navlinks">{"".join(parts)}</div>
   <div class="nav-aside">
+    {"".join(util_parts)}
     <span class="live-pip off" id="live-pip" title="No active match">
       <span class="dot"></span>
       <span id="live-pip-label">idle</span>
