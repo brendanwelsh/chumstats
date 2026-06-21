@@ -2504,6 +2504,31 @@ def _match_detail_html(store, match_id: str, viewer_pid: str | None, viewer_name
         match_context = "Regulation"
         match_context_class = "reg"
 
+    # Sticky in-page nav: jump chips for each section + each player. CSS-only
+    # (position:sticky + #anchors), no JS.
+    def _mn_chip(href, label, cls=""):
+        return f'<a class="mn-chip {cls}" href="{href}">{label}</a>'
+    _sec_chips = [
+        _mn_chip("#overview", "Overview"),
+        _mn_chip("#timeline", "Timeline"),
+        _mn_chip("#goalmap", "Goal map") if playback_data.get("goals") else "",
+        _mn_chip("#kickoff", "Kickoff"),
+        _mn_chip("#players", "Players"),
+    ]
+    _pl_chips = []
+    for _p in blue_players + orng_players:
+        _ps = "".join(ch if ch.isalnum() else "_" for ch in (_p["name"] or "")) or "p"
+        _tc = "team-blue" if _p["team_num"] == 0 else "team-orng"
+        _you = (" <span class='mn-you'>YOU</span>"
+                if (viewer_pid and _p["primary_id"] == viewer_pid and _p["name"] == viewer_name)
+                else "")
+        _pl_chips.append(
+            f'<a class="mn-chip mn-player {_tc}" href="#p-{_ps}">'
+            f'<span class="mn-swatch"></span>{html.escape(_p["name"] or "")}{_you}</a>'
+        )
+    match_nav = ('<nav class="match-nav">' + "".join(c for c in _sec_chips if c)
+                 + '<span class="mn-sep"></span>' + "".join(_pl_chips) + '</nav>')
+
     # Match-played title: arena + game-clock duration + "Regulation/Overtime"
     # context replaces the hex match GUID, which was meaningless to humans.
     body = f"""
@@ -2553,20 +2578,26 @@ def _match_detail_html(store, match_id: str, viewer_pid: str | None, viewer_name
         </div>
       </header>
 
-      {_personal_insights_card_html(store, players, viewer_pid, viewer_name, match_id)}
+      {match_nav}
 
-      {_kickoff_card_html(playback_data, players, viewer_pid, viewer_name)}
+      <div id="overview" class="mn-target">
+        {_roster_card(0)}
+        {_roster_card(1)}
+      </div>
+
+      {_personal_insights_card_html(store, players, viewer_pid, viewer_name, match_id)}
 
       {_match_events_html(playback_data)}
 
       {_goal_map_html(playback_data)}
 
+      <div id="kickoff" class="mn-target">
+        {_kickoff_card_html(playback_data, players, viewer_pid, viewer_name)}
+      </div>
+
       {_match_insights_html(playback_data, t0_name, t1_name)}
 
-      {_roster_card(0)}
-      {_roster_card(1)}
-
-      <div class="card" style="margin-top:14px">
+      <div class="card mn-target" id="players" style="margin-top:14px">
         <div class="section-title">
           <span>Per-player breakdown</span>
           <span class="dim" style="text-transform:none;letter-spacing:0">
@@ -7240,6 +7271,30 @@ table.history tr.match-row:hover { background: var(--card-hover); }
   transition: transform .15s ease; flex: 0 0 auto;
 }
 .radar-card[open] > summary.rc-head::after { transform: rotate(90deg); }
+
+/* Sticky in-page match nav (jump chips). CSS-only, no JS. */
+.match-nav {
+  position: sticky; top: 0; z-index: 20;
+  display: flex; gap: 6px; flex-wrap: wrap; align-items: center;
+  padding: 8px 2px; margin: 2px 0 14px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--accent-line);
+}
+.match-nav .mn-chip {
+  font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 999px;
+  color: var(--text-faint); text-decoration: none; white-space: nowrap;
+  border: 1px solid transparent;
+}
+.match-nav .mn-chip:hover { color: var(--text); background: var(--card); }
+.match-nav .mn-sep { width: 1px; align-self: stretch; background: var(--accent-line); margin: 2px 4px; }
+.match-nav .mn-player .mn-swatch {
+  display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+  margin-right: 5px; vertical-align: middle;
+}
+.match-nav .mn-player.team-blue .mn-swatch { background: var(--team-blue); }
+.match-nav .mn-player.team-orng .mn-swatch { background: var(--team-orng); }
+.match-nav .mn-you { font-size: 9px; font-weight: 800; color: var(--accent); margin-left: 4px; }
+.mn-target, #timeline, #goalmap, .radar-card[id] { scroll-margin-top: 64px; }
 .radar-card .rc-adv { display: flex; flex-direction: column; gap: 16px; }
 .radar-card .rc-adv-section { display: flex; flex-direction: column; gap: 10px; }
 .radar-card .rc-adv-title {
