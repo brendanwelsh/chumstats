@@ -406,7 +406,10 @@ def build_dashboard(store, *, primary_id: str | None = None,
                 SUM(ticks_full_boost)                           AS ticks_full,
                 SUM(speed_sum)                                  AS speed_sum,
                 MAX(speed_max)                                  AS speed_max,
-                SUM(boost_used)                                 AS boost_used
+                SUM(boost_used)                                 AS boost_used,
+                SUM(CASE WHEN mps.team_num = 0 THEN m.team0_score ELSE m.team1_score END) AS goals_for,
+                SUM(CASE WHEN mps.team_num = 0 THEN m.team1_score ELSE m.team0_score END) AS goals_against,
+                SUM(CASE WHEN (CASE WHEN mps.team_num = 0 THEN m.team1_score ELSE m.team0_score END) = 0 THEN 1 ELSE 0 END) AS clean_sheets
             FROM match_player_stats mps
             JOIN matches m ON m.id = mps.match_id
             WHERE mps.{where}{bot_filter}
@@ -427,6 +430,12 @@ def build_dashboard(store, *, primary_id: str | None = None,
             MetricLine("Total saves", str(row["saves"] or 0), ""),
             MetricLine("Total shots", str(row["shots"] or 0), ""),
             MetricLine("Total demos delivered", str(row["demos"] or 0), ""),
+            MetricLine("Clean sheets", str(row["clean_sheets"] or 0),
+                       f"{(row['clean_sheets'] or 0) / matches * 100:.0f}% of games — opponent kept scoreless"),
+            MetricLine("Goal difference",
+                       f"{'+' if (row['goals_for'] or 0) - (row['goals_against'] or 0) >= 0 else ''}"
+                       f"{(row['goals_for'] or 0) - (row['goals_against'] or 0)}",
+                       f"{row['goals_for'] or 0} for · {row['goals_against'] or 0} against"),
         ])
 
         # ---- per-match averages ----
@@ -460,6 +469,8 @@ def build_dashboard(store, *, primary_id: str | None = None,
                 MetricLine("In air",     _pct(row["ticks_air"] or 0, ticks, 1), ""),
                 MetricLine("On wall",    _pct(row["ticks_wall"] or 0, ticks, 1), ""),
                 MetricLine("On ground",  _pct(row["ticks_ground"] or 0, ticks, 1), ""),
+                MetricLine("BPM", f"{(row['boost_used'] or 0) / (ticks / 30 / 60):.0f}",
+                           "boost used per minute (gameplay time)"),
             ])
             boost_per_match = (row["boost_used"] or 0) / matches
             d.boost.lines.extend([

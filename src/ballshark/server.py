@@ -1550,6 +1550,12 @@ def _kpi_tiles_from_dashboard(d) -> str:
         tiles.append(tile(averages["Shooting %"].value, "Shooting %"))
     if "Matches" in overview:
         tiles.append(tile(overview["Matches"].value, "Total matches"))
+    if "Goal difference" in overview:
+        gd = overview["Goal difference"]
+        tiles.append(tile(gd.value, "Goal diff",
+                          accent="primary" if gd.value.startswith("+") else ""))
+    if "Clean sheets" in overview:
+        tiles.append(tile(overview["Clean sheets"].value, "Clean sheets"))
     return f'<div class="kpi-row">{"".join(tiles)}</div>' if tiles else ""
 
 
