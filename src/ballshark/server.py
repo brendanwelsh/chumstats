@@ -2564,6 +2564,8 @@ def _match_detail_html(store, match_id: str, viewer_pid: str | None, viewer_name
 
       {_match_events_html(playback_data)}
 
+      {_goal_map_html(playback_data)}
+
       {_match_insights_html(playback_data, t0_name, t1_name)}
 
       {_roster_card(0)}
@@ -2902,6 +2904,67 @@ def _build_playback_data(store, match_id: str, started_at: float,
         "goals": goals_raw,
         "clock_map": clock_map,
     }
+
+
+def _goal_map_html(playback: dict) -> str:
+    """Standalone goal-location map: where each goal was struck from (the
+    scorer's last touch), with the build-up traced back through the chain.
+    Reuses the shared pitch primitives (.pb-field/.pb-midline). This used to
+    live inside the now-removed ball-replay widget's 'Goals' mode."""
+    goals = playback.get("goals") or []
+    if not goals:
+        return ""
+    svg = playback["svg"]
+    vb_w, vb_h = svg["vb_w"], svg["vb_h"]
+    pad_x, pad_y = svg["pad_x"], svg["pad_y"]
+    pitch_w, pitch_h = svg["pitch_w"], svg["pitch_h"]
+    layers = []
+    for gi, g in enumerate(goals):
+        chain = g.get("chain") or []
+        if not chain:
+            continue
+        color = "var(--team-blue)" if g.get("team") == 0 else "var(--team-orng)"
+        shot = chain[-2] if len(chain) >= 2 else chain[-1]  # scorer's last touch
+        tip = f'Goal {gi + 1}: {g.get("scorer") or "?"}'
+        if g.get("assister"):
+            tip += f'  (assist: {g["assister"]})'
+        if g.get("speed"):
+            tip += f'  ·  {g["speed"]} km/h'
+        pts = " ".join(f'{p["sx"]:.1f},{p["sy"]:.1f}' for p in chain)
+        layers.append(
+            f'<g class="gm-goal"><title>{html.escape(tip)}</title>'
+            f'<polyline points="{pts}" fill="none" stroke="{color}" '
+            f'stroke-width="2" stroke-dasharray="3 3" stroke-linecap="round" '
+            f'stroke-linejoin="round" stroke-opacity="0.55" />'
+            f'<circle cx="{shot["sx"]:.1f}" cy="{shot["sy"]:.1f}" r="7.5" '
+            f'fill="{color}" stroke="var(--card)" stroke-width="2" />'
+            f'<text x="{shot["sx"]:.1f}" y="{shot["sy"]:.1f}" dy="3.4" '
+            f'text-anchor="middle" fill="var(--card)" font-size="9" font-weight="800" '
+            f'style="font-family: JetBrains Mono, monospace">{gi + 1}</text>'
+            f'</g>'
+        )
+    if not layers:
+        return ""
+    pitch = (
+        f'<svg viewBox="0 0 {vb_w} {vb_h}" class="hm-pitch" xmlns="http://www.w3.org/2000/svg">'
+        f'<rect class="pb-field" x="{pad_x:.1f}" y="{pad_y:.1f}" width="{pitch_w}" height="{pitch_h}" />'
+        f'<line class="pb-midline" x1="{vb_w/2:.1f}" y1="{pad_y:.1f}" '
+        f'x2="{vb_w/2:.1f}" y2="{pad_y + pitch_h:.1f}" />'
+        f'<circle class="pb-midcircle" cx="{vb_w/2:.1f}" cy="{vb_h/2:.1f}" r="48" fill="none" />'
+        f'{"".join(layers)}'
+        f'</svg>'
+    )
+    return f"""
+      <section id="goalmap" class="card">
+        <div class="section-title">
+          <span>Goal map</span>
+          <span class="dim" style="text-transform:none;letter-spacing:0">
+            Where each goal was struck from, traced back through the build-up.
+          </span>
+        </div>
+        <div style="max-width:560px;margin:8px auto 0">{pitch}</div>
+      </section>
+    """
 
 
 def _match_events_html(playback: dict) -> str:
