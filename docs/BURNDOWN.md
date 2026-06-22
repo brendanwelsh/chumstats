@@ -304,7 +304,7 @@ Real walkthrough; convergence was premature. Work top-down, test, commit, deploy
 
 ### Compare
 - [x] **Ball-touch count → stat row** — DONE. 'Ball touches' is a row in the Ball-positioning section; heatmap caption removed.
-- [ ] **Heatmap-type dropdown** (touch / shot / …) selectable — all heatmaps available as long-term stats.
+- [x] **Heatmap-type dropdown** — DONE. Compare renders touch + shot maps per slot; a dropdown toggles which shows. Verified the swap (touch→shot) works across all slots.
 - [x] **Match-count confusion (19/20)** — DONE. The confusing per-player "across N matches" heatmap caption is gone; the "Last N" sample tip already explains the sample.
 
 ### Clubs restructure (HIGH)
