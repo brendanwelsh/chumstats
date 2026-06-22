@@ -42,6 +42,11 @@ finishes — keep iterating balance changes.
 **First full rotation complete** (match · profile · directory · history · opponents · clubs ·
 compare). Loop now cycles back for deeper polish + continues the no-Chum sweep.
 
+### Rotation 2
+- **Player profile** — added quick-nav links (Matches / Opponents / Compare) to the player's
+  subject-parameterized pages (`/history?pid=`, `/opponents?pid=`, `/compare?names=`). The
+  subject-param features are now discoverable from any profile, not just the owner's. Verified live.
+
 ### Still to repass (ESPN pass, top-down)
 - [x] **Match · "Us vs them" → "Team comparison"** — DONE. Forced neutral Blue-vs-Orange always; nav chip "Teams"; also dropped the owner-perspective "vs your career" insights card. 0 us/them/your-career leaks live.
 - [x] **Player profile** — radar→comparison-bars + double-name DONE. Follow-up: the 2-col detail-grid stat tables could go full-width box-score; the tiny WIN% sub-label tile.
