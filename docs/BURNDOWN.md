@@ -19,11 +19,13 @@ finishes — keep iterating balance changes.
 - **Match · structure** — nav chips now SWAP panes (overview/timeline/goalmap/us-vs-them/kickoff/
   players) instead of anchor-scroll; rosters side-by-side; all "YOU" framing removed; arenas
   normalized in the career per-arena breakdown.
+- **Player profile** — replaced the weak radar (per-match avg scaled to a freak single-match
+  peak → tiny blob) with 'Per-match averages vs the field' comparison bars (player avg, bar vs
+  the best regular, tick at field avg, green when above). Fixed the `Blazed / Blazed` double-name.
 
 ### Still to repass (ESPN pass, top-down)
 - [x] **Match · "Us vs them" → "Team comparison"** — DONE. Forced neutral Blue-vs-Orange always; nav chip "Teams"; also dropped the owner-perspective "vs your career" insights card. 0 us/them/your-career leaks live.
-- [ ] **Player profile** — radar chart is weak; make the career stats a clean box score; the
-      `Blazed / Blazed` double-name + tiny win% sub-label need tightening.
+- [x] **Player profile** — radar→comparison-bars + double-name DONE. Follow-up: the 2-col detail-grid stat tables could go full-width box-score; the tiny WIN% sub-label tile.
 - [ ] **Players directory / opponents / clubs / compare / results** — same box-score treatment.
 
 ---
