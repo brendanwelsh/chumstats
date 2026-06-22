@@ -4972,6 +4972,8 @@ def _compare_page_html(store, slots: list[str], *, self_name: str | None = None,
              [pct_if(r.get("ticks"), r.get("ticks_full")) for r in rows], True),
         ]),
         ("Ball positioning (across matches)", "single", [
+            ("Ball touches",      lambda v: f"{v:,.0f}",
+             [td.get("touches") if td else None for td in touch_data], True),
             ("Defensive third %", lambda v: f"{v:.1f}%", def_pct_vals, False),
             ("Neutral third %",   lambda v: f"{v:.1f}%", neu_pct_vals, True),
             ("Offensive third %", lambda v: f"{v:.1f}%", off_pct_vals, True),
@@ -5093,15 +5095,12 @@ def _compare_heatmap_row(slots: list, touch_data: list) -> str:
             continue
         name_slug = "".join(ch if ch.isalnum() else "_" for ch in slot)
         hm = _ball_heatmap_svg(td, compact=True, key=f"cmp-{name_slug}")
-        sub = (
-            f"{td['touches']} ball contacts across {td['matches_with_touches']} match"
-            f"{'es' if td['matches_with_touches'] != 1 else ''}"
-        )
+        # Touch count + match count moved to the stats table (Ball touches row);
+        # the heatmap is just the heatmap now.
         cards.append(
             f'<div class="compare-hm-card">'
             f'<div class="compare-hm-head" title="{label}">{label}</div>'
             f'<div class="compare-hm-body">{hm}</div>'
-            f'<div class="compare-hm-foot dim">{sub}</div>'
             f'</div>'
         )
     return f"""
