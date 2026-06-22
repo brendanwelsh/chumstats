@@ -1342,13 +1342,16 @@ def _lifetime_touch_data(store, name: str | None, match_ids: set | None = None) 
     }
 
 
-def _lifetime_shot_data(store, name: str | None) -> dict:
+def _lifetime_shot_data(store, name: str | None, match_ids: set | None = None) -> dict:
     """Aggregate where the player SCORES FROM: the scorer's last ball-touch
     before each of their goals (the shot), across every match. Derived live from
     raw_events (BallHit + GoalScored) — the touch immediately before a goal is
     the shot, and replay/kickoff touches arrive after it, so stream order alone
     locates it (no stored backfill needed). Returns a playback-shaped dict so it
-    plugs straight into `_ball_heatmap_svg`."""
+    plugs straight into `_ball_heatmap_svg`.
+
+    Pass `match_ids` to scope the map to a specific set of matches (e.g. the
+    compare page's last-N sample window); None = full history."""
     import json as _json
     rl_len, rl_wid = 10240, 8192
     vb_w, vb_h = 880, 380
@@ -1371,21 +1374,30 @@ def _lifetime_shot_data(store, name: str | None) -> dict:
     }
     if not store or not name:
         return empty
+    if match_ids is not None and not match_ids:
+        return empty
 
+    scope_filter = ""
+    base_args: list = [name]
+    if match_ids is not None:
+        ph = ",".join("?" * len(match_ids))
+        scope_filter = f" AND match_id IN ({ph})"
+        base_args = [name, *match_ids]
     with store._conn() as con:
         team_by_match = {
             r["match_id"]: r["team_num"]
             for r in con.execute(
-                "SELECT match_id, team_num FROM match_player_stats WHERE name = ?", (name,))
+                f"SELECT match_id, team_num FROM match_player_stats WHERE name = ?{scope_filter}",
+                base_args)
         }
         if not team_by_match:
             return empty
-        rows = con.execute("""
+        rows = con.execute(f"""
             SELECT match_id, event, payload FROM raw_events
             WHERE event IN ('BallHit', 'GoalScored')
-              AND match_id IN (SELECT DISTINCT match_id FROM match_player_stats WHERE name = ?)
+              AND match_id IN (SELECT DISTINCT match_id FROM match_player_stats WHERE name = ?{scope_filter})
             ORDER BY match_id, received_at, id
-        """, (name,)).fetchall()
+        """, base_args).fetchall()
 
     shots: list[dict] = []
     seen_matches: set[str] = set()
@@ -4793,20 +4805,18 @@ def _compare_page_html(store, slots: list[str], *, self_name: str | None = None,
         for i, slot_name in enumerate(slots)
     ]
     # Shot maps (where each player's goals were struck from) — selectable
-    # alongside touch maps via the heatmap-type dropdown.
+    # alongside touch maps via the heatmap-type dropdown. Scoped to the same
+    # last-N sample window as the rest of the page so the "Sample" filter
+    # actually moves the maps.
     shot_data = [
-        _lifetime_shot_data(store, slot_name) if slot_name else None
-        for slot_name in slots
+        _lifetime_shot_data(store, slot_name, scopes[i]) if slot_name else None
+        for i, slot_name in enumerate(slots)
     ]
-    # Heatmaps are LIFETIME (matches the "Heatmaps (lifetime)" heading + the shot
-    # map, which has no sample scope) — a dense, representative spatial map. The
-    # TABLE's positioning metrics keep the sampled `touch_data` so they line up
-    # with the rest of the last-N table. (Before: the touch map was sampled but
-    # labelled lifetime — inconsistent with the shot map.)
-    touch_data_hm = [
-        _lifetime_touch_data(store, slot_name) if slot_name else None
-        for slot_name in slots
-    ]
+    # Heatmaps share the sampled `touch_data` (already scoped to scopes[i]) so the
+    # touch map, the shot map, and the positioning rows in the table all reflect
+    # the same window the user picked. With no sample (last falsy) every scope is
+    # None → full history, matching the "(lifetime)" heading.
+    touch_data_hm = touch_data
 
     def option_list(selected: str) -> str:
         opts = ['<option value="">(select a player)</option>']
@@ -5082,7 +5092,7 @@ def _compare_page_html(store, slots: list[str], *, self_name: str | None = None,
         <button type="submit" class="copy-btn" style="padding:8px 18px;font-size:12px">Compare</button>
       </form>
 
-      {_compare_heatmap_row(slots, touch_data_hm, shot_data)}
+      {_compare_heatmap_row(slots, touch_data_hm, shot_data, scope_label=(f"last {last_n}" if last_n else "lifetime"))}
 
       <div class="card" style="padding:0;overflow:hidden;margin-top:16px">
         <table class="compare-table">
@@ -5095,10 +5105,12 @@ def _compare_page_html(store, slots: list[str], *, self_name: str | None = None,
     return _page_wrap("Compare players", body, active="compare")
 
 
-def _compare_heatmap_row(slots: list, touch_data: list, shot_data: list | None = None) -> str:
-    """Per-slot lifetime heatmaps with a TYPE dropdown (touch map / shot map).
-    Both maps render per card; the dropdown toggles which is visible (JS). Skipped
-    entirely if no slot has any touch data."""
+def _compare_heatmap_row(slots: list, touch_data: list, shot_data: list | None = None,
+                         scope_label: str = "lifetime") -> str:
+    """Per-slot heatmaps with a TYPE dropdown (touch map / shot map). Both maps
+    render per card; the dropdown toggles which is visible (JS). Skipped entirely
+    if no slot has any touch data. `scope_label` ("lifetime" / "last 20" / …) is
+    shown in the heading so it tracks the active Sample window."""
     if not any(td and td.get("touches") for td in touch_data):
         return ""
     shot_data = shot_data or [None] * len(slots)
@@ -5138,7 +5150,7 @@ def _compare_heatmap_row(slots: list, touch_data: list, shot_data: list | None =
     return f"""
       <div class="card" style="margin-top:16px">
         <div class="section-title">
-          <span>Heatmaps (lifetime)</span>
+          <span>Heatmaps ({scope_label})</span>
           {selector}
         </div>
         <div class="section-sub dim" style="margin:-4px 0 10px;text-transform:none;letter-spacing:0">
