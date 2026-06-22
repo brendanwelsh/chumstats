@@ -2039,33 +2039,8 @@ def _history_page_html(store, primary_id, name, *,
         t0_winner = "winner" if r["winner_team_num"] == 0 else ""
         t1_winner = "winner" if r["winner_team_num"] == 1 else ""
         chips = " ".join(c for c in (size_chip, offline_chip) if c)
-        # Possession: balanced row under team names. Blue% on left, bar in
-        # the middle, Orange% on right + alignment tag.
-        t0_t = r["t0_touches"] or 0
-        t1_t = r["t1_touches"] or 0
-        poss_html = ""
-        if (t0_t + t1_t) > 0:
-            t0_pct = t0_t / (t0_t + t1_t) * 100
-            t1_pct = 100 - t0_pct
-            dom_side = 0 if t0_pct > t1_pct else 1 if t1_pct > t0_pct else None
-            diff = abs(t0_pct - t1_pct)
-            if dom_side is None or diff < 5:
-                tag_html = '<span class="poss-tag even" title="Touch share was roughly even">EVEN</span>'
-            elif dom_side == r["winner_team_num"]:
-                tag_html = '<span class="poss-tag aligned" title="Touch-share leader won">ON FORM</span>'
-            else:
-                tag_html = '<span class="poss-tag upset" title="Touch-share leader LOST">AGAINST RUN</span>'
-            poss_html = (
-                '<div class="poss-row">'
-                f'<span class="poss-pct blue tnum">{t0_pct:.0f}%</span>'
-                '<div class="poss-bar" title="Touch share">'
-                f'<div class="poss-fill blue" style="width:{t0_pct:.1f}%"></div>'
-                f'<div class="poss-fill orng" style="width:{t1_pct:.1f}%"></div>'
-                '</div>'
-                f'<span class="poss-pct orng tnum">{t1_pct:.0f}%</span>'
-                f'{tag_html}'
-                '</div>'
-            )
+        # (Per-row touch-share bar removed — it read as "half a bar chart" on the
+        # list; touch share / field tilt live on the match-detail page instead.)
         # Generic Blue / Orange labels keep the cell narrow regardless of how
         # long the actual club tag is. Hover the label to see the full tag.
         body_rows.append(f"""
@@ -2080,7 +2055,6 @@ def _history_page_html(store, primary_id, name, *,
                 <span class="vs-score {t1_winner}">{r['team1_score']}</span>
                 <span class="vs-team orng" title="{html.escape(r['team1_name'])}">Orange</span>
               </div>
-              {poss_html}
               {('<div class="row-chips">' + chips + '</div>') if chips else ''}
             </td>
             <td class="num tnum"><b>{r['goals']}</b></td>
