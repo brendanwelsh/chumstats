@@ -2618,25 +2618,116 @@ def _match_detail_html(store, match_id: str, viewer_pid: str | None, viewer_name
         _mn_chip("players", "Players"),
     ]
     all_pl = blue_players + orng_players
-    active_pl = all_pl[0] if all_pl else None
-    _pl_chips, _pp_tabs = [], []
+    # Top-nav player chips just jump to the Players pane (the box score shows
+    # every player at once — no per-player selection needed).
+    _pl_chips = []
     for _p in all_pl:
-        _ps = "".join(ch if ch.isalnum() else "_" for ch in (_p["name"] or "")) or "p"
         _tc = "team-blue" if _p["team_num"] == 0 else "team-orng"
-        _act = " active" if _p is active_pl else ""
         _pl_chips.append(
-            f'<button type="button" class="mn-chip mn-player {_tc}" '
-            f'data-target="players" data-pp="pp-{_ps}">'
-            f'<span class="mn-swatch"></span>{html.escape(_p["name"] or "")}</button>'
-        )
-        _pp_tabs.append(
-            f'<button type="button" class="pp-tab {_tc}{_act}" data-pp="pp-{_ps}">'
+            f'<button type="button" class="mn-chip mn-player {_tc}" data-target="players">'
             f'<span class="mn-swatch"></span>{html.escape(_p["name"] or "")}</button>'
         )
     match_nav = ('<nav class="match-nav">' + "".join(c for c in _sec_chips if c)
                  + '<span class="mn-sep"></span>' + "".join(_pl_chips) + '</nav>')
-    pp_tabs = "".join(_pp_tabs)
-    pp_panels = "".join(_radar_card(p, active=(p is active_pl)) for p in all_pl)
+
+    # ---- Per-player advanced stats as ESPN/ballchasing box scores ------------
+    # Full-width team-grouped tables (all players in rows, stats in columns)
+    # instead of cramped one-player-at-a-time panels of inline word-soup.
+    def _adv(p):
+        ticks = p["ticks_total"] or 0
+        cov = ticks / max(int(duration * 30), 1)
+        has_mov = cov >= 0.70 and ticks >= 200
+        ext = derived.get(p["name"]) or _empty_derived()
+        my_touches = player_touches.get(p["name"], 0)
+        team_tot = team_touches.get(p["team_num"], 0) or 1
+        dsign = 1 if p["team_num"] == 0 else -1
+        dn = nn = on = 0
+        for bh in playback_data["ball_track"]:
+            if bh["player"] != p["name"]:
+                continue
+            sy = bh["y"] * dsign
+            if sy > 1707:
+                dn += 1
+            elif sy < -1707:
+                on += 1
+            else:
+                nn += 1
+        tt = dn + nn + on or 1
+        my_tg = team_goals.get(p["team_num"], 0) or 0
+        contrib = (p["goals"] or 0) + (p["assists"] or 0)
+        d = {
+            "name": p["name"], "team": p["team_num"], "is_bot": p["is_bot"], "is_mvp": p["is_mvp"],
+            "touches": my_touches, "touch_share": my_touches / team_tot * 100,
+            "def": dn / tt * 100, "neu": nn / tt * 100, "off": on / tt * 100,
+            "demos_taken": ext["demos_received"], "crossbars": ext["crossbar_hits"],
+            "gp": (contrib / my_tg * 100) if my_tg else 0,
+            "bpm": None, "boost_used": None, "zero": None, "full": None,
+            "avg_sp": None, "sup": None, "ground": None, "air": None, "wall": None,
+        }
+        if has_mov:
+            pos = ((p["ticks_on_ground"] or 0) + (p["ticks_in_air"] or 0)
+                   + (p["ticks_on_wall"] or 0)) or 1
+            d.update(
+                boost_used=p["boost_used"] or 0,
+                bpm=((p["boost_used"] or 0) / (duration / 60.0)) if duration > 0 else 0,
+                zero=(p["ticks_zero_boost"] or 0) / ticks * 100,
+                full=(p["ticks_full_boost"] or 0) / ticks * 100,
+                avg_sp=(p["speed_sum"] or 0) / ticks,
+                sup=(p["ticks_supersonic"] or 0) / ticks * 100,
+                ground=(p["ticks_on_ground"] or 0) / pos * 100,
+                air=(p["ticks_in_air"] or 0) / pos * 100,
+                wall=(p["ticks_on_wall"] or 0) / pos * 100,
+            )
+        return d
+
+    _adv_rows = [_adv(p) for p in all_pl]
+    _pct = lambda v: f"{v:.0f}%"
+    _num = lambda v: f"{v:.0f}"
+
+    def _bs_table(title, sub, cols):
+        head = "".join(f'<th class="num">{h}</th>' for h, _, _ in cols)
+        def _cell(r, k, fmt):
+            v = r.get(k)
+            return '<td class="num dim">&mdash;</td>' if v is None else f'<td class="num tnum">{fmt(v)}</td>'
+        def _row(r):
+            tc = "team-blue" if r["team"] == 0 else "team-orng"
+            nm = html.escape(r["name"] or "")
+            link = (f"<span class='player-link' style='color:var(--text-faint)'>{nm}</span>"
+                    if r["is_bot"] else
+                    f"<a class='player-link' href='/player/{quote(r['name'], safe='')}'>{nm}</a>")
+            mvp = " <span class='chip mvp'>MVP</span>" if r["is_mvp"] else ""
+            return (f'<tr class="{tc}"><td class="player-cell"><span class="bs-sw"></span>'
+                    f'{link}{mvp}</td>{"".join(_cell(r, k, f) for _, k, f in cols)}</tr>')
+        return (f'<div class="bs-card"><div class="bs-title">{title}'
+                f'<span class="dim">{sub}</span></div>'
+                f'<table class="bs-table"><thead><tr><th>Player</th>{head}</tr></thead>'
+                f'<tbody>{"".join(_row(r) for r in _adv_rows)}</tbody></table></div>')
+
+    box_involve = _bs_table(
+        "Involvement &amp; positioning", "touches, ball-share, field thirds, combat",
+        [("Touches", "touches", _num), ("Share", "touch_share", _pct),
+         ("Def", "def", _pct), ("Neu", "neu", _pct), ("Off", "off", _pct),
+         ("Demos", "demos_taken", _num), ("Bars", "crossbars", _num), ("Goal%", "gp", _pct)])
+    box_boost = _bs_table(
+        "Boost &amp; movement", "needs spectator coverage &middot; &mdash; = unavailable",
+        [("BPM", "bpm", _num), ("Boost", "boost_used", _num), ("Empty%", "zero", _pct),
+         ("Full%", "full", _pct), ("Spd", "avg_sp", _num), ("SS%", "sup", _pct),
+         ("Grnd", "ground", _pct), ("Air", "air", _pct), ("Wall", "wall", _pct)])
+
+    _tmaps = []
+    for _p in all_pl:
+        if player_touches.get(_p["name"], 0):
+            _slug = "".join(ch if ch.isalnum() else "_" for ch in (_p["name"] or ""))
+            _hm = _touch_spots_svg(playback_data, player_filter=_p["name"],
+                                   compact=True, key=_slug, orient=False)
+            _tc = "team-blue" if _p["team_num"] == 0 else "team-orng"
+            _tmaps.append(f'<div class="bs-tmap {_tc}"><div class="bs-tmap-name">'
+                          f'{html.escape(_p["name"] or "")}</div>{_hm}</div>')
+    box_tmaps = (f'<div class="bs-card"><div class="bs-title">Touch maps'
+                 f'<span class="dim">kickoffs excluded</span></div>'
+                 f'<div class="bs-tmap-grid">{"".join(_tmaps)}</div></div>') if _tmaps else ""
+
+    players_box = box_involve + box_boost + box_tmaps
 
     # Match-played title: arena + game-clock duration + "Regulation/Overtime"
     # context replaces the hex match GUID, which was meaningless to humans.
@@ -2715,16 +2806,7 @@ def _match_detail_html(store, match_id: str, viewer_pid: str | None, viewer_name
       </section>
 
       <section class="md-pane" data-pane="players">
-        <div class="card" style="margin-top:0">
-          <div class="section-title">
-            <span>Per-player breakdown</span>
-            <span class="dim" style="text-transform:none;letter-spacing:0">
-              Pick a player &mdash; combat, highlights, movement &amp; touch map.
-            </span>
-          </div>
-          <div class="pp-selector" role="tablist">{pp_tabs}</div>
-          <div class="pp-panels">{pp_panels}</div>
-        </div>
+        {players_box}
       </section>
       <script>
       (function(){{
@@ -7598,6 +7680,34 @@ table.history tr.match-row:hover { background: var(--card-hover); }
 .md-rosters { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: start; }
 @media (max-width: 760px) { .md-rosters { grid-template-columns: 1fr; } }
 .mn-target, #timeline, #goalmap, .radar-card[id] { scroll-margin-top: 64px; }
+/* ESPN / ballchasing-style box scores (Players pane): full-width team-grouped
+   tables, all players in rows, stats in columns. */
+.bs-card { background: var(--card); border: 1px solid var(--accent-line); border-radius: 10px;
+  padding: 12px 14px; margin-bottom: 14px; overflow-x: auto; }
+.bs-title { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--text); margin-bottom: 8px; display: flex; align-items: baseline; gap: 8px; }
+.bs-title .dim { font-size: 10px; font-weight: 500; text-transform: none; letter-spacing: 0;
+  color: var(--text-faint); }
+.bs-table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.bs-table thead th { font-size: 10px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.04em; color: var(--text-faint); padding: 4px 8px; text-align: right;
+  border-bottom: 1px solid var(--accent-line); white-space: nowrap; }
+.bs-table thead th:first-child { text-align: left; }
+.bs-table tbody td { padding: 6px 8px; font-size: 13px; border-bottom: 1px solid var(--accent-line); }
+.bs-table tbody tr:last-child td { border-bottom: none; }
+.bs-table td.player-cell { text-align: left; white-space: nowrap; font-weight: 600; }
+.bs-table td.num { text-align: right; }
+.bs-table .bs-sw { display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+  margin-right: 7px; vertical-align: middle; }
+.bs-table tr.team-blue .bs-sw { background: var(--team-blue); }
+.bs-table tr.team-orng .bs-sw { background: var(--team-orng); }
+.bs-table tr.team-blue td.player-cell { box-shadow: inset 3px 0 0 var(--team-blue); }
+.bs-table tr.team-orng td.player-cell { box-shadow: inset 3px 0 0 var(--team-orng); }
+.bs-tmap-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; }
+.bs-tmap { border: 1px solid var(--accent-line); border-radius: 8px; padding: 6px; }
+.bs-tmap-name { font-size: 11px; font-weight: 600; margin-bottom: 4px; }
+.bs-tmap.team-blue .bs-tmap-name { color: var(--team-blue); }
+.bs-tmap.team-orng .bs-tmap-name { color: var(--team-orng); }
 
 /* Per-player SPA: scrollable tab strip + one visible panel (replaces the
    tall stack of collapsible cards). */
