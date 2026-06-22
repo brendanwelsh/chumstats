@@ -325,7 +325,7 @@ Real walkthrough; convergence was premature. Work top-down, test, commit, deploy
 - [x] **"Time near-empty %" — REMOVED** (was invalid: boost<=1 ~never fires → 0% for everyone). Gone from Compare, profile, match box-score; ingest threshold fixed to <=12 for future data.
 - [~] **Compare "Pro tier" → FIELD AVERAGE** — DEFERRED (needs care): the table mixes total/per-match/%/derived metrics + multiple data sources; a correct field-avg needs per-player windowed aggregation at matching scale (or reworking all count metrics to per-match first). Do as a focused task, not a quick loop fire.
 - [x] **Clubs "Club record" tile split** — DONE. Now Record / Win rate / Matches separate tiles (was one crammed tile). Verified.
-- [ ] **Club heatmap is useless** — make it "where we score from" (shot heatmap) instead.
+- [x] **Club heatmap → "Where the club scores from"** — DONE. Now the union of members' goal-shot locations (768 goals, concentrated at the attacking net) instead of the useless dense touch blob. Verified. (Minor nit: shared heatmap legend still says "touches".)
 - [ ] **Mobile / tiny-window pass** — fix spacing/vertical/horizontal in compacted view across pages.
 - [ ] **The date gets huge on mobile** — shrink it; shorter date format generally.
 - [ ] **"UF Night" arena name** — not a real map name; fix (unmapped-id fallback).
