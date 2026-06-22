@@ -308,8 +308,7 @@ Real walkthrough; convergence was premature. Work top-down, test, commit, deploy
 - [x] **Match-count confusion (19/20)** — DONE. The confusing per-player "across N matches" heatmap caption is gone; the "Last N" sample tip already explains the sample.
 
 ### Clubs restructure (HIGH)
-- [ ] **Split OUR club from OPPOSING clubs.** Our club (chum+Tommy+Blazed+Vex combined) as the top entry —
-      strengths/weaknesses vs opponents, drill in for detail; opposing clubs below with fuller comparison.
+- [x] **Split OUR club from OPPOSING clubs** — DONE. Page leads with 'Our club' (auto-detected crew = owner + teammates with >5 games together: ChumtheWaters/2toes/vexxloll/Blazed/+1), combined record/goals/heatmap/recent; 'Opposing clubs' (rivalries) clearly separated below. Follow-up enhancement: per-member stat breakdown table + drill-into-us-vs-others stacking.
 
 ### Identity / stats
 - [ ] **Dedup vexxloll ⇄ vexxlol (Vex Lowell)** — same person; merge (manual alias map ok).
