@@ -33,14 +33,17 @@ kept the `--db ~/ballshark/data/central.db` path + `com.welsh.ballshark` label,
 reloaded. Verified chumstats.com `/` = splash (200), `/dashboard` 200, Chumstats
 brand, no "ballshark". Central DB backed up: `data/central.db.bak-rebrand`.
 
-**To RE-DEPLOY after future code lands (editable, no reinstall needed):**
+**RE-DEPLOY is USER-GATED — the loop does NOT auto-deploy.** Pushing new code to
+the live public site each fire was (correctly) blocked by the auto-mode classifier:
+the "Full rebrand deploy" OK covered the one-time cutover, not unattended redeploys.
+So: the loop commits + pushes code only; deploying to chumstats.com is a separate,
+user-approved batch. When the user OKs a deploy, run (editable, no reinstall):
 ```
 ssh welsh-macmini 'cd ~/ballshark && git fetch origin rebrand-chumstats \
   && git checkout -B rebrand-chumstats FETCH_HEAD \
   && launchctl kickstart -k gui/$(id -u)/com.welsh.ballshark'
 ```
 (Schema-changing items A/B migrate on startup. Reinstall only if deps/entry change.)
-After the loop lands code items + pushes, run the above so chumstats.com updates.
 
 ---
 
