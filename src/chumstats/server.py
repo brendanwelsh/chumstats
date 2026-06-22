@@ -6069,7 +6069,7 @@ def _filter_sidebar(active: str, force_hidden: bool = False) -> str:
 
     mode = section("mode", """
         <div class="sf-section">
-          <div class="sf-title">Game mode</div>
+          <div class="sf-title">Mode</div>
           <div class="sf-group" data-filter="mode">
             <a class="sf-chip" data-val="">All</a>
             <a class="sf-chip" data-val="1">1v1</a>
@@ -6103,7 +6103,7 @@ def _filter_sidebar(active: str, force_hidden: bool = False) -> str:
     """)
     window = section("window", """
         <div class="sf-section">
-          <div class="sf-title">Date range</div>
+          <div class="sf-title">Date</div>
           <div class="sf-group" data-filter="window">
             <a class="sf-chip" data-val="">All time</a>
             <a class="sf-chip" data-val="today">Today</a>
@@ -6531,14 +6531,14 @@ body { min-height: 100vh; }
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px 16px;
+  gap: 6px 11px;
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 8px 12px;
+  padding: 7px 12px;
   margin: 0 0 16px;
 }
-.side-filters .sf-section { display: flex; align-items: center; gap: 6px; margin: 0; }
+.side-filters .sf-section { display: flex; align-items: center; gap: 5px; margin: 0; }
 .side-filters .sf-title {
   font-size: 10px;
   font-weight: 700;
@@ -6549,7 +6549,7 @@ body { min-height: 100vh; }
   white-space: nowrap;
 }
 .side-filters .sf-tip { display: none; }  /* too verbose for the compact bar */
-.side-filters .sf-group { display: flex; gap: 4px; }
+.side-filters .sf-group { display: flex; gap: 3px; }
 
 /* Every chip gets the same height + same vertical/horizontal centering. */
 .side-filters .sf-chip {
