@@ -2198,7 +2198,7 @@ def _history_page_html(store, primary_id, name, *,
         """)
 
     table_html = f"""
-      <table class="history">
+      <div class="tscroll"><table class="history">
         <thead><tr>
           <th style="width:40px"></th>
           <th style="width:110px">When</th>
@@ -6045,7 +6045,7 @@ def _clan_page_html(store, members: list[str], *, self_name: str | None = None,
         recent_matches_html = '<div class="empty">No club matches found yet.</div>'
     else:
         recent_matches_html = f"""
-          <table class="history">
+          <div class="tscroll"><table class="history">
             <thead><tr>
               <th></th>
               <th>When</th>
@@ -6055,7 +6055,7 @@ def _clan_page_html(store, members: list[str], *, self_name: str | None = None,
               <th>MVP</th>
             </tr></thead>
             <tbody>{"".join(match_rows)}</tbody>
-          </table>
+          </table></div>
         """
 
     # Rivalries block
