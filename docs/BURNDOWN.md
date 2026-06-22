@@ -69,7 +69,7 @@ the older C/D/E below (E is subsumed by the reframe item).
 - [x] **Scrollable 6-player selector** — DONE. Match detail per-player breakdown is now a
       scrollable tab selector + one visible panel (SPA, JS toggle, no reload); top-nav chips
       drive it. Collapsible `<details>` removed.
-- [ ] **Pressure & share always 50/50** — data bug; find the calc, fix or remove if not real.
+- [x] **Pressure & share always 50/50** — DONE. Root cause: uploaded matches batch all BallHits under one received_at, so time-interval possession/pressure collapsed (0% / 50-50). Recomputed from touch counts + positions ("Touch share" / "Field tilt"). Verified varied (38/62, 57/43).
 - [ ] **Touches-per-player half-bar** (match history) — broken/half-rendered; fix or remove.
 - [ ] **Data-gap audit (RECURRING)** — each pass, audit one page's datasets vs the DB; flag
       missing / placeholder / always-constant values; fix or document. Screenshot to verify.
