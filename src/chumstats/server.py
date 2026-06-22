@@ -6903,14 +6903,18 @@ section, .card {
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 0;
-  padding: 16px 18px 14px;
+  padding: 14px 16px;
   position: relative;
   overflow: hidden;
+  display: flex; flex-direction: column;
+  justify-content: center; align-items: center;
+  text-align: center;
+  min-height: 80px;
 }
 .kpi .kpi-label {
   font-size: 10px; font-weight: 700; letter-spacing: 0.12em;
   text-transform: uppercase; color: var(--text-dim);
-  margin-bottom: 8px;
+  margin-bottom: 4px;
 }
 .kpi .kpi-value {
   font-size: 26px; font-weight: 800; letter-spacing: -0.02em;
@@ -6921,7 +6925,7 @@ section, .card {
   margin-top: 6px;
   font-size: 12px; color: var(--text-dim);
   font-variant-numeric: tabular-nums;
-  display: flex; gap: 6px; align-items: center;
+  display: flex; gap: 6px; align-items: center; justify-content: center;
 }
 .kpi.primary { border-color: var(--accent-line); background: linear-gradient(180deg, var(--accent-soft), transparent 60%), var(--card); }
 .kpi.primary .kpi-label { color: var(--accent); }
