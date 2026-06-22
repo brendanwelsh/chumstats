@@ -2349,9 +2349,15 @@ def _match_detail_html(store, match_id: str, viewer_pid: str | None, viewer_name
         # Movement + boost (only meaningful at >=70% coverage).
         if cov >= 0.70 and ticks >= 200:
             sup = p["ticks_supersonic"] / ticks * 100
-            air = p["ticks_in_air"] / ticks * 100
-            wall = p["ticks_on_wall"] / ticks * 100
-            ground = p["ticks_on_ground"] / ticks * 100
+            # Ground/air/wall partition POSITION time, but some ticks lack a clean
+            # position classification (so g+a+w can fall short of ticks_total and
+            # read e.g. 68/0/10 = 78%). Normalise to their own sum so the three
+            # always read as shares of classified position time and total 100%.
+            pos_ticks = ((p["ticks_on_ground"] or 0) + (p["ticks_in_air"] or 0)
+                         + (p["ticks_on_wall"] or 0)) or 1
+            air = (p["ticks_in_air"] or 0) / pos_ticks * 100
+            wall = (p["ticks_on_wall"] or 0) / pos_ticks * 100
+            ground = (p["ticks_on_ground"] or 0) / pos_ticks * 100
             avg_sp = p["speed_sum"] / ticks
             boost = p["boost_used"]
             zero_pct = (p["ticks_zero_boost"] or 0) / ticks * 100

@@ -71,21 +71,12 @@ the older C/D/E below (E is subsumed by the reframe item).
       drive it. Collapsible `<details>` removed.
 - [x] **Pressure & share always 50/50** — DONE. Root cause: uploaded matches batch all BallHits under one received_at, so time-interval possession/pressure collapsed (0% / 50-50). Recomputed from touch counts + positions ("Touch share" / "Field tilt"). Verified varied (38/62, 57/43).
 - [x] **Touches-per-player half-bar** (match history) — DONE. Removed the per-row touch-share bar (read as half a bar chart); the list is cleaner, touch share/field tilt live on the match page.
-- [ ] **VALIDATION SWEEP (RECURRING — never check off; this keeps the loop alive)** —
-      once the finite items above are done, each 15-min fire picks ONE page (rotate:
-      splash → players → player profile → history → match detail → opponents → clubs →
-      compare) and validates all four dimensions, then fixes + deploys + screenshots what
-      it finds:
-      1. **Stat accuracy** — recompute a couple of the page's headline numbers straight
-         from `data/central.db` (on the macmini) and diff against what the page renders;
-         flag any mismatch.
-      2. **Correct/complete data** — no missing / placeholder / always-constant / not-
-         summing-to-100 values (e.g. the ground/air/wall %s). Fix or document.
-      3. **No UI overlap / clunk** — Playwright screenshot at 1280–1500px; check nothing
-         overlaps and the layout is tight (ballchasing-style).
-      4. **No Chum/owner perspective** — grep the rendered page for `Me|you|your|our|us|
-         them|@ChumtheWaters`; everything must read neutral (all-players).
-      Log findings here under "## Validation log". Re-screenshot to verify each fix.
+- [x] **Ground/air/wall not summing to 100** — DONE. Normalize the three position
+      categories to their own sum (shares of *classified* position time) so they always
+      total 100% (was e.g. 68/0/10 = 78% when ~22% of a player's ticks lacked a clean
+      classification — air also under-counted for the owner's own captured ticks).
+> The **VALIDATION SWEEP (recurring)** now lives at the very bottom of this file — it runs
+> AFTER the finite items (D/E) so it can't starve them. Never check it off; it keeps the loop alive.
 - [x] **Club "1ST DAY PEWPING" noise** — removed the our-team-name suffix from the /clan title
       (it was the user's own RL club name leaking onto the opponent-clubs page).
 - [x] **>200 matches** — history limit 200 → 2000 (proper pagination/infinite-scroll is the
@@ -125,6 +116,28 @@ the older C/D/E below (E is subsumed by the reframe item).
 ## Housekeeping
 
 - [x] Push `rebrand-chumstats`; delete stale `origin/fix/local-portal-scope`. (done)
+
+## ♻️ VALIDATION SWEEP (RECURRING — never check off; keeps the loop alive)
+
+Reached only after the finite items above (D/E) are done, so it can't starve them. Each
+15-min fire picks ONE page (rotate: splash → players → player profile → history → match
+detail → opponents → clubs → compare), validates all four dimensions, then fixes + deploys
++ screenshots what it finds:
+
+- [ ] (this stays unchecked forever — it's the standing mission)
+  1. **Stat accuracy** — recompute a couple of the page's headline numbers straight from
+     `data/central.db` (on the macmini) and diff against what the page renders; flag mismatches.
+  2. **Correct/complete data** — no missing / placeholder / always-constant / not-summing-
+     to-100 values. Fix or document.
+  3. **No UI overlap / clunk** — Playwright screenshot at 1280–1500px; nothing overlaps,
+     layout is tight (ballchasing-style).
+  4. **No Chum/owner perspective** — grep the rendered page for `Me|you|your|our|us|@ChumtheWaters`;
+     everything reads neutral (all-players).
+
+  Log findings under "## Validation log" below. Re-screenshot to verify each fix.
+
+## Validation log
+_(loop appends per-page findings + fixes here)_
 
 ---
 
