@@ -1548,31 +1548,49 @@ def _radar_block_for_player(store, primary_id: str | None, name: str | None,
                 COUNT(*)     AS n
             FROM match_player_stats WHERE {where}{bot_filter}
         """, (arg,)).fetchone()
-        peaks = con.execute("""
-            SELECT
-                MAX(goals)   AS g,
-                MAX(assists) AS a,
-                MAX(saves)   AS sv,
-                MAX(shots)   AS sh,
-                MAX(demos)   AS d
-            FROM match_player_stats
+        # Reference = the field of per-player per-match averages (regulars only).
+        # Scaling against the best regular's average (not a freak single game)
+        # keeps the bars meaningful instead of a tiny blob near zero.
+        field = con.execute("""
+            SELECT AVG(ag) mg, MAX(ag) xg, AVG(aa) ma, MAX(aa) xa,
+                   AVG(asv) msv, MAX(asv) xsv, AVG(ash) msh, MAX(ash) xsh,
+                   AVG(ad) md, MAX(ad) xd
+            FROM (SELECT AVG(goals) ag, AVG(assists) aa, AVG(saves) asv,
+                         AVG(shots) ash, AVG(demos) ad
+                  FROM match_player_stats GROUP BY primary_id HAVING COUNT(*) >= 5)
         """).fetchone()
     if not row or not row["n"]:
         return ""
-    values = [
-        ("Goals",   row["g"]  or 0, max(peaks["g"]  or 0, 1)),
-        ("Shots",   row["sh"] or 0, max(peaks["sh"] or 0, 1)),
-        ("Demos",   row["d"]  or 0, max(peaks["d"]  or 0, 1)),
-        ("Saves",   row["sv"] or 0, max(peaks["sv"] or 0, 1)),
-        ("Assists", row["a"]  or 0, max(peaks["a"]  or 0, 1)),
+    # (label, player per-match avg, field avg, field best-regular)
+    stats = [
+        ("Goals",   row["g"]  or 0, field["mg"]  or 0, field["xg"]  or 1),
+        ("Assists", row["a"]  or 0, field["ma"]  or 0, field["xa"]  or 1),
+        ("Saves",   row["sv"] or 0, field["msv"] or 0, field["xsv"] or 1),
+        ("Shots",   row["sh"] or 0, field["msh"] or 0, field["xsh"] or 1),
+        ("Demos",   row["d"]  or 0, field["md"]  or 0, field["xd"]  or 1),
     ]
-    svg = _radar_svg(values)
+    rows_html = ""
+    for label, val, favg, fmax in stats:
+        fmax = fmax or 1
+        pct = min(100, val / fmax * 100)
+        avg_pct = min(100, (favg or 0) / fmax * 100)
+        tone = "good" if val >= (favg or 0) else "bad"
+        rows_html += (
+            f'<div class="skill-row">'
+            f'<div class="skill-label">{label}</div>'
+            f'<div class="skill-track">'
+            f'<div class="skill-fill {tone}" style="width:{pct:.0f}%"></div>'
+            f'<div class="skill-avg" style="left:{avg_pct:.0f}%" '
+            f'title="field average {favg:.2f}"></div></div>'
+            f'<div class="skill-val">{val:.2f}<span class="skill-favg">avg {favg:.2f}</span></div>'
+            f'</div>'
+        )
     return (
-        f'<section class="radar-section">'
-        f'<h2>Radar - per-match averages</h2>'
-        f'{svg}'
-        f'<p class="caption">Each axis scaled to the highest single-match value in the DB. '
-        f'Polygon = your per-match averages over {row["n"]} matches.</p>'
+        f'<section class="card skill-card">'
+        f'<div class="section-title"><span>Per-match averages vs the field</span>'
+        f'<span class="dim">over {row["n"]} matches &middot; bar = vs the best regular, '
+        f'tick = field average</span></div>'
+        f'{rows_html}'
         f'</section>'
     )
 
@@ -7699,6 +7717,18 @@ table.history tr.match-row:hover { background: var(--card-hover); }
 .bs-tmap-name { font-size: 11px; font-weight: 600; margin-bottom: 4px; }
 .bs-tmap.team-blue .bs-tmap-name { color: var(--team-blue); }
 .bs-tmap.team-orng .bs-tmap-name { color: var(--team-orng); }
+/* Player-profile skill bars: per-match avg vs the field (replaces weak radar). */
+.skill-card { margin-top: 14px; }
+.skill-row { display: grid; grid-template-columns: 84px 1fr 116px; align-items: center;
+  gap: 12px; padding: 5px 0; }
+.skill-label { font-size: 13px; font-weight: 600; color: var(--text); }
+.skill-track { position: relative; height: 10px; background: var(--accent-line); border-radius: 6px; }
+.skill-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 6px; }
+.skill-fill.good { background: #34d399; }
+.skill-fill.bad { background: var(--text-faint); }
+.skill-avg { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--text); opacity: 0.55; }
+.skill-val { font-size: 13px; font-weight: 700; text-align: right; font-variant-numeric: tabular-nums; }
+.skill-favg { display: block; font-size: 10px; font-weight: 500; color: var(--text-faint); }
 
 /* Per-player SPA: scrollable tab strip + one visible panel (replaces the
    tall stack of collapsible cards). */
@@ -9810,11 +9840,14 @@ def _dashboard_html(d, store=None, primary_id: str | None = None,
     base_path = "/dashboard" if is_self else f"/player/{quote(name, safe='')}"
     filter_html = _filter_chip_html(base_path, "Filter Bot matches", include_bots)
 
+    # Subtitle only when it adds info — otherwise it's just the name twice.
+    who_html = (f'<div class="who">{html.escape(d.player_label)}</div>'
+                if d.player_label and d.player_label != page_title else "")
     body = f"""
   <div class="profile-header">
     <h1>{html.escape(page_title)} {bot_badge}</h1>
   </div>
-  <div class="who">{html.escape(d.player_label)}</div>
+  {who_html}
   {filter_html}
   {kpis}
   {form_section}
