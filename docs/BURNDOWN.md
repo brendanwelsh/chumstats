@@ -279,7 +279,7 @@ with `/loop 10m <prompt>`, or re-point it at a specific target. Genuine remainin
 Real walkthrough; convergence was premature. Work top-down, test, commit, deploy, screenshot, check off.
 
 ### Filters (HIGH)
-- [ ] **Filters must APPLY (not just persist) across page nav (back/forward)** — they save but don't apply right.
+- [x] **Filters APPLY + persist across page nav** — DONE. Root cause: stored-filter redirect was gated by a session-wide flag (fired once/session). Now nav links carry the filters + a self-guarding per-load fallback redirect. Verified: /history all=383, ?mode=2=166; Matches nav from /players?mode=2 → /history?mode=2.
 - [ ] **Platform (opponent) filter doesn't actually filter** — verify + fix everywhere it's shown.
 - [ ] **Top filter bar is 2 lines on /history** — make it 1 row / cleaner / balanced.
 
