@@ -47,8 +47,9 @@ After the loop lands code items + pushes, run the above so chumstats.com updates
 ## [code] genuine fixes to grind (loop works these)
 
 - [x] ~~**Scaling/console icons**~~ — RESOLVED as deploy-only; caps verified correct in code (see above). No code change needed; deploy fixes the live site.
-- [ ] **Heatmap: remove first touches** — kickoff dead-centre already excluded (`760f8ed`);
-      extend to all kickoff first-touches if that's the intent.
+- [x] **Heatmap: remove first touches** — DONE. Sequence-tag kickoff first-touches
+      (first non-replay BallHit after start + after each goal) in `_build_playback_data`;
+      `_ball_heatmap_svg` drops tagged touches; lifetime keeps the centre-box fallback.
 - [ ] **Per-match touches = spot icons, not heatmap** — in the per-match view, render
       each touch as a discrete spot/marker; keep the density heatmap only for the
       aggregate/career view (too few touches per match for a meaningful heatmap).
