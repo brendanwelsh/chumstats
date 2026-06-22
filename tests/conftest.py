@@ -28,4 +28,7 @@ def exhibition_capture() -> Path:
 
 @pytest.fixture(scope="session")
 def all_captures() -> list[Path]:
-    return sorted(CAPTURES.glob("rl_*.jsonl"))
+    caps = sorted(CAPTURES.glob("rl_*.jsonl"))
+    if not caps:
+        pytest.skip("capture fixtures missing")  # skip, don't run on empty data
+    return caps
