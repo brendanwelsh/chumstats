@@ -9885,7 +9885,7 @@ def _dashboard_html(d, store=None, primary_id: str | None = None,
                       f'<div class="detail-grid">{"".join(detail_sections)}</div>'))
     if teammate_sections:
         panes.append(("teammates", "Teammates &amp; opponents",
-                      f'<div class="detail-grid">{"".join(teammate_sections)}</div>'))
+                      f'<div class="rel-grid">{"".join(teammate_sections)}</div>'))
     if ball_section:
         panes.append(("heatmap", "Heatmap", ball_section))
     panes.append(("matches", "Matches", history))
@@ -9914,6 +9914,8 @@ def _dashboard_html(d, store=None, primary_id: str | None = None,
   <style>
     .detail-grid{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;align-items:start}}
     @media(max-width:760px){{.detail-grid{{grid-template-columns:1fr}}}}
+    /* Relationships tab: 1 card centers, 2 sit side-by-side (no half-empty grid). */
+    .rel-grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,480px));gap:14px;align-items:start;justify-content:center}}
     #profile-nav{{position:static}}
     .kpi-row{{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}}
   </style>
