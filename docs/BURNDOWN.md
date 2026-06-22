@@ -55,11 +55,10 @@ also includes **auditing every page's datasets for gaps each pass** and **re-scr
 to verify** (Playwright works; `.venv/Scripts/python` + chromium installed). Do these BEFORE
 the older C/D/E below (E is subsumed by the reframe item).
 
-- [x] **Kill all "Me"/owner framing** — DONE (core). Removed "Me" nav; brand -> splash; /dashboard redirects to /; neutralized copy (Your insights/goals, you've faced, Your line, vs your average). Full /dashboard code removal can follow later.
-      repurpose/remove the `/dashboard` "Career dashboard"; neutralize copy across pages:
-      "Every player you've faced" → "Every player faced", "YOUR GOALS / THEIR GOALS" →
-      "Goals For / Against", analytics.py "Your line / Your insights" → neutral; drop the
-      hardcoded @ChumtheWaters self.
+- [x] **Kill all "Me"/owner framing** — DONE (core). Removed "Me" nav; brand → splash;
+      `/dashboard` redirects to `/`; neutralized copy (Your insights/goals, you've faced,
+      Your line, vs your average). Follow-ups: delete the dead `_dashboard_html(is_self)`
+      path; `/history` still renders the configured owner (subject-param `?pid=` = old item E).
 - [ ] **Filter overlap (left) + redundancy** — sidebar overlaps at the user's width (asked
       20+ times; width-specific — chips overflow when narrow). Harden: `min-width:0` +
       overflow guards on `.side-filters`/`.sf-chip`; verify 1200–1500px. Remove the REDUNDANT
