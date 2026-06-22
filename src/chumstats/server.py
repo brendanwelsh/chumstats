@@ -1925,7 +1925,7 @@ def _players_directory_html(store, self_primary_id: str | None = None,
             sort, sort, sort, sort,
         )).fetchall()
 
-    def _row(r) -> str:
+    def _row(r, rank) -> str:
         is_bot = bool(r["is_bot"])
         tag = "<span class='tag'>BOT</span>" if is_bot else ""
         _pid = r["primary_id"] if "primary_id" in r.keys() else ""
@@ -1943,6 +1943,7 @@ def _players_directory_html(store, self_primary_id: str | None = None,
         kind_str = " · ".join(kind) or "n/a"
         return f"""
           <tr class="player-row">
+            <td class="num tnum rank">{rank}</td>
             <td><a class="player-link" href="{href}">{html.escape(r["name"])}</a> {tag}</td>
             <td class="dim">{r["platform"] or 'n/a'}</td>
             <td class="dim">{kind_str}</td>
@@ -1999,12 +2000,13 @@ def _players_directory_html(store, self_primary_id: str | None = None,
       <section>
         <table class="players-table">
           <thead><tr>
+            <th class="num rank">#</th>
             <th>Player</th><th>Platform</th><th>Relation</th>
             <th class="num">Matches</th><th class="num">W-L</th>
             {_stat_cols_th()}
           </tr></thead>
           <tbody>
-            {"".join(_row(r) for r in rows)}
+            {"".join(_row(r, i + 1) for i, r in enumerate(rows))}
           </tbody>
         </table>
       </section>
@@ -7729,6 +7731,9 @@ table.history tr.match-row:hover { background: var(--card-hover); }
 .skill-avg { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--text); opacity: 0.55; }
 .skill-val { font-size: 13px; font-weight: 700; text-align: right; font-variant-numeric: tabular-nums; }
 .skill-favg { display: block; font-size: 10px; font-weight: 500; color: var(--text-faint); }
+/* Leaderboard rank column on the players directory. */
+.players-table td.rank, .players-table th.rank { color: var(--text-faint); font-weight: 600;
+  width: 34px; text-align: right; padding-right: 10px; }
 
 /* Per-player SPA: scrollable tab strip + one visible panel (replaces the
    tall stack of collapsible cards). */
