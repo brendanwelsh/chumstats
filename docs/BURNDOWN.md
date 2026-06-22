@@ -324,7 +324,7 @@ Real walkthrough; convergence was premature. Work top-down, test, commit, deploy
 - [x] **Platform column → icons (not text)** in square boxes; filter icons shrunk to 15px in 30px square boxes (more padding). NOTE: icons are the app's abstract concept-drawings, not brand logos — recognizable-logo redesign is a separate optional task.
 - [x] **"Time near-empty %" — REMOVED** (was invalid: boost<=1 ~never fires → 0% for everyone). Gone from Compare, profile, match box-score; ingest threshold fixed to <=12 for future data.
 - [~] **Compare "Pro tier" → FIELD AVERAGE** — DEFERRED (needs care): the table mixes total/per-match/%/derived metrics + multiple data sources; a correct field-avg needs per-player windowed aggregation at matching scale (or reworking all count metrics to per-match first). Do as a focused task, not a quick loop fire.
-- [ ] **Clubs: "Club record 179-169 / 51% / 348 matches" shouldn't be one tile** — split/restructure.
+- [x] **Clubs "Club record" tile split** — DONE. Now Record / Win rate / Matches separate tiles (was one crammed tile). Verified.
 - [ ] **Club heatmap is useless** — make it "where we score from" (shot heatmap) instead.
 - [ ] **Mobile / tiny-window pass** — fix spacing/vertical/horizontal in compacted view across pages.
 - [ ] **The date gets huge on mobile** — shrink it; shorter date format generally.
