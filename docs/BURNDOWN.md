@@ -284,8 +284,8 @@ Real walkthrough; convergence was premature. Work top-down, test, commit, deploy
 - [x] **Filter bar 2 lines → 1 row** — DONE. Was wrapping at ≤1024px; shortened labels (Game mode→Mode, Date range→Date) + tightened gaps → 1 clean row at 1024/960 (wraps only <960). Verified.
 
 ### Matches / history (HIGH)
-- [ ] **Make /history a true ALL-MATCHES view** — stop showing the owner's per-match stat line (chum-centric).
-- [ ] **Redundant match count** ("47" + "{N} matches shown") — one clear count. (7-day filter is good, keep.)
+- [x] **/history = ALL-MATCHES view** — DONE. Default Matches now lists EVERY recorded match neutrally (When/Score Blue-v-Orange/Arena/Mode/MVP), not the owner's per-match goals/assists/saves/shots. Per-player history stays at ?pid=.
+- [x] **Redundant match count** — DONE. The all-matches view shows ONE count ("N matches recorded"), no toolbar/subtitle double-count.
 
 ### No-Chum residue (HIGH)
 - [x] **Owner name renders ORANGE on the match roster** — DONE (dropped the .self accent highlight) — leftover `self`/viewer highlight. Remove → team-color/neutral.
