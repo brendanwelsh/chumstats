@@ -2110,6 +2110,7 @@ def _history_page_html(store, primary_id, name, *,
               </div>
               {('<div class="row-chips">' + chips + '</div>') if chips else ''}
             </td>
+            <td class="dim arena-cell">{html.escape(_arena_nice(r['arena'] or ''))}</td>
             <td class="num tnum"><b>{r['goals']}</b></td>
             <td class="num tnum"><b>{r['assists']}</b></td>
             <td class="num tnum"><b>{r['saves']}</b></td>
@@ -2124,6 +2125,7 @@ def _history_page_html(store, primary_id, name, *,
           <th style="width:40px"></th>
           <th style="width:110px">When</th>
           <th>Score</th>
+          <th>Arena</th>
           <th class="num">{_stat_icon_html("Goals")}Goals</th>
           <th class="num">{_stat_icon_html("Assists")}Assists</th>
           <th class="num">{_stat_icon_html("Saves")}Saves</th>
@@ -7734,6 +7736,10 @@ table.history tr.match-row:hover { background: var(--card-hover); }
 /* Leaderboard rank column on the players directory. */
 .players-table td.rank, .players-table th.rank { color: var(--text-faint); font-weight: 600;
   width: 34px; text-align: right; padding-right: 10px; }
+/* History results table: keep the score tight + a venue (Arena) column so the
+   row doesn't have a dead gap between the score and the stat columns. */
+.history .score-cell { width: 168px; }
+.history .arena-cell { color: var(--text-faint); white-space: nowrap; font-size: 12.5px; }
 
 /* Per-player SPA: scrollable tab strip + one visible panel (replaces the
    tall stack of collapsible cards). */
