@@ -50,6 +50,13 @@ compare). Loop now cycles back for deeper polish + continues the no-Chum sweep.
   (72/19/5) on the profile MOVEMENT section + compare table — same normalization bug as the
   match page, but the lifetime paths in analytics.py weren't fixed. Normalized both to the
   position-tick sum; now 74.4/20.1/5.6 = 100. Verified live.
+- **Match · Kickoff pane** — was EMPTY on every uploaded match: it detected kickoffs by time
+  windows, but uploaded timestamps collapse to one value so nothing matched. Rewired to the
+  sequence-tagged is_kickoff touches (timing-independent); neutralized to Blue-vs-Orange (dropped
+  'YOU'/'my wins' + the unreliable time-to-first-touch). Now shows 6 kickoffs + winner. Verified live.
+- **[ ] Match · Timeline timestamps** — every event shows the same time (e.g. '8:29') due to the
+  upload timestamp collapse. Events are correctly ORDERED; the per-event time is just noise.
+  Next: hide the timestamp (or show sequence/score-state) when timing is collapsed.
 
 ### Still to repass (ESPN pass, top-down)
 - [x] **Match · "Us vs them" → "Team comparison"** — DONE. Forced neutral Blue-vs-Orange always; nav chip "Teams"; also dropped the owner-perspective "vs your career" insights card. 0 us/them/your-career leaks live.
