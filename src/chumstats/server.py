@@ -355,7 +355,8 @@ def make_app(broadcaster: Broadcaster, *, store=None,
 
     @_gated_get("/history")
     async def history_page(include_bots: int = 0, mode: int | None = None,
-                            window: str | None = None, sort: str = "recent"):
+                            window: str | None = None, platform: str | None = None,
+                            sort: str = "recent"):
         if store is None:
             return HTMLResponse("<p>No DB configured</p>")
         mode_filter = mode if mode in (1, 2, 3, 4) else None
@@ -367,6 +368,7 @@ def make_app(broadcaster: Broadcaster, *, store=None,
             include_bots=bool(include_bots),
             mode_filter=mode_filter,
             window_days=window_days,
+            platform_filter=platform or None,
             sort=sort,
         ))
 
@@ -382,14 +384,14 @@ def make_app(broadcaster: Broadcaster, *, store=None,
 
     @_gated_get("/opponents")
     async def opponents_page(include_bots: int = 0, mode: int | None = None,
-                              limit: int = 50):
+                              platform: str | None = None, limit: int = 50):
         if store is None:
             return HTMLResponse("<p>No DB configured</p>")
         mode_filter = mode if mode in (1, 2, 3, 4) else None
         return HTMLResponse(_opponents_page_html(
             store, self_primary_id, self_name,
             include_bots=bool(include_bots), mode_filter=mode_filter,
-            limit=limit,
+            platform_filter=platform or None, limit=limit,
         ))
 
     @_gated_get("/compare")
@@ -1602,7 +1604,8 @@ def _match_history_rows(store, primary_id: str | None, name: str | None,
                         *, limit: int = 50,
                         include_bots: bool = True,
                         mode_filter: int | None = None,
-                        window_days: int | None = None):
+                        window_days: int | None = None,
+                        platform_filter: str | None = None):
     """Shared query for recent matches. Returns sqlite Row objects.
 
     `team_size` is derived as max(team0_count, team1_count) so it reflects the
@@ -1638,6 +1641,11 @@ def _match_history_rows(store, primary_id: str | None, name: str | None,
         import time as _time
         where_clauses.append("m.started_at >= ?")
         args.append(_time.time() - window_days * 86400)
+    if platform_filter:
+        where_clauses.append(
+            "EXISTS (SELECT 1 FROM match_player_stats op2 WHERE op2.match_id = m.id "
+            "AND op2.team_num != mps.team_num AND op2.platform LIKE '%' || ? || '%')")
+        args.append(platform_filter)
     where_sql = " AND ".join(where_clauses)
     # Per-match team touches (used for possession indicator in history row)
     t0_touches_sql = """(
@@ -2000,11 +2008,12 @@ def _history_page_html(store, primary_id, name, *,
                        include_bots=True,
                        mode_filter: int | None = None,
                        window_days: int | None = None,
+                       platform_filter: str | None = None,
                        sort: str = "recent") -> str:
     rows = _match_history_rows(
         store, primary_id, name, limit=2000,
         include_bots=include_bots, mode_filter=mode_filter,
-        window_days=window_days,
+        window_days=window_days, platform_filter=platform_filter,
     )
     # Sort options. "recent" is the source order (already DESC by started_at).
     if sort == "score":
@@ -5219,6 +5228,7 @@ def _boost_view_markup() -> str:
 def _opponents_page_html(store, self_primary_id, self_name, *,
                           include_bots: bool = False,
                           mode_filter: int | None = None,
+                          platform_filter: str | None = None,
                           limit: int = 50) -> str:
     """Head-to-head opponent records. Lists every player you've faced on the
     OTHER team at least twice, with your W/L vs them, total goals for/against,
@@ -5242,6 +5252,16 @@ def _opponents_page_html(store, self_primary_id, self_name, *,
             )
         ) = ?"""
         mode_args = [mode_filter]
+    # Opponent-platform filter: matches where the opposing team (relative to me)
+    # fielded a player on this platform. Each of the 3 queries below has me + m
+    # aliases, so the same clause + arg plug into all of them.
+    platform_clause = ""
+    platform_args: list = []
+    if platform_filter:
+        platform_clause = (" AND EXISTS (SELECT 1 FROM match_player_stats op2 "
+                           "WHERE op2.match_id = m.id AND op2.team_num != me.team_num "
+                           "AND op2.platform LIKE '%' || ? || '%')")
+        platform_args = [platform_filter]
 
     with store._conn() as con:
         rows = con.execute(f"""
@@ -5263,12 +5283,12 @@ def _opponents_page_html(store, self_primary_id, self_name, *,
                                         AND opp.team_num != me.team_num
             JOIN match_player_stats x   ON x.match_id = me.match_id
                                         AND x.primary_id = me.primary_id
-            WHERE {self_clause}{bots_clause}{mode_clause}
+            WHERE {self_clause}{bots_clause}{mode_clause}{platform_clause}
             GROUP BY opp.name, opp.primary_id
             HAVING matches >= 1
             ORDER BY matches DESC, last_played DESC
             LIMIT ?
-        """, (self_arg, *mode_args, limit)).fetchall()
+        """, (self_arg, *mode_args, *platform_args, limit)).fetchall()
 
         # Opposing TEAMS: aggregate per MATCH (one row per match, via me's single
         # row) so the match count isn't multiplied by the opponent roster size.
@@ -5290,14 +5310,14 @@ def _opponents_page_html(store, self_primary_id, self_name, *,
                     m.started_at AS last_played
                 FROM match_player_stats me
                 JOIN matches m ON m.id = me.match_id
-                WHERE {self_clause_me}{mode_clause}
+                WHERE {self_clause_me}{mode_clause}{platform_clause}
             )
             WHERE opp_team NOT IN ('Blue', 'Orange', 'Home', 'Away', '')
             GROUP BY opp_team
             HAVING matches >= 1
             ORDER BY matches DESC, last_played DESC
             LIMIT ?
-        """, (self_arg, *mode_args, limit)).fetchall()
+        """, (self_arg, *mode_args, *platform_args, limit)).fetchall()
 
         # Rosters they fielded, fetched separately (the opponent join would
         # otherwise re-inflate the per-match aggregation above).
@@ -5311,10 +5331,10 @@ def _opponents_page_html(store, self_primary_id, self_name, *,
                 JOIN matches m ON m.id = me.match_id
                 JOIN match_player_stats opp ON opp.match_id = m.id
                                             AND opp.team_num != me.team_num
-                WHERE {self_clause_me}{bots_clause}{mode_clause}
+                WHERE {self_clause_me}{bots_clause}{mode_clause}{platform_clause}
                   AND CASE WHEN me.team_num = 0 THEN m.team1_name ELSE m.team0_name END NOT IN ('Blue', 'Orange', 'Home', 'Away', '')
                 GROUP BY opp_team
-            """, (self_arg, *mode_args)).fetchall():
+            """, (self_arg, *mode_args, *platform_args)).fetchall():
                 roster_map[rr["opp_team"]] = rr["roster"] or ""
 
     if not rows:
