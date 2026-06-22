@@ -4452,57 +4452,26 @@ def _match_insights_html(playback: dict, t0_name: str, t1_name: str) -> str:
     if not ball:
         return ""
 
-    # ---- Possession (team) -------------------------------------------------
-    # Possession = sum of durations attributed to the most-recent toucher.
-    # Until someone touches the ball the first time, possession is "neutral".
-    b_pos = 0.0
-    o_pos = 0.0
-    duration = playback["duration"] or 0
-    last_team = None
-    last_t = 0.0
-    for bh in ball:
-        t = bh["t"]
-        if last_team == 0:
-            b_pos += max(0.0, t - last_t)
-        elif last_team == 1:
-            o_pos += max(0.0, t - last_t)
-        last_team = bh["team"]
-        last_t = t
-    # Tail interval from last hit -> end of match
-    if last_team == 0:
-        b_pos += max(0.0, duration - last_t)
-    elif last_team == 1:
-        o_pos += max(0.0, duration - last_t)
-    total_attr = b_pos + o_pos or 1.0
-    b_pct = b_pos / total_attr * 100
-    o_pct = o_pos / total_attr * 100
+    # ---- Touch share (possession proxy) ------------------------------------
+    # Per-touch timing isn't reliable: uploaded matches arrive batched with a
+    # single received_at, so inter-touch intervals collapse to zero (this was
+    # the "possession 0% / pressure 50-50" bug). Use touch COUNTS instead — a
+    # robust proxy that works for every match. Each team's share of contacts.
+    b_touch = sum(1 for bh in ball if bh.get("team") == 0)
+    o_touch = sum(1 for bh in ball if bh.get("team") == 1)
+    total_touch = b_touch + o_touch or 1
+    b_pct = b_touch / total_touch * 100
+    o_pct = o_touch / total_touch * 100
 
-    # ---- Ball-half pressure ------------------------------------------------
-    # Team 0 (Blue) defends Y = +5120 and attacks Y = -5120. So time spent
-    # at Y < 0 = pressure FOR Blue (in their attacking half); Y > 0 = pressure
-    # FOR Orange. Use the same inter-hit-interval attribution.
-    b_attack_time = 0.0
-    o_attack_time = 0.0
-    last_y = ball[0]["y"]
-    last_t = 0.0
-    for bh in ball:
-        t = bh["t"]
-        # Approximation: assume the ball was on the same side of midfield as
-        # whichever hit was MOST RECENT to that interval. Y < 0 = Blue's
-        # attacking half (Orange's defensive half).
-        dt = max(0.0, t - last_t)
-        if last_y < -300:    # Comfortably in Orange's defensive half
-            b_attack_time += dt
-        elif last_y > 300:   # Comfortably in Blue's defensive half
-            o_attack_time += dt
-        else:
-            b_attack_time += dt / 2
-            o_attack_time += dt / 2
-        last_y = bh["y"]
-        last_t = t
-    pres_total = b_attack_time + o_attack_time or 1.0
-    b_pres = b_attack_time / pres_total * 100
-    o_pres = o_attack_time / pres_total * 100
+    # ---- Field tilt (pressure proxy) ---------------------------------------
+    # Blue attacks Y < 0 (Orange's half); Orange attacks Y > 0. Count contacts
+    # in each attacking half — a position-based proxy for territorial pressure
+    # (count, not time, so it survives the batched-timestamp upload).
+    b_attack = sum(1 for bh in ball if (bh.get("y") or 0) < -300)
+    o_attack = sum(1 for bh in ball if (bh.get("y") or 0) > 300)
+    pres_total = b_attack + o_attack or 1
+    b_pres = b_attack / pres_total * 100
+    o_pres = o_attack / pres_total * 100
 
     # ---- Touches per player ------------------------------------------------
     by_player: dict[str, dict] = {}
@@ -4541,14 +4510,14 @@ def _match_insights_html(playback: dict, t0_name: str, t1_name: str) -> str:
         <div class="section-title">
           <span>Match insights</span>
           <span class="dim" style="text-transform:none;letter-spacing:0">
-            Derived from {len(ball)} ball contacts. Time-on-ball and pressure
-            are estimates from inter-touch intervals.
+            Derived from {len(ball)} ball contacts. Touch share and field tilt
+            are from contact counts and positions.
           </span>
         </div>
 
         <div class="insights-row">
           <div class="insights-bars">
-            <div class="insights-subtitle">Time on ball (share of play after each touch)</div>
+            <div class="insights-subtitle">Touch share (share of ball contacts)</div>
             <div class="dual-bar">
               <div class="dual-bar-blue" style="width:{b_pct:.1f}%">
                 <span class="dual-bar-label">{b_pct:.0f}%</span>
@@ -4563,7 +4532,7 @@ def _match_insights_html(playback: dict, t0_name: str, t1_name: str) -> str:
             </div>
 
             <div class="insights-subtitle" style="margin-top:14px">
-              Pressure (time ball was in opponent's half)
+              Field tilt (contacts in opponent's half)
             </div>
             <div class="dual-bar">
               <div class="dual-bar-blue" style="width:{b_pres:.1f}%">
