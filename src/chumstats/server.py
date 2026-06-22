@@ -4788,6 +4788,12 @@ def _compare_page_html(store, slots: list[str], *, self_name: str | None = None,
         _lifetime_touch_data(store, slot_name, scopes[i]) if slot_name else None
         for i, slot_name in enumerate(slots)
     ]
+    # Shot maps (where each player's goals were struck from) — selectable
+    # alongside touch maps via the heatmap-type dropdown.
+    shot_data = [
+        _lifetime_shot_data(store, slot_name) if slot_name else None
+        for slot_name in slots
+    ]
 
     def option_list(selected: str) -> str:
         opts = ['<option value="">(select a player)</option>']
@@ -5063,7 +5069,7 @@ def _compare_page_html(store, slots: list[str], *, self_name: str | None = None,
         <button type="submit" class="copy-btn" style="padding:8px 18px;font-size:12px">Compare</button>
       </form>
 
-      {_compare_heatmap_row(slots, touch_data)}
+      {_compare_heatmap_row(slots, touch_data, shot_data)}
 
       <div class="card" style="padding:0;overflow:hidden;margin-top:16px">
         <table class="compare-table">
@@ -5076,43 +5082,57 @@ def _compare_page_html(store, slots: list[str], *, self_name: str | None = None,
     return _page_wrap("Compare players", body, active="compare")
 
 
-def _compare_heatmap_row(slots: list, touch_data: list) -> str:
-    """Render a horizontal row of per-slot lifetime touch heatmaps. Skipped
-    entirely if no slot has any data, so the compare page stays compact when
-    you've only filled a single slot or no one has ball contacts yet."""
+def _compare_heatmap_row(slots: list, touch_data: list, shot_data: list | None = None) -> str:
+    """Per-slot lifetime heatmaps with a TYPE dropdown (touch map / shot map).
+    Both maps render per card; the dropdown toggles which is visible (JS). Skipped
+    entirely if no slot has any touch data."""
     if not any(td and td.get("touches") for td in touch_data):
         return ""
+    shot_data = shot_data or [None] * len(slots)
+    any_shots = any(sd and sd.get("shots") for sd in shot_data)
     cards = []
-    for i, (slot, td) in enumerate(zip(slots, touch_data)):
+    for i, slot in enumerate(slots):
+        td = touch_data[i] if i < len(touch_data) else None
+        sd = shot_data[i] if i < len(shot_data) else None
         label = slot or f"(empty slot {i+1})"
         if not td or not td.get("touches"):
             cards.append(
-                f'<div class="compare-hm-card">'
-                f'<div class="compare-hm-head">{label}</div>'
-                f'<div class="compare-hm-empty">No touch data yet.</div>'
-                f'</div>'
+                f'<div class="compare-hm-card"><div class="compare-hm-head">{label}</div>'
+                f'<div class="compare-hm-empty">No data yet.</div></div>'
             )
             continue
         name_slug = "".join(ch if ch.isalnum() else "_" for ch in slot)
-        hm = _ball_heatmap_svg(td, compact=True, key=f"cmp-{name_slug}")
-        # Touch count + match count moved to the stats table (Ball touches row);
-        # the heatmap is just the heatmap now.
+        touch_hm = _ball_heatmap_svg(td, compact=True, key=f"cmp-t-{name_slug}")
+        shot_hm = (_ball_heatmap_svg(sd, compact=True, key=f"cmp-s-{name_slug}", exclude_center=False)
+                   if sd and sd.get("shots") else '<div class="compare-hm-empty">No goals yet.</div>')
         cards.append(
             f'<div class="compare-hm-card">'
             f'<div class="compare-hm-head" title="{label}">{label}</div>'
-            f'<div class="compare-hm-body">{hm}</div>'
+            f'<div class="compare-hm-body cmp-hm cmp-hm-touch">{touch_hm}</div>'
+            f'<div class="compare-hm-body cmp-hm cmp-hm-shot" style="display:none">{shot_hm}</div>'
             f'</div>'
         )
+    selector = (
+        '<select id="cmp-hm-select" class="cmp-hm-select">'
+        '<option value="touch">Touch map &mdash; where they touch the ball</option>'
+        '<option value="shot">Shot map &mdash; where they score from</option>'
+        '</select>') if any_shots else ""
+    js = ("<script>(function(){var s=document.getElementById('cmp-hm-select');if(!s)return;"
+          "s.addEventListener('change',function(){var v=s.value;"
+          "document.querySelectorAll('.cmp-hm-touch').forEach(function(e){e.style.display=v==='touch'?'':'none';});"
+          "document.querySelectorAll('.cmp-hm-shot').forEach(function(e){e.style.display=v==='shot'?'':'none';});});})();</script>"
+          ) if any_shots else ""
     return f"""
       <div class="card" style="margin-top:16px">
         <div class="section-title">
-          <span>Where they touch the ball (lifetime)</span>
-          <span class="dim" style="text-transform:none;letter-spacing:0">
-            Every BallHit each player has been on across all stored matches,
-            rotated so each player attacks &#8594; (right).
-          </span>
+          <span>Heatmaps (lifetime)</span>
+          {selector}
+        </div>
+        <div class="section-sub dim" style="margin:-4px 0 10px;text-transform:none;letter-spacing:0">
+          Rotated so each player attacks &#8594; (right). Brighter = more.
         </div>
         <div class="compare-hm-row">{"".join(cards)}</div>
+        {js}
       </div>
     """
 
@@ -8958,6 +8978,11 @@ table.history th .rl-icon,
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: 16px;
   margin-top: 4px;
+}
+.cmp-hm-select {
+  font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 6px;
+  border: 1px solid var(--border); background: var(--card); color: var(--text);
+  cursor: pointer; margin-left: auto;
 }
 .compare-hm-card {
   border: 1px solid var(--border);
