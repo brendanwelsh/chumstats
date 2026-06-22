@@ -1910,13 +1910,13 @@ def _players_directory_html(store, self_primary_id: str | None = None,
                    SUM(CASE WHEN mps.team_num = m.winner_team_num THEN 1 ELSE 0 END) AS wins,
                    MAX(mps.is_bot)  AS max_bot,
                    MIN(mps.platform) AS platform,
-                   MAX(CASE WHEN ? != '' AND EXISTS(
+                   SUM(CASE WHEN ? != '' AND EXISTS(
                         SELECT 1 FROM match_player_stats z
                         WHERE z.match_id = m.id AND z.primary_id = ?
                           AND z.team_num = mps.team_num
                           AND NOT (z.primary_id = mps.primary_id AND z.name = mps.name)
                    ) THEN 1 ELSE 0 END) AS was_teammate,
-                   MAX(CASE WHEN ? != '' AND EXISTS(
+                   SUM(CASE WHEN ? != '' AND EXISTS(
                         SELECT 1 FROM match_player_stats z
                         WHERE z.match_id = m.id AND z.primary_id = ?
                           AND z.team_num != mps.team_num
@@ -1952,16 +1952,23 @@ def _players_directory_html(store, self_primary_id: str | None = None,
         n = r["n"] or 1
         wins = r["wins"] or 0
         winpct = (wins / n) * 100
-        kind = []
-        if r["was_teammate"]: kind.append("teammate")
-        if r["was_opponent"]: kind.append("opponent")
-        kind_str = " · ".join(kind) or "n/a"
+        # Relation = the split of shared games (with vs against), so a player you
+        # both teamed with AND faced reads clearly ("12× with · 5× vs") instead
+        # of an ambiguous "teammate · opponent".
+        n_with = r["was_teammate"] or 0
+        n_vs = r["was_opponent"] or 0
+        kp = []
+        if n_with: kp.append(f'<b>{n_with}</b>&times; with')
+        if n_vs: kp.append(f'<b>{n_vs}</b>&times; vs')
+        kind_str = " &middot; ".join(kp) or "&mdash;"
+        kind_title = (f"Played {n_with} game{'s' if n_with != 1 else ''} with and "
+                      f"{n_vs} against this player")
         return f"""
           <tr class="player-row">
             <td class="num tnum rank">{rank}</td>
             <td><a class="player-link" href="{href}">{html.escape(r["name"])}</a> {tag}</td>
             <td class="dim">{r["platform"] or 'n/a'}</td>
-            <td class="dim">{kind_str}</td>
+            <td class="dim" title="{kind_title}">{kind_str}</td>
             <td class="num tnum">{r["n"]}</td>
             <td class="num tnum"><b>{wins}</b><span class="dim">-{r["n"] - wins}</span> <span class="dim">({winpct:.0f}%)</span></td>
             {_stat_cols_td(r)}
@@ -2016,7 +2023,7 @@ def _players_directory_html(store, self_primary_id: str | None = None,
         <table class="players-table">
           <thead><tr>
             <th class="num rank">#</th>
-            <th>Player</th><th>Platform</th><th>Relation</th>
+            <th>Player</th><th>Platform</th><th>With / vs</th>
             <th class="num">Matches</th><th class="num">W-L</th>
             {_stat_cols_th()}
           </tr></thead>
