@@ -8169,7 +8169,8 @@ p, li { max-width: 72ch; }
 }
 .compare-slots {
   display: grid;
-  grid-template-columns: repeat(3, minmax(180px, 1fr));
+  /* auto-fit so the slot pickers wrap (not overflow) on mobile / tiny windows */
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   gap: 12px;
   flex: 1;
 }
