@@ -429,28 +429,15 @@ def make_app(broadcaster: Broadcaster, *, store=None,
             return HTMLResponse("<p>No DB configured</p>")
         slots = list(names)
         if not slots:
-            # Default to (self + top 2 most-played teammates excluding bots) so
-            # the page is useful with no params instead of an empty form.
-            slots = [self_name] if self_name else []
+            # Default to the top 3 most-played (non-bot) players so the page is
+            # useful with no params — neutral, not owner-first.
             try:
                 with store._conn() as con:
                     top_rows = con.execute(
-                        """
-                        SELECT mps.name
-                        FROM match_player_stats mps
-                        WHERE mps.is_bot = 0
-                          AND (? = '' OR mps.name != ?)
-                        GROUP BY mps.name
-                        ORDER BY COUNT(*) DESC
-                        LIMIT 4
-                        """,
-                        (self_name or "", self_name or ""),
+                        "SELECT name FROM match_player_stats WHERE is_bot = 0 "
+                        "GROUP BY name ORDER BY COUNT(*) DESC LIMIT 3"
                     ).fetchall()
-                for r in top_rows:
-                    if len(slots) >= 3:
-                        break
-                    if r["name"] not in slots:
-                        slots.append(r["name"])
+                slots = [r["name"] for r in top_rows]
             except Exception:
                 pass
         slots = (slots + ["", "", ""])[:3]
@@ -4931,8 +4918,7 @@ def _compare_page_html(store, slots: list[str], *, self_name: str | None = None,
     # Compose the row of selectors.
     selectors = []
     for i, slot in enumerate(slots):
-        is_self_slot = (i == 0 and (slot == (self_name or "") or not slot))
-        label = "Slot " + str(i + 1) + (" (you)" if is_self_slot else "")
+        label = "Slot " + str(i + 1)  # neutral all-players view — no "(you)"
         selectors.append(f"""
           <label class="compare-slot">
             <span class="compare-slot-label">{label}</span>
@@ -5175,8 +5161,8 @@ def _compare_page_html(store, slots: list[str], *, self_name: str | None = None,
       <div class="page-head">
         <div>
           <h1>Compare players</h1>
-          <div class="sub">Side-by-side lifetime stats. Pick up to 2 others.
-            Slot 1 defaults to you. Best value in each row is highlighted by per-match average.</div>
+          <div class="sub">Side-by-side lifetime stats. Pick up to 3 players —
+            defaults to the most-played. Best value in each row is highlighted by per-match average.</div>
         </div>
       </div>
 
