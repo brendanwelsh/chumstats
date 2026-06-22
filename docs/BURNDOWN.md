@@ -87,7 +87,7 @@ compare). Loop now cycles back for deeper polish + continues the no-Chum sweep.
 ### Still to repass (ESPN pass, top-down)
 - [x] **Match · "Us vs them" → "Team comparison"** — DONE. Forced neutral Blue-vs-Orange always; nav chip "Teams"; also dropped the owner-perspective "vs your career" insights card. 0 us/them/your-career leaks live.
 - [x] **Player profile** — radar→comparison-bars + double-name DONE. Follow-up: the 2-col detail-grid stat tables could go full-width box-score; the tiny WIN% sub-label tile.
-- [ ] **Players directory / opponents / clubs / compare / results** — same box-score treatment.
+- [x] **Players directory / opponents / clubs / compare / results** — DONE across the ESPN loop + the 2026-06-22 batch.
 
 ---
 
@@ -316,4 +316,4 @@ Real walkthrough; convergence was premature. Work top-down, test, commit, deploy
 - [x] **Teammate AND opponent** — DONE. Relation column now shows the game SPLIT ('87× with · 1× vs') instead of ambiguous 'teammate · opponent'; header 'With / vs'. Verified.
 
 ### Layout
-- [ ] **W-L column wraps to 2 lines** on some directory rows (score skew) — keep to 1 line.
+- [x] **W-L column 1 line** — DONE. white-space:nowrap keeps '212-182 (54%)' on one line; no more layout shift.
