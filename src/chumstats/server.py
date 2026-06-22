@@ -101,6 +101,23 @@ class MatchSummaryUpload(BaseModel):
     raw_events: list[dict] = Field(default_factory=list)
 
 
+def _impossible_match_reason(team0_score, team1_score, rows) -> str | None:
+    """Return a reason string if a match is physically impossible (corrupt /
+    freeplay), else None. Invariant: a player's goals can never exceed their
+    team's final score — own goals credit the other team, so every legit goal
+    a player scores adds to their own team's score. A violation (e.g. 11 goals
+    in a 4-goal game) marks a corrupt upload that must not enter the leaderboard.
+    Rows are anything with .goals / .team_num / .name attributes."""
+    ts = {0: int(team0_score or 0), 1: int(team1_score or 0)}
+    for r in rows:
+        g = int(getattr(r, "goals", 0) or 0)
+        tn = getattr(r, "team_num", -1)
+        if g > ts.get(tn, 0):
+            return (f"{getattr(r, 'name', '?')} has {g} goals but team {tn} "
+                    f"scored {ts.get(tn, 0)} (impossible)")
+    return None
+
+
 class RegisterRequest(BaseModel):
     """Self-registration with the shared friend-group join password. The friend's
     own detected RL identity is registered and the server issues them a personal
@@ -640,6 +657,14 @@ def make_app(broadcaster: Broadcaster, *, store=None,
                 detail=f"my_row.primary_id ({payload.my_row.primary_id}) does not match "
                        f"authenticated user's primary_id ({user['primary_id']})",
             )
+        # Data-integrity guard: reject physically-impossible (corrupt/freeplay)
+        # matches so they can't pollute the all-friends leaderboard.
+        _bad = _impossible_match_reason(
+            payload.team0_score, payload.team1_score,
+            (payload.my_row, *payload.other_rows))
+        if _bad:
+            raise HTTPException(status_code=422,
+                                detail=f"rejected match {payload.match_id}: {_bad}")
         try:
             result = store.upsert_uploaded_match(
                 payload.model_dump(), owner_primary_id=user["primary_id"],
