@@ -395,14 +395,26 @@ def make_app(broadcaster: Broadcaster, *, store=None,
 
     @_gated_get("/opponents")
     async def opponents_page(include_bots: int = 0, mode: int | None = None,
-                              platform: str | None = None, limit: int = 50):
+                              platform: str | None = None,
+                              pid: str | None = None, name: str | None = None,
+                              limit: int = 50):
         if store is None:
             return HTMLResponse("<p>No DB configured</p>")
         mode_filter = mode if mode in (1, 2, 3, 4) else None
+        # Subject: any player via ?pid= / ?name=, else the configured owner.
+        is_self = not (pid or name)
+        subj_pid = pid or self_primary_id
+        subj_name = name or self_name
+        if pid and not name:
+            with store._conn() as con:
+                r = con.execute("SELECT name FROM match_player_stats WHERE "
+                                "primary_id = ? ORDER BY rowid DESC LIMIT 1", (pid,)).fetchone()
+                if r:
+                    subj_name = r["name"]
         return HTMLResponse(_opponents_page_html(
-            store, self_primary_id, self_name,
+            store, subj_pid, subj_name,
             include_bots=bool(include_bots), mode_filter=mode_filter,
-            platform_filter=platform or None, limit=limit,
+            platform_filter=platform or None, limit=limit, is_self=is_self,
         ))
 
     @_gated_get("/compare")
@@ -5359,7 +5371,7 @@ def _opponents_page_html(store, self_primary_id, self_name, *,
                           include_bots: bool = False,
                           mode_filter: int | None = None,
                           platform_filter: str | None = None,
-                          limit: int = 50) -> str:
+                          limit: int = 50, is_self: bool = True) -> str:
     """Head-to-head opponent records. Lists every player you've faced on the
     OTHER team at least twice, with your W/L vs them, total goals for/against,
     and the last time you played them."""
@@ -5608,8 +5620,8 @@ def _opponents_page_html(store, self_primary_id, self_name, *,
     body = f"""
       <div class="page-head">
         <div>
-          <h1>Opponents</h1>
-          <div class="sub">Every player faced. Head-to-head records, last meeting,
+          <h1>{"Opponents" if is_self else html.escape(self_name or "") + " — opponents"}</h1>
+          <div class="sub">{"Every player faced." if is_self else "Every player " + html.escape(self_name or "") + " faced."} Head-to-head records, last meeting,
           total goals exchanged. Repeats sit at the top.</div>
         </div>
       </div>
