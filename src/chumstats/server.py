@@ -2795,8 +2795,8 @@ def _match_detail_html(store, match_id: str, viewer_pid: str | None, viewer_name
                     f'{link}{mvp}</td>{"".join(_cell(r, k, f) for _, k, f in cols)}</tr>')
         return (f'<div class="bs-card"><div class="bs-title">{title}'
                 f'<span class="dim">{sub}</span></div>'
-                f'<table class="bs-table"><thead><tr><th>Player</th>{head}</tr></thead>'
-                f'<tbody>{"".join(_row(r) for r in _adv_rows)}</tbody></table></div>')
+                f'<div class="tscroll"><table class="bs-table"><thead><tr><th>Player</th>{head}</tr></thead>'
+                f'<tbody>{"".join(_row(r) for r in _adv_rows)}</tbody></table></div></div>')
 
     box_involve = _bs_table(
         "Involvement &amp; positioning", "touches, ball-share, field thirds, combat",
@@ -7547,12 +7547,12 @@ time { white-space: nowrap; }
 .roster-card table { width: 100%; table-layout: auto; }
 .roster-card td.player-cell {
   font-weight: 600;
-  min-width: 120px;
-  max-width: 180px;
+  min-width: 140px;
+  max-width: 220px;
 }
 .roster-card td.player-cell .player-link {
   display: inline-block;
-  max-width: 110px;
+  max-width: 200px;          /* was 110px — truncated "@ChumtheWaters" to "@ChumtheWa…" */
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -7692,7 +7692,8 @@ time { white-space: nowrap; }
 .bs-table thead th:first-child { text-align: left; }
 .bs-table tbody td { padding: 6px 8px; font-size: 13px; border-bottom: 1px solid var(--accent-line); }
 .bs-table tbody tr:last-child td { border-bottom: none; }
-.bs-table td.player-cell { text-align: left; white-space: nowrap; font-weight: 600; }
+.bs-table td.player-cell { text-align: left; white-space: nowrap; font-weight: 600; min-width: 128px; }
+.bs-table th:first-child { min-width: 128px; }
 .bs-table td.num { text-align: right; }
 .bs-table .bs-sw { display: inline-block; width: 7px; height: 7px; border-radius: 50%;
   margin-right: 7px; vertical-align: middle; }
