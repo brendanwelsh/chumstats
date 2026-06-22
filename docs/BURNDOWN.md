@@ -274,3 +274,47 @@ cadence than every 10 min, or winding down, since per-fire yield is dropping.
 act as a regression monitor instead of churning every 10 min on a finished app. Restore 10-min anytime
 with `/loop 10m <prompt>`, or re-point it at a specific target. Genuine remaining work is optional
 (per-game-rate directory sorting) or structural-but-not-a-real-gap (clubs data scope is inherent).
+
+## ⚡⚡ User feedback batch (2026-06-22) — /loop until ALL fixed
+Real walkthrough; convergence was premature. Work top-down, test, commit, deploy, screenshot, check off.
+
+### Filters (HIGH)
+- [ ] **Filters must APPLY (not just persist) across page nav (back/forward)** — they save but don't apply right.
+- [ ] **Platform (opponent) filter doesn't actually filter** — verify + fix everywhere it's shown.
+- [ ] **Top filter bar is 2 lines on /history** — make it 1 row / cleaner / balanced.
+
+### Matches / history (HIGH)
+- [ ] **Make /history a true ALL-MATCHES view** — stop showing the owner's per-match stat line (chum-centric).
+- [ ] **Redundant match count** ("47" + "{N} matches shown") — one clear count. (7-day filter is good, keep.)
+
+### No-Chum residue (HIGH)
+- [ ] **Owner name renders ORANGE on the match roster** — leftover `self`/viewer highlight. Remove → team-color/neutral.
+- [ ] **Remove any data-source/owner attribution** — it's the friends-group capture, no owner framing anywhere.
+
+### Nav
+- [ ] **Remove OBS Overlay from site nav** — local/live-only; move to a button on the live/boost view page.
+- [ ] **Remove the Opponents page** — redundant with All Players (same data); fold any unique value into Players.
+
+### Player profile → SPA (HIGH)
+- [ ] **Make the profile a tabbed SPA like the match page** — no long scroll; sections behind tabs, not stacked side-by-side.
+- [ ] **Match history at the very BOTTOM** of the profile.
+- [ ] **Remove the Online-vs-Offline section.**
+- [ ] **Balance the KPI tiles** (5+2 uneven → even grid) + the boost/movement section lengths.
+- [ ] **Tighten tiles** (opponents/clubs/profile) — text centered/fit, not jammed top-left.
+
+### Compare
+- [ ] **Ball-touch count → a stat row, not the heatmap caption.**
+- [ ] **Heatmap-type dropdown** (touch / shot / …) selectable — all heatmaps available as long-term stats.
+- [ ] **Default match-count confusion** (19/20) — clarify the "last N" sample wording.
+
+### Clubs restructure (HIGH)
+- [ ] **Split OUR club from OPPOSING clubs.** Our club (chum+Tommy+Blazed+Vex combined) as the top entry —
+      strengths/weaknesses vs opponents, drill in for detail; opposing clubs below with fuller comparison.
+
+### Identity / stats
+- [ ] **Dedup vexxloll ⇄ vexxlol (Vex Lowell)** — same person; merge (manual alias map ok).
+- [ ] **>5-games-with-me threshold** for the relevant stats (best teammates etc.).
+- [ ] **Teammate AND opponent** (e.g. Blazed) — fix the confusing dual-relation display.
+
+### Layout
+- [ ] **W-L column wraps to 2 lines** on some directory rows (score skew) — keep to 1 line.
