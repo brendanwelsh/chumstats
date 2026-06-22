@@ -28,6 +28,10 @@ finishes — keep iterating balance changes.
 - **Results / history** — killed the dead gap between score and stat columns by adding a
   venue **Arena** column (normalized names) + capping the score-cell width, so each row reads
   as a balanced scoreboard line. Verified live.
+- **Opponents** — already a clean box score, but it was hard-wired to the owner (owner-
+  perspective: 'who Chum faced', Chum's W-L). Subject-parameterized it (`?pid=`/`?name=`) like
+  /history; title reads '<name> — opponents' for a subject. Resolves the RELATION/opponents
+  no-Chum flag at the source. Follow-up: add a discoverable link from player profiles.
 
 ### Still to repass (ESPN pass, top-down)
 - [x] **Match · "Us vs them" → "Team comparison"** — DONE. Forced neutral Blue-vs-Orange always; nav chip "Teams"; also dropped the owner-perspective "vs your career" insights card. 0 us/them/your-career leaks live.
