@@ -7193,6 +7193,8 @@ table.history tr.match-row:hover { background: var(--card-hover); }
 /* Wide tables scroll horizontally within their box instead of blowing out the
    page on mobile / tiny windows. */
 .tscroll { overflow-x: auto; -webkit-overflow-scrolling: touch; max-width: 100%; }
+/* Dates stay on one line (the table scrolls in-box rather than wrapping the date). */
+time { white-space: nowrap; }
 
 /* Mode / offline chips that sit below the team-vs-team line */
 .row-chips {
