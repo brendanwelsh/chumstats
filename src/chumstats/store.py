@@ -39,6 +39,8 @@ CREATE TABLE IF NOT EXISTS matches (
     winner_team_num INTEGER NOT NULL,
     is_online       INTEGER NOT NULL,            -- 0/1
     crossbar_hits   INTEGER NOT NULL DEFAULT 0,
+    regulation_seconds REAL NOT NULL DEFAULT 0,  -- in-game-clock length (no OT); survives the tick prune
+    overtime_seconds   REAL NOT NULL DEFAULT 0,  -- OT elapsed on the game clock (0 if none)
     parser_version  INTEGER NOT NULL DEFAULT 0   -- aggregation logic version that produced this row
 );
 
@@ -130,6 +132,14 @@ class Store:
             c.execute(
                 "ALTER TABLE matches ADD COLUMN parser_version INTEGER NOT NULL DEFAULT 0"
             )
+        if "regulation_seconds" not in cols:
+            c.execute(
+                "ALTER TABLE matches ADD COLUMN regulation_seconds REAL NOT NULL DEFAULT 0"
+            )
+        if "overtime_seconds" not in cols:
+            c.execute(
+                "ALTER TABLE matches ADD COLUMN overtime_seconds REAL NOT NULL DEFAULT 0"
+            )
 
     @contextmanager
     def _conn(self):
@@ -153,8 +163,9 @@ class Store:
                 INSERT OR REPLACE INTO matches
                 (id, started_at, ended_at, arena, team0_score, team1_score,
                  team0_name, team1_name, team0_color, team1_color,
-                 winner_team_num, is_online, crossbar_hits, parser_version)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 winner_team_num, is_online, crossbar_hits,
+                 regulation_seconds, overtime_seconds, parser_version)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     s.match_id, s.started_at, s.ended_at, s.arena,
@@ -162,7 +173,8 @@ class Store:
                     s.team0_name, s.team1_name,
                     s.color_primary.get(0, ""), s.color_primary.get(1, ""),
                     s.winner_team_num,
-                    1 if s.is_online else 0, s.crossbar_hits, AGGREGATOR_VERSION,
+                    1 if s.is_online else 0, s.crossbar_hits,
+                    s.regulation_seconds, s.overtime_seconds, AGGREGATOR_VERSION,
                 ),
             )
             c.execute("DELETE FROM match_player_stats WHERE match_id = ?", (s.match_id,))
@@ -275,8 +287,9 @@ class Store:
                 INSERT OR IGNORE INTO matches
                 (id, started_at, ended_at, arena, team0_score, team1_score,
                  team0_name, team1_name, team0_color, team1_color,
-                 winner_team_num, is_online, crossbar_hits, parser_version)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 winner_team_num, is_online, crossbar_hits,
+                 regulation_seconds, overtime_seconds, parser_version)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     match_id, payload["started_at"], payload["ended_at"], payload["arena"],
@@ -286,6 +299,7 @@ class Store:
                     payload["winner_team_num"],
                     1 if payload.get("is_online", True) else 0,
                     payload.get("crossbar_hits", 0),
+                    payload.get("regulation_seconds", 0), payload.get("overtime_seconds", 0),
                     payload.get("parser_version", 0),
                 ),
             )

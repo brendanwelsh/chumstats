@@ -69,6 +69,8 @@ def build_payload(summary: MatchSummary, owner_primary_id: str) -> dict | None:
         "is_online": bool(summary.is_online),
         "crossbar_hits": summary.crossbar_hits,
         "duration_seconds": summary.duration_seconds,
+        "regulation_seconds": summary.regulation_seconds,
+        "overtime_seconds": summary.overtime_seconds,
         "my_row": _player_dict(my_p, summary.is_mvp.get(my_p.primary_id, False)),
         "other_rows": [_player_dict(p, summary.is_mvp.get(p.primary_id, False))
                        for p in others],
