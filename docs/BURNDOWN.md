@@ -110,7 +110,7 @@ the older C/D/E below (E is subsumed by the reframe item).
       DDL, INSERT OR IGNORE). Idempotent; runs on startup. Tested: data preserved,
       same-name/diff-pid rows coexist, re-init no-ops. (Schema migration — runs on deploy.)
 - [x] **C — stat-line consistency** — DONE. Added single-source STAT_COLUMNS + _stat_cols_th/_td; players directory now score-first with the full block; other tables already canonical.
-- [ ] **D — filter consistency** — `window`→history DONE (route + query wired, verified filters). STILL TODO: `platform` (opponent-platform) filter on opponents/compare/clan/club (each needs an opp-platform EXISTS subquery).
+- [x] **D — filter consistency** — DONE. Wired `window` + `platform` (opponent-platform EXISTS) on /history and `platform` on /opponents; compare/clan/club/live already suppress platform, so every shown filter now works. Verified filtering.
 - [ ] **E — multi-user reframe** — neutralize "Your line / Your insights" labels; make `/history` subject-parameterized (`?pid=`).
 
 ## Housekeeping
