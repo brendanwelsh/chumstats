@@ -311,7 +311,7 @@ Real walkthrough; convergence was premature. Work top-down, test, commit, deploy
 - [x] **Split OUR club from OPPOSING clubs** — DONE. Page leads with 'Our club' (auto-detected crew = owner + teammates with >5 games together: ChumtheWaters/2toes/vexxloll/Blazed/+1), combined record/goals/heatmap/recent; 'Opposing clubs' (rivalries) clearly separated below. Follow-up enhancement: per-member stat breakdown table + drill-into-us-vs-others stacking.
 
 ### Identity / stats
-- [ ] **Dedup vexxloll ⇄ vexxlol (Vex Lowell)** — same person; merge (manual alias map ok).
+- [x] **Dedup vexxloll ⇄ vexxlol** — DONE. PLAYER_ALIASES merges vexxlol (Steam) → vexxloll (Epic) on startup + at ingest (durable). Verified live: vexxlol 0 rows, vexxloll 198 (was 191+7).
 - [ ] **>5-games-with-me threshold** for the relevant stats (best teammates etc.).
 - [ ] **Teammate AND opponent** (e.g. Blazed) — fix the confusing dual-relation display.
 
