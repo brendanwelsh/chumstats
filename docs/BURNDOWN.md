@@ -22,6 +22,9 @@ finishes — keep iterating balance changes.
 - **Player profile** — replaced the weak radar (per-match avg scaled to a freak single-match
   peak → tiny blob) with 'Per-match averages vs the field' comparison bars (player avg, bar vs
   the best regular, tick at field avg, green when above). Fixed the `Blazed / Blazed` double-name.
+- **Players directory** — already a clean full-width box score; added a leaderboard **rank (#)**
+  column (ESPN-standings style), verified live. NOTE for a no-Chum pass: the RELATION column
+  (teammate/opponent) is relative to the configured owner — owner-centric framing to revisit.
 
 ### Still to repass (ESPN pass, top-down)
 - [x] **Match · "Us vs them" → "Team comparison"** — DONE. Forced neutral Blue-vs-Orange always; nav chip "Teams"; also dropped the owner-perspective "vs your career" insights card. 0 us/them/your-career leaks live.
