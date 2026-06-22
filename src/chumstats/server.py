@@ -1867,8 +1867,10 @@ def _stat_cols_th() -> str:
 def _stat_cols_td(r) -> str:
     """Body cells for the canonical stat block, pulling each key off a row/dict."""
     keys = r.keys() if hasattr(r, "keys") else r
+    # Thousands separators so the big cumulative Score reads cleanly (116,505 not
+    # 116505); small counts (goals/saves/…) are unaffected.
     return "".join(
-        f'<td class="num tnum">{(r[k] if k in keys else 0) or 0}</td>'
+        f'<td class="num tnum">{int((r[k] if k in keys else 0) or 0):,}</td>'
         for k, _ in STAT_COLUMNS
     )
 
