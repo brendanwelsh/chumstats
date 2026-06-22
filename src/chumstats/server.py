@@ -1978,7 +1978,7 @@ def _players_directory_html(store, self_primary_id: str | None = None,
       <h1>All players</h1>
       <p class="caption">Everyone we've recorded in any match. Click a name to see their full stats.</p>
       {sort_toolbar}
-      <section>
+      <section class="tscroll">
         <table class="players-table">
           <thead><tr>
             <th class="num rank">#</th>
@@ -6387,10 +6387,14 @@ _LOCAL_TIME_SCRIPT = """<script>
       if (mode === 'time') {
         return d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', hour12: true });
       }
-      // Default: date + 12hr local time + timezone short name.
-      var date = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
-      var time = d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', hour12: true, timeZoneName: 'short' });
-      return date + ' at ' + time;
+      // Default: compact date + 12hr local time. Drop "at", the timezone, and
+      // the year when it's the current year — the long form wrapped to ~7 lines
+      // on mobile. e.g. "Jun 21, 7:34 PM" (or "Jun 21, 2025, 7:34 PM" if older).
+      var dopts = { month: 'short', day: 'numeric' };
+      if (d.getFullYear() !== new Date().getFullYear()) dopts.year = 'numeric';
+      var date = d.toLocaleDateString(undefined, dopts);
+      var time = d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', hour12: true });
+      return date + ', ' + time;
     } catch (e) { return null; }
   }
   document.querySelectorAll('time[datetime]').forEach(function(el) {
@@ -7186,6 +7190,9 @@ table.history tr.match-row:hover { background: var(--card-hover); }
   color: var(--text-dim);
 }
 .plat-cell svg.plat-ic { display: block; }
+/* Wide tables scroll horizontally within their box instead of blowing out the
+   page on mobile / tiny windows. */
+.tscroll { overflow-x: auto; -webkit-overflow-scrolling: touch; max-width: 100%; }
 
 /* Mode / offline chips that sit below the team-vs-team line */
 .row-chips {
