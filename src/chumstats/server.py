@@ -6202,21 +6202,37 @@ _SIDEBAR_FILTER_JS = """<script>
     location.href = location.pathname;
   });
 
-  // On first paint, if URL has NO filter params but localStorage DOES, redirect
-  // once so the page actually applies the saved filters. Use a sentinel flag
-  // to avoid loops.
-  if (!sessionStorage.getItem('chumstats-flt-applied')) {
-    var url = new URL(location.href);
-    var added = false;
-    KEYS.forEach(function(k) {
-      if (!url.searchParams.get(k)) {
-        var v = getStored(k);
-        if (v) { url.searchParams.set(k, v); added = true; }
-      }
-    });
-    sessionStorage.setItem('chumstats-flt-applied', '1');
-    if (added) { location.replace(url.toString()); }
-  }
+  // Carry the active filters onto the main nav links so moving page-to-page
+  // KEEPS and APPLIES them with no redirect round-trip (the common case).
+  var carry = new URLSearchParams();
+  KEYS.forEach(function(k) {
+    if (k === 'last') return;            // compare-only; don't leak elsewhere
+    var v = effective(k);
+    if (v) carry.set(k, v);
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('.topnav .navlink'), function(a) {
+    try {
+      var u = new URL(a.getAttribute('href'), location.origin);
+      carry.forEach(function(val, key) { u.searchParams.set(key, val); });
+      a.setAttribute('href', u.pathname + (u.search || ''));
+    } catch (e) {}
+  });
+
+  // Fallback for non-nav entries (direct URL, player/match/club links): if the
+  // URL lacks a filter the user has stored, apply it. The redirect writes the
+  // param into the URL, so `added` is false on the reload -> self-guarding, no
+  // session flag (the old flag fired ONCE per session, so filters never applied
+  // after the first page — that was the "saves but doesn't apply" bug).
+  var url = new URL(location.href);
+  var added = false;
+  KEYS.forEach(function(k) {
+    if (k === 'last') return;
+    if (!url.searchParams.get(k)) {
+      var v = getStored(k);
+      if (v) { url.searchParams.set(k, v); added = true; }
+    }
+  });
+  if (added) { location.replace(url.toString()); }
 })();
 </script>"""
 
