@@ -4978,7 +4978,7 @@ def _compare_page_html(store, slots: list[str], *, self_name: str | None = None,
              [safe_div(r.get("speed_sum"), r.get("ticks")) if (r.get("ticks") or 0) >= 1000 else None for r in rows], True),
         ]),
         ("Boost (total · per match)", "totavg", [
-            ("Boost used", lambda v: f"{v:.0f}", lambda v: f"{v:.0f}",
+            ("Boost used", lambda v: f"{v:,.0f}", lambda v: f"{v:,.0f}",
              [r.get("boost_used") if (r.get("ticks") or 0) >= 1000 else None for r in rows],
              [safe_div(r.get("boost_used"), r.get("matches")) if (r.get("ticks") or 0) >= 1000 else None for r in rows], True),
         ]),
