@@ -115,6 +115,15 @@ CREATE INDEX IF NOT EXISTS idx_users_api_key ON users(api_key);
 CREATE INDEX IF NOT EXISTS idx_users_primary ON users(primary_id);
 """
 
+# Manual identity merges: the same person playing on more than one account.
+# Keyed by the alias account's primary_id -> the canonical (name, primary_id) it
+# folds into. Applied to existing rows on startup AND to incoming uploads, so the
+# merge is durable across re-uploads.
+PLAYER_ALIASES: dict[str, tuple[str, str]] = {
+    # vexxlol (Steam) is the same person as vexxloll (Epic) — "Vex".
+    "Steam|76561197972356941|0": ("vexxloll", "Epic|c20c9f350bf84db98acb992ffe6e137c|0"),
+}
+
 
 class Store:
     def __init__(self, db_path: str | Path):
@@ -123,6 +132,17 @@ class Store:
         with self._conn() as c:
             c.executescript(SCHEMA)
             self._migrate(c)
+            self._apply_player_aliases(c)
+
+    def _apply_player_aliases(self, c) -> None:
+        """Manual identity merges — same person on different accounts (see
+        PLAYER_ALIASES). Idempotent: once merged, no rows match the alias
+        primary_id so re-running no-ops. UPDATE OR IGNORE + DELETE folds an alias
+        row into its canonical even if a canonical row already exists for a match."""
+        for alias_pid, (cname, cpid) in PLAYER_ALIASES.items():
+            c.execute("UPDATE OR IGNORE match_player_stats SET name = ?, primary_id = ? "
+                      "WHERE primary_id = ?", (cname, cpid, alias_pid))
+            c.execute("DELETE FROM match_player_stats WHERE primary_id = ?", (alias_pid,))
 
     def _migrate(self, c) -> None:
         """Additive, idempotent migrations for DBs created before a column
@@ -404,6 +424,11 @@ class Store:
 
     @staticmethod
     def _insert_player_row(c, match_id: str, r: dict, is_mvp_override: bool) -> None:
+        # Fold known alias accounts into their canonical identity at ingest, so
+        # re-uploads from the alias account stay merged.
+        _alias = PLAYER_ALIASES.get(r.get("primary_id"))
+        if _alias:
+            r = {**r, "name": _alias[0], "primary_id": _alias[1]}
         c.execute(
             """
             INSERT OR IGNORE INTO match_player_stats
