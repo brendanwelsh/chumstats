@@ -464,9 +464,25 @@ def make_app(broadcaster: Broadcaster, *, store=None,
     ):
         if store is None:
             return HTMLResponse("<p>No DB configured</p>")
-        # If no names provided, default to the owner alone (so the page is at
-        # least navigable; user picks teammates from the selector).
-        members = [n for n in names if n] or ([self_name] if self_name else [])
+        # Default "Our club" = the owner + their regular crew (teammates with
+        # >5 games on the owner's team), so the club page reflects the actual
+        # friend group, not a club of one. Explicit ?names= overrides.
+        members = [n for n in names if n]
+        if not members and self_name:
+            members = [self_name]
+            try:
+                with store._conn() as con:
+                    crew = con.execute(
+                        "SELECT t.name AS name, COUNT(*) AS n FROM match_player_stats me "
+                        "JOIN match_player_stats t ON t.match_id = me.match_id "
+                        "AND t.team_num = me.team_num AND t.name != me.name "
+                        "WHERE me.name = ? AND t.is_bot = 0 "
+                        "GROUP BY t.name HAVING n > 5 ORDER BY n DESC LIMIT 5",
+                        (self_name,),
+                    ).fetchall()
+                members += [r["name"] for r in crew]
+            except Exception:
+                pass
         mode_filter = mode if mode in (1, 2, 3, 4) else None
         window_days = {"today": 1, "7d": 7, "30d": 30}.get(window or "", None)
         return HTMLResponse(_clan_page_html(
@@ -6073,14 +6089,19 @@ def _clan_page_html(store, members: list[str], *, self_name: str | None = None,
     else:
         rivals_html = ""
 
+    _mnames = ", ".join(html.escape(m) for m in members[:4])
+    if len(members) > 4:
+        _mnames += f" +{len(members) - 4}"
     body = f"""
       <div class="page-head">
         <div>
-          <h1>Opposing clubs</h1>
-          <div class="sub">Every named club played against, and the head-to-head record vs each.</div>
+          <h1>Our club</h1>
+          <div class="sub">Combined record for <b>{_mnames}</b> when 2+ play together &mdash;
+            and how we stack up against rival clubs below.</div>
         </div>
       </div>
 
+      <div class="section-eyebrow">Our club</div>
       <div class="kpi-row">
         <div class="kpi primary">
           <div class="kpi-label">Club record</div>
@@ -6105,8 +6126,6 @@ def _clan_page_html(store, members: list[str], *, self_name: str | None = None,
         </div>
       </div>
 
-      {rivals_html}
-
       {heatmap_html}
 
       <div class="card" style="margin-top:14px;padding:0;overflow:hidden">
@@ -6118,6 +6137,9 @@ def _clan_page_html(store, members: list[str], *, self_name: str | None = None,
         </div>
         {recent_matches_html}
       </div>
+
+      <div class="section-eyebrow" style="margin-top:24px">Opposing clubs</div>
+      {rivals_html}
     """
     return _page_wrap("Clubs", body, active="clan")
 
@@ -6912,6 +6934,10 @@ section, .card {
 .player-link.self  { color: var(--accent); }
 
 /* KPI tiles */
+.section-eyebrow {
+  font-size: 11px; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--text-faint); margin: 0 0 8px;
+}
 .kpi-row {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
