@@ -111,7 +111,7 @@ the older C/D/E below (E is subsumed by the reframe item).
       same-name/diff-pid rows coexist, re-init no-ops. (Schema migration — runs on deploy.)
 - [x] **C — stat-line consistency** — DONE. Added single-source STAT_COLUMNS + _stat_cols_th/_td; players directory now score-first with the full block; other tables already canonical.
 - [x] **D — filter consistency** — DONE. Wired `window` + `platform` (opponent-platform EXISTS) on /history and `platform` on /opponents; compare/clan/club/live already suppress platform, so every shown filter now works. Verified filtering.
-- [ ] **E — multi-user reframe** — neutralize "Your line / Your insights" labels; make `/history` subject-parameterized (`?pid=`).
+- [x] **E — multi-user reframe** — DONE. "Your line/insights" already neutralized (kill-Me item); `/history` now subject-parameterized (`?pid=`/`?name=`, title shows whose), and player-profile "view all" links there. Every uploader is first-class.
 
 ## Housekeeping
 
