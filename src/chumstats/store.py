@@ -75,7 +75,7 @@ CREATE TABLE IF NOT EXISTS match_player_stats (
     speed_max         REAL    NOT NULL DEFAULT 0,
     boost_used        REAL    NOT NULL DEFAULT 0,
 
-    PRIMARY KEY (match_id, name, team_num),
+    PRIMARY KEY (match_id, primary_id, team_num),
     FOREIGN KEY (match_id) REFERENCES matches(id) ON DELETE CASCADE
 );
 
@@ -140,6 +140,35 @@ class Store:
             c.execute(
                 "ALTER TABLE matches ADD COLUMN overtime_seconds REAL NOT NULL DEFAULT 0"
             )
+
+        # Identity PK migration: re-key match_player_stats on
+        # (match_id, primary_id, team_num). The old (match_id, name, team_num) PK
+        # collapsed two different players who shared a name in one match (and an
+        # INSERT OR IGNORE could then silently drop a row / roll back an upload).
+        # Drift-proof: rebuild from the live table DDL, swapping only the PK
+        # clause, so we copy whatever columns currently exist. Idempotent.
+        mps_pk = {r[1] for r in c.execute("PRAGMA table_info(match_player_stats)") if r[5] > 0}
+        if "name" in mps_pk and "primary_id" not in mps_pk:
+            row = c.execute(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='match_player_stats'"
+            ).fetchone()
+            new_sql = (row[0] if row else "").replace(
+                "PRIMARY KEY (match_id, name, team_num)",
+                "PRIMARY KEY (match_id, primary_id, team_num)",
+            )
+            # Only proceed if the PK clause was actually swapped (don't build a
+            # table with the wrong/old key from an unexpected DDL).
+            if "PRIMARY KEY (match_id, primary_id, team_num)" in new_sql:
+                new_sql = new_sql.replace("match_player_stats", "match_player_stats_new", 1)
+                c.execute(new_sql)
+                # OR IGNORE: if a pre-rename name dupe produced two rows that now
+                # share (match_id, primary_id, team_num), keep the first.
+                c.execute("INSERT OR IGNORE INTO match_player_stats_new "
+                          "SELECT * FROM match_player_stats")
+                c.execute("DROP TABLE match_player_stats")
+                c.execute("ALTER TABLE match_player_stats_new RENAME TO match_player_stats")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_mps_primary "
+                          "ON match_player_stats(primary_id)")
 
     @contextmanager
     def _conn(self):
