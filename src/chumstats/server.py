@@ -6598,57 +6598,34 @@ body { min-height: 100vh; }
 .wrapper, .app-shell { max-width: 1680px; margin: 0 auto; padding: 0 24px 56px; }
 
 /* Page layout with optional left filter sidebar */
-.page-layout {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 0;
-}
-body.with-sidebar .page-layout {
-  grid-template-columns: 196px 1fr;
-  gap: 22px;
-  align-items: start;
-}
+.page-layout { display: block; }
 .page-main { min-width: 0; }
 
-@media (max-width: 980px) {
-  body.with-sidebar .page-layout { grid-template-columns: 1fr; }
-}
-
-/* Filter sidebar — align top edge with .page-head h1 baseline */
+/* Filters: a compact horizontal bar at the top of the content (ballchasing
+   style). No left rail, so nothing can overlap content on the left. */
 .side-filters {
-  position: sticky;
-  top: 16px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 16px;
   background: var(--card);
   border: 1px solid var(--border);
-  padding: 14px 14px 10px;
-  align-self: start;
-  margin-top: 8px;  /* matches .page-head top spacing (m: 8px 0 22px) */
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin: 0 0 16px;
 }
-.side-filters .sf-section { margin-bottom: 14px; }
+.side-filters .sf-section { display: flex; align-items: center; gap: 6px; margin: 0; }
 .side-filters .sf-title {
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--text-dim);
-  margin-bottom: 6px;
-}
-.side-filters .sf-tip {
-  font-size: 10.5px;
   color: var(--text-faint);
-  margin: -2px 0 8px;
-  line-height: 1.3;
+  margin: 0;
+  white-space: nowrap;
 }
-/* All filter groups use CSS Grid with equal-width cells so chips line up
-   horizontally and never wrap into uneven rows. */
-.side-filters .sf-group {
-  display: grid;
-  gap: 3px;
-}
-.side-filters .sf-group[data-filter="mode"]         { grid-template-columns: repeat(5, 1fr); }
-.side-filters .sf-group[data-filter="window"]       { grid-template-columns: repeat(4, 1fr); }
-.side-filters .sf-group[data-filter="include_bots"] { grid-template-columns: repeat(2, 1fr); }
-.side-filters .sf-group[data-filter="platform"]     { grid-template-columns: repeat(6, 1fr); }
+.side-filters .sf-tip { display: none; }  /* too verbose for the compact bar */
+.side-filters .sf-group { display: flex; gap: 4px; }
 
 /* Every chip gets the same height + same vertical/horizontal centering. */
 .side-filters .sf-chip {
@@ -6693,9 +6670,9 @@ svg.plat-ic { width: 16px; height: 16px; flex: 0 0 auto; }
   letter-spacing: 0.04em;
 }
 .side-filters .sf-foot {
-  margin-top: 4px;
-  padding-top: 10px;
-  border-top: 1px solid var(--border);
+  margin: 0;
+  padding: 0;
+  border: none;
 }
 .side-filters .sf-clear {
   font-size: 11px;
