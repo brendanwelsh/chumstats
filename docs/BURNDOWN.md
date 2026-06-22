@@ -57,7 +57,7 @@ site → requires explicit go-ahead before executing.
 
 ## Housekeeping
 
-- [ ] Push `rebrand-chumstats`; delete stale `origin/fix/local-portal-scope`.
+- [x] Push `rebrand-chumstats`; delete stale `origin/fix/local-portal-scope`. (done)
 
 ---
 
