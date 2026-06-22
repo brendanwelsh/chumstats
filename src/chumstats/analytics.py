@@ -482,7 +482,7 @@ def build_dashboard(store, *, primary_id: str | None = None,
             boost_per_match = (row["boost_used"] or 0) / matches
             d.boost.lines.extend([
                 MetricLine("Avg used/match",   f"{boost_per_match:.0f}", f"~{boost_per_match / 100:.1f} full tanks"),
-                MetricLine("Lifetime used",    f"{row['boost_used'] or 0:.0f}", ""),
+                MetricLine("Lifetime used",    f"{row['boost_used'] or 0:,.0f}", ""),
                 # "Time at 0 boost" removed — boost<=1 almost never fires (invalid 0%).
                 MetricLine("Time at 100 boost",_pct(row["ticks_full"] or 0, ticks, 1), "of all play"),
             ])
