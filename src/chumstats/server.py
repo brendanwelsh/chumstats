@@ -5908,7 +5908,7 @@ def _clan_page_html(store, members: list[str], *, self_name: str | None = None,
         '<div class="section-title" style="padding:14px 18px 6px"><span>Club members</span>'
         '<span class="dim" style="text-transform:none;letter-spacing:0">'
         'Each member&rsquo;s stats in club matches.</span></div>'
-        '<table class="history"><thead><tr><th>Member</th>'
+        '<div class="tscroll"><table class="history"><thead><tr><th>Member</th>'
         f'<th class="num">Matches</th><th class="num">W-L</th>'
         f'<th class="num">{_stat_icon_html("Goals")}Goals</th>'
         f'<th class="num">{_stat_icon_html("Assists")}Assists</th>'
@@ -5916,7 +5916,7 @@ def _clan_page_html(store, members: list[str], *, self_name: str | None = None,
         f'<th class="num">{_stat_icon_html("Shots")}Shots</th>'
         f'<th class="num">{_stat_icon_html("Demos")}Demos</th>'
         f'<th class="num">{_stat_icon_html("MVP")}MVPs</th></tr></thead>'
-        f'<tbody>{"".join(_mrows)}</tbody></table></div>'
+        f'<tbody>{"".join(_mrows)}</tbody></table></div></div>'
     ) if _mrows else ""
 
     # ---- Rivalries: us vs other teams --------------------------------------
@@ -6095,7 +6095,7 @@ def _clan_page_html(store, members: list[str], *, self_name: str | None = None,
                 Other named clubs matched up against.
               </span>
             </div>
-            <table class="history">
+            <div class="tscroll"><table class="history">
               <thead><tr>
                 <th class="num rank">#</th>
                 <th>Club</th>
@@ -6108,7 +6108,7 @@ def _clan_page_html(store, members: list[str], *, self_name: str | None = None,
                 <th>Last played</th>
               </tr></thead>
               <tbody>{"".join(rivals_cells)}</tbody>
-            </table>
+            </table></div>
           </div>
         """
     else:
