@@ -5673,13 +5673,14 @@ def _club_detail_html(store, club_name: str,
 
     # Render
     roster_rows = []
-    for r in roster:
+    for rank, r in enumerate(roster, 1):
         bot = ' <span class="chip bot">BOT</span>' if r["is_bot"] else ""
         href = f"/player/{quote(r['name'], safe='')}" if not r["is_bot"] else "#"
         link_open = f'<a href="{href}" class="player-link">' if not r["is_bot"] else "<span>"
         link_close = "</a>" if not r["is_bot"] else "</span>"
         roster_rows.append(f"""
           <tr class="row">
+            <td class="num tnum rank">{rank}</td>
             <td>{link_open}<b>{html.escape(r['name'])}</b>{link_close}{bot}</td>
             <td class="dim">{r['platform'] or 'n/a'}</td>
             <td class="num tnum"><b>{r['n']}</b></td>
@@ -5742,6 +5743,7 @@ def _club_detail_html(store, club_name: str,
         </div>
         <table class="history">
           <thead><tr>
+            <th class="num rank">#</th>
             <th>Player</th>
             <th>Platform</th>
             <th class="num">Matches</th>
