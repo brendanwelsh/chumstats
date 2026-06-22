@@ -364,10 +364,10 @@ def make_app(broadcaster: Broadcaster, *, store=None,
         window_days = {"today": 1, "7d": 7, "30d": 30}.get(window or "", None)
         if sort not in ("recent", "score", "goals", "saves", "best"):
             sort = "recent"
-        # Subject: any player via ?pid= / ?name=, else the configured owner.
-        is_self = not (pid or name)
-        subj_pid = pid or self_primary_id
-        subj_name = name or self_name
+        # Default Matches view = ALL recorded matches (neutral, not the owner's
+        # stat line). A specific player's history is shown only via ?pid=/?name=.
+        all_matches = not (pid or name)
+        subj_pid, subj_name = pid, name
         if pid and not name:
             with store._conn() as con:
                 r = con.execute("SELECT name FROM match_player_stats WHERE "
@@ -380,7 +380,7 @@ def make_app(broadcaster: Broadcaster, *, store=None,
             mode_filter=mode_filter,
             window_days=window_days,
             platform_filter=platform or None,
-            sort=sort, is_self=is_self,
+            sort=sort, is_self=False, all_matches=all_matches,
         ))
 
     @_gated_get("/match/{match_id}")
@@ -2037,13 +2037,83 @@ def _not_found_html(name: str) -> str:
     """, status=404)
 
 
+def _all_matches_html(store, *, include_bots=True, mode_filter=None,
+                      window_days=None, platform_filter=None, sort="recent") -> str:
+    """Neutral ALL-MATCHES view (the default Matches page): every recorded match —
+    score, arena, mode, MVP — not tied to any one player. No per-player stat line."""
+    ts_sql = ("(SELECT MAX(c) FROM (SELECT team_num, COUNT(*) c FROM "
+              "match_player_stats WHERE match_id=m.id GROUP BY team_num))")
+    clauses, args = [], []
+    if mode_filter is not None:
+        clauses.append(f"{ts_sql} = ?"); args.append(mode_filter)
+    if window_days and window_days > 0:
+        import time as _t
+        clauses.append("m.started_at >= ?"); args.append(_t.time() - window_days * 86400)
+    if not include_bots:
+        clauses.append("NOT EXISTS (SELECT 1 FROM match_player_stats x "
+                       "WHERE x.match_id=m.id AND x.is_bot=1)")
+    if platform_filter:
+        clauses.append("EXISTS (SELECT 1 FROM match_player_stats op "
+                       "WHERE op.match_id=m.id AND op.platform LIKE '%' || ? || '%')")
+        args.append(platform_filter)
+    where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+    order = ("(m.team0_score + m.team1_score) DESC, m.started_at DESC"
+             if sort == "goals" else "m.started_at DESC")
+    with store._conn() as con:
+        rows = con.execute(
+            f"SELECT m.id, m.started_at, m.arena, m.team0_score, m.team1_score, "
+            f"m.winner_team_num, {ts_sql} AS team_size FROM matches m{where} "
+            f"ORDER BY {order} LIMIT 2000", tuple(args)).fetchall()
+        mvp_map = {}
+        for mr in con.execute("SELECT match_id, name, primary_id, team_num, is_bot "
+                              "FROM match_player_stats WHERE is_mvp=1"):
+            mvp_map.setdefault(mr["match_id"], mr)
+    body_rows = []
+    for r in rows:
+        ts_iso = datetime.fromtimestamp(r["started_at"]).isoformat() if r["started_at"] else ""
+        ts_fb = datetime.fromtimestamp(r["started_at"]).strftime("%b %d, %Y") if r["started_at"] else "—"
+        sz = r["team_size"]; mode_lbl = f"{sz}v{sz}" if sz else ""
+        w = r["winner_team_num"]
+        c0 = "vs-score win" if w == 0 else "vs-score"
+        c1 = "vs-score win" if w == 1 else "vs-score"
+        mvp = _mvp_cell_html(mvp_map.get(r["id"]), viewer_is_mvp=False)
+        body_rows.append(
+            f'<tr class="row click match-row" onclick="window.location=\'/match/{quote(r["id"], safe="")}\'">'
+            f'<td class="dim tnum"><time datetime="{ts_iso}">{ts_fb}</time></td>'
+            f'<td class="score-cell"><div class="vs-line">'
+            f'<span class="vs-team blue">Blue</span><span class="{c0}">{r["team0_score"]}</span>'
+            f'<span class="vs-sep">vs</span><span class="{c1}">{r["team1_score"]}</span>'
+            f'<span class="vs-team orng">Orange</span></div></td>'
+            f'<td class="dim arena-cell">{html.escape(_arena_nice(r["arena"] or ""))}</td>'
+            f'<td class="dim">{mode_lbl}</td><td>{mvp}</td></tr>')
+    total = len(rows)
+    parts = []
+    if mode_filter: parts.append(f"{mode_filter}v{mode_filter}")
+    if window_days: parts.append({1: "today", 7: "last 7 days", 30: "last 30 days"}.get(window_days, ""))
+    if platform_filter: parts.append(f"vs {html.escape(platform_filter)}")
+    fsum = (" · " + ", ".join(p for p in parts if p)) if any(parts) else ""
+    table = (f'<table class="history"><thead><tr><th style="width:110px">When</th>'
+             f'<th>Score</th><th>Arena</th><th>Mode</th>'
+             f'<th>{_stat_icon_html("MVP")}MVP</th></tr></thead>'
+             f'<tbody>{"".join(body_rows)}</tbody></table>'
+             if body_rows else '<div class="empty">No matches for this filter.</div>')
+    body = (f'<div class="page-head"><div><h1>All matches</h1>'
+            f'<div class="sub">{total} match{"es" if total != 1 else ""} recorded{fsum}</div>'
+            f'</div></div>{table}')
+    return _page_wrap("All matches", body, active="history")
+
+
 def _history_page_html(store, primary_id, name, *,
                        include_bots=True,
                        mode_filter: int | None = None,
                        window_days: int | None = None,
                        platform_filter: str | None = None,
                        sort: str = "recent",
-                       is_self: bool = True) -> str:
+                       is_self: bool = True,
+                       all_matches: bool = False) -> str:
+    if all_matches:
+        return _all_matches_html(store, include_bots=include_bots, mode_filter=mode_filter,
+                                 window_days=window_days, platform_filter=platform_filter, sort=sort)
     rows = _match_history_rows(
         store, primary_id, name, limit=2000,
         include_bots=include_bots, mode_filter=mode_filter,
