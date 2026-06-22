@@ -71,8 +71,21 @@ the older C/D/E below (E is subsumed by the reframe item).
       drive it. Collapsible `<details>` removed.
 - [x] **Pressure & share always 50/50** — DONE. Root cause: uploaded matches batch all BallHits under one received_at, so time-interval possession/pressure collapsed (0% / 50-50). Recomputed from touch counts + positions ("Touch share" / "Field tilt"). Verified varied (38/62, 57/43).
 - [x] **Touches-per-player half-bar** (match history) — DONE. Removed the per-row touch-share bar (read as half a bar chart); the list is cleaner, touch share/field tilt live on the match page.
-- [ ] **Data-gap audit (RECURRING)** — each pass, audit one page's datasets vs the DB; flag
-      missing / placeholder / always-constant values; fix or document. Screenshot to verify.
+- [ ] **VALIDATION SWEEP (RECURRING — never check off; this keeps the loop alive)** —
+      once the finite items above are done, each 15-min fire picks ONE page (rotate:
+      splash → players → player profile → history → match detail → opponents → clubs →
+      compare) and validates all four dimensions, then fixes + deploys + screenshots what
+      it finds:
+      1. **Stat accuracy** — recompute a couple of the page's headline numbers straight
+         from `data/central.db` (on the macmini) and diff against what the page renders;
+         flag any mismatch.
+      2. **Correct/complete data** — no missing / placeholder / always-constant / not-
+         summing-to-100 values (e.g. the ground/air/wall %s). Fix or document.
+      3. **No UI overlap / clunk** — Playwright screenshot at 1280–1500px; check nothing
+         overlaps and the layout is tight (ballchasing-style).
+      4. **No Chum/owner perspective** — grep the rendered page for `Me|you|your|our|us|
+         them|@ChumtheWaters`; everything must read neutral (all-players).
+      Log findings here under "## Validation log". Re-screenshot to verify each fix.
 - [x] **Club "1ST DAY PEWPING" noise** — removed the our-team-name suffix from the /clan title
       (it was the user's own RL club name leaking onto the opponent-clubs page).
 - [x] **>200 matches** — history limit 200 → 2000 (proper pagination/infinite-scroll is the
