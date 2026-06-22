@@ -68,6 +68,12 @@ compare). Loop now cycles back for deeper polish + continues the no-Chum sweep.
 - **Club detail (/club/<name>)** — reviewed for the first time; already a clean box score
   (record/matches/roster tiles + a "Their roster" table). Added a leaderboard rank (#) column for
   consistency. Owner-relative "RECORD VS THEM" framing remains (club-subject-param follow-up).
+- **No-Chum sweep (all pages)** — grepped every page for owner-perspective text. Neutralized the
+  club detail first-person framing: "We played them N times" -> "Head-to-head record across N
+  recorded matches", "Record vs them" -> "Head-to-head", "Matches vs them" -> "Recorded matches"
+  (0 leaks live). Left intentional copy (splash pitch, /about setup docs, the owner-stream overlay
+  YOU marker). Cleanup follow-up: delete the dead _personal_insights_card_html (uncalled, holds the
+  old "vs your career" strings).
 
 ### Still to repass (ESPN pass, top-down)
 - [x] **Match · "Us vs them" → "Team comparison"** — DONE. Forced neutral Blue-vs-Orange always; nav chip "Teams"; also dropped the owner-perspective "vs your career" insights card. 0 us/them/your-career leaks live.
