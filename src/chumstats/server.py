@@ -2613,7 +2613,7 @@ def _match_detail_html(store, match_id: str, viewer_pid: str | None, viewer_name
         _mn_chip("overview", "Overview", "active"),
         _mn_chip("timeline", "Timeline"),
         _mn_chip("goalmap", "Goal map") if playback_data.get("goals") else "",
-        _mn_chip("compare", "Us vs them"),
+        _mn_chip("compare", "Teams"),
         _mn_chip("kickoff", "Kickoff"),
         _mn_chip("players", "Players"),
     ]
@@ -3164,17 +3164,9 @@ def _match_compare_html(players, viewer_pid, viewer_name,
     Every stat here is reported for ALL players (unlike movement/boost)."""
     if not players:
         return ""
-    us = None
-    if viewer_pid or viewer_name:
-        for p in players:
-            if (viewer_pid and p["primary_id"] == viewer_pid) or \
-               (viewer_name and p["name"] == viewer_name):
-                us = p["team_num"]
-                break
-    viewer_relative = us is not None
-    if us is None:
-        us = 0
-    them = 1 - us
+    # Neutral all-players view: always Blue (team 0) vs Orange (team 1), never
+    # "us/them" — that would assume the configured owner is in this match.
+    us, them, viewer_relative = 0, 1, False
     up = [p for p in players if p["team_num"] == us]
     tp = [p for p in players if p["team_num"] == them]
 
@@ -3221,7 +3213,7 @@ def _match_compare_html(players, viewer_pid, viewer_name,
               f'<div class="cmp-pp-row {them_cls}">{share(tp)}</div></div>')
     return f"""
       <section id="compare" class="card mn-target">
-        <div class="section-title"><span>Us vs them</span></div>
+        <div class="section-title"><span>Team comparison</span></div>
         <table class="cmp-table">
           <thead><tr><th></th>
             <th class="num {us_cls}">{us_label}</th>
