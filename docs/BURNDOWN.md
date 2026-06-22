@@ -62,8 +62,11 @@ ssh welsh-macmini 'cd ~/ballshark && git fetch origin rebrand-chumstats \
       Assist, EpicSave, Shot). RL's Stats API doesn't emit positions for these, so a
       demo map can't be built from captured data.
 - [x] **Spatial-data gap analysis** — DONE (see "## Spatial data" below).
-- [ ] **Arena names: unverified ids** — give real names to `uf_*`, `mall_*`, `paname_*`,
-      `stadium_10a_p`, `neotokyo_arcade_p` (currently title-case fallback). Needs a source.
+- **[BLOCKED — needs source]** ~~Arena names: unverified ids~~ (`uf_*`, `mall_*`,
+      `paname_*`, `stadium_10a_p`, `neotokyo_arcade_p`) — web search (Liquipedia / RLStats /
+      ballchasing) found no authoritative id→name mapping, and they're not in RLBot's dict.
+      Per the project's no-guess principle, keep the title-case fallback (deployed, fine).
+      Resolve later with a ballchasing `/api/maps` token. NOT auto-run by the loop.
 - [ ] **A — persist game length** — add `regulation_seconds`/`overtime_seconds` (+ statfeed)
       columns to the `matches` schema + migration; persist in `save_match`.
 - [ ] **B — identity PK migration** — `match_player_stats` PK → `(match_id, primary_id, team_num)` + migration.
