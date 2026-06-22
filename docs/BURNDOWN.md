@@ -303,9 +303,9 @@ Real walkthrough; convergence was premature. Work top-down, test, commit, deploy
 - [x] **Tighten tiles** — DONE. .kpi is a centered flex column with uniform min-height; value+label centered, not top-left. Verified on clubs/opponents/profile.
 
 ### Compare
-- [ ] **Ball-touch count → a stat row, not the heatmap caption.**
+- [x] **Ball-touch count → stat row** — DONE. 'Ball touches' is a row in the Ball-positioning section; heatmap caption removed.
 - [ ] **Heatmap-type dropdown** (touch / shot / …) selectable — all heatmaps available as long-term stats.
-- [ ] **Default match-count confusion** (19/20) — clarify the "last N" sample wording.
+- [x] **Match-count confusion (19/20)** — DONE. The confusing per-player "across N matches" heatmap caption is gone; the "Last N" sample tip already explains the sample.
 
 ### Clubs restructure (HIGH)
 - [ ] **Split OUR club from OPPOSING clubs.** Our club (chum+Tommy+Blazed+Vex combined) as the top entry —
