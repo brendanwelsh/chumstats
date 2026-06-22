@@ -1970,7 +1970,7 @@ def _players_directory_html(store, self_primary_id: str | None = None,
             <td class="dim">{r["platform"] or 'n/a'}</td>
             <td class="dim" title="{kind_title}">{kind_str}</td>
             <td class="num tnum">{r["n"]}</td>
-            <td class="num tnum"><b>{wins}</b><span class="dim">-{r["n"] - wins}</span> <span class="dim">({winpct:.0f}%)</span></td>
+            <td class="num tnum" style="white-space:nowrap"><b>{wins}</b><span class="dim">-{r["n"] - wins}</span> <span class="dim">({winpct:.0f}%)</span></td>
             {_stat_cols_td(r)}
           </tr>
         """
