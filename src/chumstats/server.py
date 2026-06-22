@@ -4236,7 +4236,7 @@ def _ball_heatmap_svg(playback: dict, player_filter: str | None = None,
              if bh.get("team") == 1 else bh)
             for bh in ball
         ]
-    return _heat_pitch_svg(ball, svg, compact, key)
+    return _heat_pitch_svg(ball, svg, compact, key, legend_label=legend_label)
 
 
 def _touch_spots_svg(playback: dict, player_filter: str | None = None,
@@ -4288,7 +4288,7 @@ def _touch_spots_svg(playback: dict, player_filter: str | None = None,
 
 
 def _heat_pitch_svg(ball: list, svg: dict, compact: bool, key: str,
-                    team: int | None = None) -> str:
+                    team: int | None = None, legend_label: str = "touches") -> str:
     """Render ONE density pitch for a list of touches (one team's, or all of
     them when only one team is present). `team` picks the colour ramp: 0=blue,
     1=orange, None=legacy thermal (ball-only maps)."""
