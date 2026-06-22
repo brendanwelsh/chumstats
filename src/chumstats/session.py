@@ -427,9 +427,10 @@ class MatchAggregator:
                 if last is not None and p.boost < last:
                     line.boost_used += (last - p.boost)
                 self._last_boost[key] = p.boost
-                # The Stats API never reports exactly 0 boost (observed floor is
-                # 1), so <= 0 never fired -- treat <= 1 as an empty tank.
-                if p.boost <= 1:
+                # "Near-empty" = low tank, not literally 0. boost <= 1 almost
+                # never fired (the metric read 0% for everyone), so use ~12
+                # (≈ one boost pad) as the low-boost threshold for future data.
+                if p.boost <= 12:
                     line.ticks_zero_boost += 1
                 if p.boost >= 100:
                     line.ticks_full_boost += 1

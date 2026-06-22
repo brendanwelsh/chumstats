@@ -2794,7 +2794,7 @@ def _match_detail_html(store, match_id: str, viewer_pid: str | None, viewer_name
          ("Demos", "demos_taken", _num), ("Bars", "crossbars", _num), ("Goal%", "gp", _pct)])
     box_boost = _bs_table(
         "Boost &amp; movement", "needs spectator coverage &middot; &mdash; = unavailable",
-        [("BPM", "bpm", _num), ("Boost", "boost_used", _num), ("Empty%", "zero", _pct),
+        [("BPM", "bpm", _num), ("Boost", "boost_used", _num),
          ("Full%", "full", _pct), ("Spd", "avg_sp", _num), ("SS%", "sup", _pct),
          ("Grnd", "ground", _pct), ("Air", "air", _pct), ("Wall", "wall", _pct)])
 
@@ -4961,8 +4961,8 @@ def _compare_page_html(store, slots: list[str], *, self_name: str | None = None,
         ("Boost timing", "single", [
             ("BPM (boost used per minute)", lambda v: f"{v:.0f}",
              bpm_vals, True),
-            ("Time near-empty %",   lambda v: f"{v*100:.1f}%",
-             [pct_if(r.get("ticks"), r.get("ticks_zero")) for r in rows], False),
+            # "Time near-empty %" removed — boost<=1 almost never fires (0% for
+            # everyone), so the stat was invalid. See session.py threshold note.
             ("Time at 100 boost %", lambda v: f"{v*100:.1f}%",
              [pct_if(r.get("ticks"), r.get("ticks_full")) for r in rows], True),
         ]),
