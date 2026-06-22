@@ -61,6 +61,10 @@ compare). Loop now cycles back for deeper polish + continues the no-Chum sweep.
   mobile: no horizontal spill (scrollWidth==clientWidth), nav wraps, hero stacks, box-score
   tables scroll internally. Confirmed the Goal map pane renders (6 goals, build-up chains) and
   the Timeline shows ordinals (#1..) live. All 6 match panes verified functional + neutral.
+- **Validation sweep — green test suite** — `test_session_tracker_aggregates` had failed EVERY
+  loop run (assert 0==2): the `all_captures` fixture returned [] when the gitignored RL captures
+  are absent, so it ran on empty data instead of skipping. Made it `pytest.skip` like its
+  siblings. Suite now 17 passed / 15 skipped / 0 failed — no more false-failure noise each fire.
 
 ### Still to repass (ESPN pass, top-down)
 - [x] **Match · "Us vs them" → "Team comparison"** — DONE. Forced neutral Blue-vs-Orange always; nav chip "Teams"; also dropped the owner-perspective "vs your career" insights card. 0 us/them/your-career leaks live.
