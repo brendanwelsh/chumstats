@@ -4794,6 +4794,15 @@ def _compare_page_html(store, slots: list[str], *, self_name: str | None = None,
         _lifetime_shot_data(store, slot_name) if slot_name else None
         for slot_name in slots
     ]
+    # Heatmaps are LIFETIME (matches the "Heatmaps (lifetime)" heading + the shot
+    # map, which has no sample scope) — a dense, representative spatial map. The
+    # TABLE's positioning metrics keep the sampled `touch_data` so they line up
+    # with the rest of the last-N table. (Before: the touch map was sampled but
+    # labelled lifetime — inconsistent with the shot map.)
+    touch_data_hm = [
+        _lifetime_touch_data(store, slot_name) if slot_name else None
+        for slot_name in slots
+    ]
 
     def option_list(selected: str) -> str:
         opts = ['<option value="">(select a player)</option>']
@@ -5069,7 +5078,7 @@ def _compare_page_html(store, slots: list[str], *, self_name: str | None = None,
         <button type="submit" class="copy-btn" style="padding:8px 18px;font-size:12px">Compare</button>
       </form>
 
-      {_compare_heatmap_row(slots, touch_data, shot_data)}
+      {_compare_heatmap_row(slots, touch_data_hm, shot_data)}
 
       <div class="card" style="padding:0;overflow:hidden;margin-top:16px">
         <table class="compare-table">
