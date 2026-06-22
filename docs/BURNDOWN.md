@@ -57,6 +57,10 @@ compare). Loop now cycles back for deeper polish + continues the no-Chum sweep.
 - **[x] Match · Timeline timestamps** — DONE. Was repeating '8:29' (upload timestamp collapse);
   now shows play ordinals (#1, #2, …) when timing has no spread, real M:SS for live matches.
   Goals still carry the running score. Verified live.
+- **Validation sweep — overlap + match panes (PASS, no fix)** — checked the match page at 400px
+  mobile: no horizontal spill (scrollWidth==clientWidth), nav wraps, hero stacks, box-score
+  tables scroll internally. Confirmed the Goal map pane renders (6 goals, build-up chains) and
+  the Timeline shows ordinals (#1..) live. All 6 match panes verified functional + neutral.
 
 ### Still to repass (ESPN pass, top-down)
 - [x] **Match · "Us vs them" → "Team comparison"** — DONE. Forced neutral Blue-vs-Orange always; nav chip "Teams"; also dropped the owner-perspective "vs your career" insights card. 0 us/them/your-career leaks live.
