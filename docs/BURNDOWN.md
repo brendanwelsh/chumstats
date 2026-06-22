@@ -67,8 +67,9 @@ ssh welsh-macmini 'cd ~/ballshark && git fetch origin rebrand-chumstats \
       ballchasing) found no authoritative id→name mapping, and they're not in RLBot's dict.
       Per the project's no-guess principle, keep the title-case fallback (deployed, fine).
       Resolve later with a ballchasing `/api/maps` token. NOT auto-run by the loop.
-- [ ] **A — persist game length** — add `regulation_seconds`/`overtime_seconds` (+ statfeed)
-      columns to the `matches` schema + migration; persist in `save_match`.
+- [x] **A — persist game length** — DONE. Added `regulation_seconds`/`overtime_seconds`
+      columns + additive migration; persisted in `save_match` + upload path + sync payload.
+      (Statfeed stays recoverable from kept raw_events — no column needed.) Migrates on deploy.
 - [ ] **B — identity PK migration** — `match_player_stats` PK → `(match_id, primary_id, team_num)` + migration.
 - [ ] **C — stat-line consistency** — one shared score-first `STAT_COLUMNS` across all web tables.
 - [ ] **D — filter consistency** — add `platform` filter to opponents/compare/clan/club; `window` to history.
