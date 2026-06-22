@@ -2316,7 +2316,7 @@ def _match_detail_html(store, match_id: str, viewer_pid: str | None, viewer_name
             bot = " <span class='chip bot'>BOT</span>" if p["is_bot"] else ""
             you = ""  # neutral all-players view — no "you" framing
             href = f"/player/{quote(p['name'], safe='')}"
-            link_cls = "player-link self" if is_viewer else "player-link"
+            link_cls = "player-link"  # neutral — no owner self-highlight (was orange)
             nm = html.escape(p["name"] or "")  # attacker-controllable
             name_link = (f"<span class='{link_cls}' style='cursor:default;color:var(--text-faint)'>{nm}</span>"
                          if p["is_bot"] else
@@ -6309,17 +6309,15 @@ def _nav(active: str = "", friend_mode: bool = False) -> str:
         ("players",   "/players",       "Players"),
         ("compare",   "/compare",       "Compare"),
         ("clan",      "/clan",          "Clubs"),
-        ("opponents", "/opponents",     "Opponents"),
     ]
-    util_items = [
-        ("overlay", "/overlay", "OBS overlay"),
-        ("about",   "/about",   "How it works"),
-    ]
+    # OBS overlay is a local/live-host tool, not a central-site page — it lives as
+    # a button on the Live view, not the nav. Opponents is folded into Players
+    # (same data), so it's no longer a top-level page.
+    util_items = [("about", "/about", "How it works")]
     if friend_mode:
-        # The friend's local server only serves the live view + OBS overlay
-        # picker; the analytical pages and /about 404 here, so drop them.
+        # The friend's local server only serves the live view + OBS overlay.
         stat_items = [it for it in stat_items if it[0] == "live"]
-        util_items = [it for it in util_items if it[0] == "overlay"]
+        util_items = [("overlay", "/overlay", "OBS overlay")]
     if not _LIVE_AVAILABLE:
         # The central `serve` host has no RL ingest -> no live feed; drop the
         # dead 'Live' link (the /live route still exists for direct hits).
