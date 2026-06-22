@@ -59,7 +59,7 @@ the older C/D/E below (E is subsumed by the reframe item).
       `/dashboard` redirects to `/`; neutralized copy (Your insights/goals, you've faced,
       Your line, vs your average). Follow-ups: delete the dead `_dashboard_html(is_self)`
       path; `/history` still renders the configured owner (subject-param `?pid=` = old item E).
-- [ ] **Filter overlap (left) + redundancy** — sidebar overlaps at the user's width (asked
+- [x] **Filter overlap (left) + redundancy** — DONE. Converted the left filter rail to a compact top horizontal bar (ballchasing-style) — no left column, so overlap is eliminated by construction. Removed the redundant inline mode/bots toolbars on history + opponents (now in the bar). Verified live across pages.
       20+ times; width-specific — chips overflow when narrow). Harden: `min-width:0` +
       overflow guards on `.side-filters`/`.sf-chip`; verify 1200–1500px. Remove the REDUNDANT
       inline mode/bots filter row that duplicates the sidebar (seen on /opponents).
