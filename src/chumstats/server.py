@@ -2143,22 +2143,12 @@ def _history_page_html(store, primary_id, name, *,
       </div>
 
       <div class="toolbar">
-        <div class="seg" title="Filter by playlist size">
-          {mode_chip("All",  None)}
-          {mode_chip("1v1",  1)}
-          {mode_chip("2v2",  2)}
-          {mode_chip("3v3",  3)}
-          {mode_chip("4v4",  4)}
-        </div>
         <div class="seg" title="Sort matches">
           {sort_chip("Recent", "recent")}
           {sort_chip("Score",  "score")}
           {sort_chip("Goals",  "goals")}
           {sort_chip("Saves",  "saves")}
           {sort_chip("Wins first", "best")}
-        </div>
-        <div class="seg">
-          <a class="{bots_chip_state}" href="{bots_target_url}">{'Show bots' if not include_bots else 'Hide bots'}</a>
         </div>
         <div style="margin-left:auto;font-size:12px;color:var(--text-dim)">
           {total} match{'es' if total != 1 else ''}
@@ -5517,16 +5507,6 @@ def _opponents_page_html(store, self_primary_id, self_name, *,
       </div>
 
       <div class="toolbar">
-        <div class="seg" title="Filter by playlist size">
-          {mode_chip("All",  None)}
-          {mode_chip("1v1",  1)}
-          {mode_chip("2v2",  2)}
-          {mode_chip("3v3",  3)}
-          {mode_chip("4v4",  4)}
-        </div>
-        <div class="seg">
-          <a class="{bots_chip_state}" href="{_url(bots_=not include_bots)}">{'Show bots' if not include_bots else 'Hide bots'}</a>
-        </div>
         <div style="margin-left:auto;font-size:12px;color:var(--text-dim)">
           {len(rows)} opponent{'s' if len(rows) != 1 else ''}
         </div>
