@@ -1611,7 +1611,7 @@ def _radar_block_for_player(store, primary_id: str | None, name: str | None,
     return (
         f'<section class="card skill-card">'
         f'<div class="section-title"><span>Per-match averages vs the field</span>'
-        f'<span class="dim">over {row["n"]} matches &middot; bar = vs the best regular, '
+        f'<span class="dim">over {row["n"]} match{"es" if row["n"] != 1 else ""} &middot; bar = vs the best regular, '
         f'tick = field average</span></div>'
         f'{rows_html}'
         f'</section>'
