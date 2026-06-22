@@ -6302,8 +6302,11 @@ def _page_wrap(title: str, body_html: str, *, status: int = 200, active: str = "
     body_cls = "with-sidebar" if sidebar else "no-sidebar"
     main_html = f'<main class="page-main">{body_html}</main>' if sidebar else body_html
     return f"""<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>Chumstats - {html.escape(title)}</title>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="color-scheme" content="dark light">
+<title>Chumstats - {html.escape(title)}</title>
 <link rel="icon" type="image/png" href="/static/brand/chum-logo.png">
+<script>(function(){{try{{var t=localStorage.getItem('chumstats-theme')||((window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches)?'light':'dark');document.documentElement.setAttribute('data-theme',t);}}catch(e){{document.documentElement.setAttribute('data-theme','dark');}}}})();</script>
 {_STYLE_TAG}
 </head><body class="{body_cls}">
 <div class="wrapper">
