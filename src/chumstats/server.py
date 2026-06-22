@@ -1530,7 +1530,7 @@ def _player_ball_section_html(store, name: str | None) -> str:
     sd = _lifetime_shot_data(store, name)
     shot_card = ""
     if sd["shots"]:
-        shotmap = _ball_heatmap_svg(sd, key=f"shots-{name_slug}", exclude_center=False)
+        shotmap = _ball_heatmap_svg(sd, key=f"shots-{name_slug}", exclude_center=False, legend_label="goals")
         shot_card = f"""
       <div class="card insights-card">
         <div class="section-title">
@@ -4195,7 +4195,7 @@ _KICKOFF_CENTER_UU = 256
 
 def _ball_heatmap_svg(playback: dict, player_filter: str | None = None,
                      compact: bool = False, key: str = "", orient: bool = True,
-                     exclude_center: bool = True) -> str:
+                     exclude_center: bool = True, legend_label: str = "touches") -> str:
     """Top-down ball-touch *density* heatmap on ONE pitch.
 
     Every BallHit is splatted as a soft point, Gaussian-blurred into a
@@ -4345,7 +4345,7 @@ def _heat_pitch_svg(ball: list, svg: dict, compact: bool, key: str,
         f'</filter>'
         f'</defs>'
     )
-    legend = "" if compact else _heat_legend_svg(vb_w, vb_h, sfx, team)
+    legend = "" if compact else _heat_legend_svg(vb_w, vb_h, sfx, team, label=legend_label)
     pitch_cls = "hm-pitch hm-pitch-compact" if compact else "hm-pitch"
     return (
         f'<svg viewBox="0 0 {vb_w} {vb_h}" class="{pitch_cls}" '
@@ -4366,9 +4366,11 @@ def _heat_pitch_svg(ball: list, svg: dict, compact: bool, key: str,
     )
 
 
-def _heat_legend_svg(vb_w: float, vb_h: float, sfx: str, team: int | None = None) -> str:
-    """Small 'fewer -> more touches' key, bottom-right of a heatmap. Tinted to the
-    team hue so the legend matches the pitch (blue / orange); thermal otherwise."""
+def _heat_legend_svg(vb_w: float, vb_h: float, sfx: str, team: int | None = None,
+                     label: str = "touches") -> str:
+    """Small 'fewer -> more <label>' key, bottom-right of a heatmap. `label` is the
+    metric ('touches' for touch maps, 'goals' for shot maps). Tinted to the team
+    hue so the legend matches the pitch (blue / orange); thermal otherwise."""
     lw, lh = 96, 6
     lx, ly = vb_w - lw - 14, vb_h - 16
     gid = f"heatleg{sfx}"
@@ -4402,7 +4404,7 @@ def _heat_legend_svg(vb_w: float, vb_h: float, sfx: str, team: int | None = None
         f'fill="url(#{gid})"/>'
         f'<text x="{lx:.1f}" y="{ly - 3:.1f}" style="{tstyle}">fewer</text>'
         f'<text x="{lx + lw:.1f}" y="{ly - 3:.1f}" style="{tstyle}" '
-        f'text-anchor="end">more touches</text>'
+        f'text-anchor="end">more {label}</text>'
     )
 
 
@@ -5991,7 +5993,7 @@ def _clan_page_html(store, members: list[str], *, self_name: str | None = None,
         "svg": {"vb_w": 880, "vb_h": 380, "pitch_w": 800, "pitch_h": 320,
                 "pad_x": 40.0, "pad_y": 30.0},
     }
-    heatmap_svg = _ball_heatmap_svg(combined, key="clan", exclude_center=False) if merged_shots else ""
+    heatmap_svg = _ball_heatmap_svg(combined, key="clan", exclude_center=False, legend_label="goals") if merged_shots else ""
     heatmap_html = (
         f"""
           <div class="card" style="margin-top:14px">
