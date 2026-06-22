@@ -300,7 +300,7 @@ Real walkthrough; convergence was premature. Work top-down, test, commit, deploy
 - [x] **Match history at the bottom** — DONE. It's the last tab (Matches).
 - [x] **Remove Online-vs-Offline** — DONE (dropped from the profile groups).
 - [x] **Balance KPI tiles** — DONE. Even auto-fit grid (7 tiles in one balanced row, was 5+2). (Boost/movement now live in the Breakdown tab.)
-- [ ] **Tighten tiles** (opponents/clubs/profile) — text centered/fit, not jammed top-left.
+- [x] **Tighten tiles** — DONE. .kpi is a centered flex column with uniform min-height; value+label centered, not top-left. Verified on clubs/opponents/profile.
 
 ### Compare
 - [ ] **Ball-touch count → a stat row, not the heatmap caption.**
