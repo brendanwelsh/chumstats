@@ -35,6 +35,12 @@ finishes — keep iterating balance changes.
 - **Clubs (opposing clubs)** — already a box score; added a leaderboard **rank (#)** column and
   renamed the first-person **'Our goals' → 'Goals for'** (owner-tell). The page is still the
   owner-club's rivalries (CLUB RECORD etc.); full club-subject-param is a bigger follow-up.
+- **Compare** — already a strong side-by-side (heatmaps + metric table per player); neutralized
+  the owner framing: default to the top-3 most-played players (was owner-first), dropped the
+  'Slot 1 (you)' label + 'defaults to you' copy. 0 you-leaks live.
+
+**First full rotation complete** (match · profile · directory · history · opponents · clubs ·
+compare). Loop now cycles back for deeper polish + continues the no-Chum sweep.
 
 ### Still to repass (ESPN pass, top-down)
 - [x] **Match · "Us vs them" → "Team comparison"** — DONE. Forced neutral Blue-vs-Orange always; nav chip "Teams"; also dropped the owner-perspective "vs your career" insights card. 0 us/them/your-career leaks live.
