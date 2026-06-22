@@ -2798,7 +2798,6 @@ def _match_detail_html(store, match_id: str, viewer_pid: str | None, viewer_name
       <section class="md-pane" data-pane="compare">
         {_match_compare_html(players, viewer_pid, viewer_name, t0_name, t1_name, playback_data)}
         {_match_insights_html(playback_data, t0_name, t1_name)}
-        {_personal_insights_card_html(store, players, viewer_pid, viewer_name, match_id)}
       </section>
 
       <section class="md-pane" data-pane="kickoff">
