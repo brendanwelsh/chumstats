@@ -397,6 +397,7 @@ def make_app(broadcaster: Broadcaster, *, store=None,
     async def opponents_page():
         # Retired — redundant with All Players (same data). Any old link / bookmark
         # lands on the directory, where the with/vs relation split lives.
+        from fastapi.responses import RedirectResponse
         return RedirectResponse(url="/players")
 
     @_gated_get("/compare")
