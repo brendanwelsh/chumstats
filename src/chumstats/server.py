@@ -2074,10 +2074,10 @@ def _all_matches_html(store, *, include_bots=True, mode_filter=None,
     if window_days: parts.append({1: "today", 7: "last 7 days", 30: "last 30 days"}.get(window_days, ""))
     if platform_filter: parts.append(f"vs {html.escape(platform_filter)}")
     fsum = (" · " + ", ".join(p for p in parts if p)) if any(parts) else ""
-    table = (f'<table class="history"><thead><tr><th style="width:110px">When</th>'
+    table = (f'<div class="tscroll"><table class="history"><thead><tr><th style="width:96px">When</th>'
              f'<th>Score</th><th>Arena</th><th>Mode</th>'
              f'<th>{_stat_icon_html("MVP")}MVP</th></tr></thead>'
-             f'<tbody>{"".join(body_rows)}</tbody></table>'
+             f'<tbody>{"".join(body_rows)}</tbody></table></div>'
              if body_rows else '<div class="empty">No matches for this filter.</div>')
     body = (f'<div class="page-head"><div><h1>All matches</h1>'
             f'<div class="sub">{total} match{"es" if total != 1 else ""} recorded{fsum}</div>'
