@@ -301,23 +301,12 @@ def make_app(broadcaster: Broadcaster, *, store=None,
                 "rl_connected": broadcaster.rl_connected}
 
     @_gated_get("/dashboard")
-    async def dashboard(include_bots: int = 0, mode: int | None = None,
-                        platform: str | None = None, window: str | None = None):
-        """Career dashboard HTML page for the configured player."""
-        if store is None or (not self_primary_id and not self_name):
-            return HTMLResponse("<p>No player configured; set RL_PLAYER_NAME / RL_PLAYER_PRIMARY_ID in .env</p>")
-        from .analytics import build_dashboard
-        mode_filter = mode if mode in (1, 2, 3, 4) else None
-        window_days = {"today": 1, "7d": 7, "30d": 30}.get(window or "", None)
-        d = build_dashboard(store, primary_id=self_primary_id, name=self_name,
-                            include_bots=bool(include_bots),
-                            mode_filter=mode_filter,
-                            platform_filter=platform or None,
-                            window_days=window_days)
-        return HTMLResponse(_dashboard_html(
-            d, store=store, primary_id=self_primary_id, name=self_name,
-            is_self=True, include_bots=bool(include_bots),
-        ))
+    async def dashboard():
+        """Legacy owner 'Me' dashboard — retired. This is an all-players tracker,
+        so send it to the neutral splash. Any single player's career still lives
+        at /player/<name> (parameterized, not owner-specific)."""
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse(url="/")
 
     @_gated_get("/player/{name}")
     async def player_page(name: str, include_bots: int = 0,
@@ -4445,7 +4434,7 @@ def _personal_insights_card_html(store, players, viewer_pid: str | None,
     return f"""
       <div class="card insights-card" style="margin-top:14px">
         <div class="section-title">
-          <span>Your insights this match</span>
+          <span>Match insights</span>
           <span class="dim" style="text-transform:none;letter-spacing:0">
             How this match's numbers compare to your career baseline.
           </span>
@@ -5421,8 +5410,8 @@ def _opponents_page_html(store, self_primary_id, self_name, *,
               <th class="num">Matches</th>
               <th class="num">W-L</th>
               <th class="num">Win rate</th>
-              <th class="num">Your goals</th>
-              <th class="num">Their goals</th>
+              <th class="num">Goals for</th>
+              <th class="num">Goals against</th>
               <th class="num">Their saves</th>
               <th class="num">Their demos</th>
               <th>Last played</th>
@@ -5514,7 +5503,7 @@ def _opponents_page_html(store, self_primary_id, self_name, *,
       <div class="page-head">
         <div>
           <h1>Opponents</h1>
-          <div class="sub">Every player you've faced. Head-to-head records, last meeting,
+          <div class="sub">Every player faced. Head-to-head records, last meeting,
           total goals exchanged. Repeats sit at the top.</div>
         </div>
       </div>
@@ -6069,7 +6058,7 @@ def _clan_page_html(store, members: list[str], *, self_name: str | None = None,
                 <th class="num">W-L</th>
                 <th class="num">Win rate</th>
                 <th class="num">Our goals</th>
-                <th class="num">Their goals</th>
+                <th class="num">Goals against</th>
                 <th class="num">+/−</th>
                 <th>Last played</th>
               </tr></thead>
@@ -6398,7 +6387,6 @@ def _nav(active: str = "", friend_mode: bool = False) -> str:
     # like another stat page.
     stat_items = [
         ("live",      "/live",          "Live"),
-        ("dashboard", "/dashboard",     "Me"),
         ("history",   "/history",       "Matches"),
         ("players",   "/players",       "Players"),
         ("compare",   "/compare",       "Compare"),
@@ -6418,9 +6406,9 @@ def _nav(active: str = "", friend_mode: bool = False) -> str:
         # The central `serve` host has no RL ingest -> no live feed; drop the
         # dead 'Live' link (the /live route still exists for direct hits).
         stat_items = [it for it in stat_items if it[0] != "live"]
-    # In friend mode the brand can't point at /dashboard (it 404s); send it home
-    # to the live view instead.
-    brand_href = "/live" if friend_mode else "/dashboard"
+    # All-matches tracker (no "Me" home): the brand goes to the neutral splash.
+    # Friend mode only serves /live, so it points there instead.
+    brand_href = "/live" if friend_mode else "/"
 
     live_pip = ('<span class="live-pip off" id="live-pip" title="No active match">'
                 '<span class="dot"></span><span id="live-pip-label">idle</span></span>'

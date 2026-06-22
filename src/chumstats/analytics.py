@@ -48,7 +48,7 @@ class MetricGroup:
 @dataclass
 class MatchAnalytics:
     summary_block: list[MetricLine] = field(default_factory=list)
-    you_block: MetricGroup = field(default_factory=lambda: MetricGroup("Your line"))
+    you_block: MetricGroup = field(default_factory=lambda: MetricGroup("Stat line"))
     movement_block: MetricGroup = field(default_factory=lambda: MetricGroup("Movement"))
     boost_block: MetricGroup = field(default_factory=lambda: MetricGroup("Boost"))
     opponents_block: MetricGroup = field(default_factory=lambda: MetricGroup("Opponents"))
@@ -267,7 +267,7 @@ def build_analytics(s: MatchSummary, *,
                 matches = (avgs.get("matches") or 0)
                 if matches >= 2:
                     a.you_block.lines.append(MetricLine(
-                        "vs your average",
+                        "vs career average",
                         "",
                         (f"Goals {avgs.get('avg_goals') or 0:.1f}  ·  "
                          f"Assists {avgs.get('avg_assists') or 0:.1f}  ·  "
