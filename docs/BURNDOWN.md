@@ -328,10 +328,11 @@ Real walkthrough; convergence was premature. Work top-down, test, commit, deploy
 - [x] **Club heatmap → "Where the club scores from"** — DONE. Now the union of members' goal-shot locations (768 goals, concentrated at the attacking net) instead of the useless dense touch blob. Verified. (Minor nit: shared heatmap legend still says "touches".)
 - [x] **Mobile / tiny-window pass** — DONE. All 6 main pages (players/clan/history/match/compare/profile) now 0 page-overflow at 390px: wrapped the wide directory + all-matches tables in .tscroll (scroll in-box), and made the compare slot-pickers wrap (auto-fit). Match box-score already scrolled internally.
 - [x] **Date shrunk** — DONE. 'Jun 21, 2026 at 7:34 PM PDT' (wrapped ~7 lines) → 'Jun 21, 7:34 PM' on one line (dropped 'at', timezone, current-year; time{nowrap}).
-- [ ] **"UF Night" arena name** — not a real map name; fix (unmapped-id fallback).
+- [x] **"UF Night" arena name FIXED** — opaque capture ids (uf_*/mall_*/paname_*) aren't in any public RL map list, so they no longer title-case into fake names ("UF Night") — they show "Unknown arena" (logged). Mapped 3 verified variants (Neo Tokyo Arcade, Salty Shores Night/Pitched, DFH Stadium 10th Anniversary). Verified live.
 
 
 ## 🔁 Ongoing QA audit log (continuous — does NOT self-delete)
 Each fire: finish batch #2 remainders, then a fresh pass for erroneous statlines / clunky-overlapping UI (mobile 390px + tiny desktop) / broken filters / @ChumtheWaters owner-lens. Fix ONE concrete thing, log it here.
 - Removed the owner-relative Teammates/Opponents relation filter from /players (neutral all-friends leaderboard).
 - Mobile pass: compact one-line dates + .tscroll on directory/all-matches tables + auto-fit compare slot-pickers → all 6 main pages 0 overflow at 390px.
+- Arenas: stopped fabricating names for opaque ids ('UF Night'→'Unknown arena'); mapped 3 verified variants. BATCH #2 COMPLETE except the deferred Compare field-average.
