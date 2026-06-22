@@ -312,7 +312,7 @@ Real walkthrough; convergence was premature. Work top-down, test, commit, deploy
 
 ### Identity / stats
 - [x] **Dedup vexxloll ⇄ vexxlol** — DONE. PLAYER_ALIASES merges vexxlol (Steam) → vexxloll (Epic) on startup + at ingest (durable). Verified live: vexxlol 0 rows, vexxloll 198 (was 191+7).
-- [ ] **>5-games-with-me threshold** for the relevant stats (best teammates etc.).
+- [x] **>5-games threshold** — DONE. Best-teammates + toughest-opponents now require >5 shared games (was >=2). Verified: all listed have >5 (Blazed: 22/54/81/87).
 - [ ] **Teammate AND opponent** (e.g. Blazed) — fix the confusing dual-relation display.
 
 ### Layout
