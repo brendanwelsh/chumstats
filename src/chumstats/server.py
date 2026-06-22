@@ -6125,7 +6125,7 @@ def _clan_page_html(store, members: list[str], *, self_name: str | None = None,
 
     # Rivalries block
     rivals_cells = []
-    for r in rival_rows[:30]:
+    for rank, r in enumerate(rival_rows[:30], 1):
         wn = r["wins"]; ls = r["matches"] - wn
         wr = (wn / r["matches"] * 100) if r["matches"] else 0
         diff = (r["our_goals"] or 0) - (r["their_goals"] or 0)
@@ -6136,6 +6136,7 @@ def _clan_page_html(store, members: list[str], *, self_name: str | None = None,
         from urllib.parse import quote as _q
         rivals_cells.append(f"""
           <tr class="row click" onclick="window.location='/club/{_q(r['name'], safe='')}'">
+            <td class="num tnum rank">{rank}</td>
             <td><a class="player-link" href="/club/{_q(r['name'], safe='')}"><span class="club-name" title="{html.escape(r['name'])}"><b>{html.escape(r['name'])}</b></span></a></td>
             <td class="num tnum"><b>{r['matches']}</b></td>
             <td class="num tnum">
@@ -6161,11 +6162,12 @@ def _clan_page_html(store, members: list[str], *, self_name: str | None = None,
             </div>
             <table class="history">
               <thead><tr>
+                <th class="num rank">#</th>
                 <th>Club</th>
                 <th class="num">Matches</th>
                 <th class="num">W-L</th>
                 <th class="num">Win rate</th>
-                <th class="num">Our goals</th>
+                <th class="num">Goals for</th>
                 <th class="num">Goals against</th>
                 <th class="num">+/−</th>
                 <th>Last played</th>
@@ -7745,8 +7747,8 @@ table.history tr.match-row:hover { background: var(--card-hover); }
 .skill-avg { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--text); opacity: 0.55; }
 .skill-val { font-size: 13px; font-weight: 700; text-align: right; font-variant-numeric: tabular-nums; }
 .skill-favg { display: block; font-size: 10px; font-weight: 500; color: var(--text-faint); }
-/* Leaderboard rank column on the players directory. */
-.players-table td.rank, .players-table th.rank { color: var(--text-faint); font-weight: 600;
+/* Leaderboard rank column (players directory, club rivalries, …). */
+td.rank, th.rank { color: var(--text-faint); font-weight: 600;
   width: 34px; text-align: right; padding-right: 10px; }
 /* History results table: keep the score tight + a venue (Arena) column so the
    row doesn't have a dead gap between the score and the stat columns. */
