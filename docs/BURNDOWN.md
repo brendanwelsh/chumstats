@@ -288,12 +288,12 @@ Real walkthrough; convergence was premature. Work top-down, test, commit, deploy
 - [ ] **Redundant match count** ("47" + "{N} matches shown") — one clear count. (7-day filter is good, keep.)
 
 ### No-Chum residue (HIGH)
-- [ ] **Owner name renders ORANGE on the match roster** — leftover `self`/viewer highlight. Remove → team-color/neutral.
+- [x] **Owner name renders ORANGE on the match roster** — DONE (dropped the .self accent highlight) — leftover `self`/viewer highlight. Remove → team-color/neutral.
 - [ ] **Remove any data-source/owner attribution** — it's the friends-group capture, no owner framing anywhere.
 
 ### Nav
-- [ ] **Remove OBS Overlay from site nav** — local/live-only; move to a button on the live/boost view page.
-- [ ] **Remove the Opponents page** — redundant with All Players (same data); fold any unique value into Players.
+- [x] **Remove OBS Overlay from site nav** — DONE (friend-mode nav only now). TODO: add it as a button on the Live view — local/live-only; move to a button on the live/boost view page.
+- [~] **Remove the Opponents page** — nav link removed; TODO: retire route + fold into Players, drop profile quick-nav link — redundant with All Players (same data); fold any unique value into Players.
 
 ### Player profile → SPA (HIGH)
 - [ ] **Make the profile a tabbed SPA like the match page** — no long scroll; sections behind tabs, not stacked side-by-side.
