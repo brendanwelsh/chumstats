@@ -289,7 +289,7 @@ Real walkthrough; convergence was premature. Work top-down, test, commit, deploy
 
 ### No-Chum residue (HIGH)
 - [x] **Owner name renders ORANGE on the match roster** — DONE (dropped the .self accent highlight) — leftover `self`/viewer highlight. Remove → team-color/neutral.
-- [ ] **Remove any data-source/owner attribution** — it's the friends-group capture, no owner framing anywhere.
+- [x] **Remove data-source/owner attribution** — DONE. Splash no longer tags/highlights the owner ('· you'/self-chip removed → owner is just one chip); /about data-format sample uses a generic name. Owner name remains only as legit DATA (rosters/directory).
 
 ### Nav
 - [x] **Remove OBS Overlay from site nav** — DONE (friend-mode nav only now). TODO: add it as a button on the Live view — local/live-only; move to a button on the live/boost view page.
