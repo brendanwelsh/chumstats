@@ -1935,23 +1935,13 @@ def _players_directory_html(store, self_primary_id: str | None = None,
         n = r["n"] or 1
         wins = r["wins"] or 0
         winpct = (wins / n) * 100
-        # Relation = the split of shared games (with vs against), so a player you
-        # both teamed with AND faced reads clearly ("12× with · 5× vs") instead
-        # of an ambiguous "teammate · opponent".
-        n_with = r["was_teammate"] or 0
-        n_vs = r["was_opponent"] or 0
-        kp = []
-        if n_with: kp.append(f'<b>{n_with}</b>&times; with')
-        if n_vs: kp.append(f'<b>{n_vs}</b>&times; vs')
-        kind_str = " &middot; ".join(kp) or "&mdash;"
-        kind_title = (f"Played {n_with} game{'s' if n_with != 1 else ''} with and "
-                      f"{n_vs} against this player")
+        # Neutral all-players list — no owner-relative "with/vs" framing. Platform
+        # shows the brand logo in a square box (consistent with the filter).
         return f"""
           <tr class="player-row">
             <td class="num tnum rank">{rank}</td>
             <td><a class="player-link" href="{href}">{html.escape(r["name"])}</a> {tag}</td>
-            <td class="dim">{r["platform"] or 'n/a'}</td>
-            <td class="dim" title="{kind_title}">{kind_str}</td>
+            <td class="plat-cell" title="{html.escape(r["platform"] or '')}">{_platform_icon_html(r["platform"], size=15)}</td>
             <td class="num tnum">{r["n"]}</td>
             <td class="num tnum" style="white-space:nowrap"><b>{wins}</b><span class="dim">-{r["n"] - wins}</span> <span class="dim">({winpct:.0f}%)</span></td>
             {_stat_cols_td(r)}
@@ -2006,7 +1996,7 @@ def _players_directory_html(store, self_primary_id: str | None = None,
         <table class="players-table">
           <thead><tr>
             <th class="num rank">#</th>
-            <th>Player</th><th>Platform</th><th>With / vs</th>
+            <th>Player</th><th>Platform</th>
             <th class="num">Matches</th><th class="num">W-L</th>
             {_stat_cols_th()}
           </tr></thead>
@@ -6714,9 +6704,11 @@ body { min-height: 100vh; }
    width/height, and NO class -- so without a hard CSS size on the SVG itself
    they balloon to ~512px (the "huge console icons" bug, worst when the sidebar
    goes full-width on narrow screens). Constrain the SVG directly. */
-svg.plat-ic { width: 16px; height: 16px; flex: 0 0 auto; }
-.side-filters .sf-chip-ic { display: flex; align-items: center; justify-content: center; }
-.side-filters .sf-chip-ic svg { display: block; width: 20px; height: 20px; }
+svg.plat-ic { width: 15px; height: 15px; flex: 0 0 auto; }
+/* Platform icon chips: smaller logo, square box (same shape as the column). */
+.side-filters .sf-chip-ic { display: inline-flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px; padding: 0; }
+.side-filters .sf-chip-ic svg { display: block; width: 15px; height: 15px; }
 .side-filters .sf-chip-ic:hover svg.plat-ic { color: var(--accent); }
 .side-filters .sf-chip-ic.active svg.plat-ic { color: var(--accent); }
 .side-filters .sf-platform .sf-chip[data-val=""] {
@@ -7203,7 +7195,7 @@ table.history tr.match-row:hover { background: var(--card-hover); }
   align-items: center;
   justify-content: center;
   width: 28px;
-  height: 22px;
+  height: 28px;
   color: var(--text-dim);
 }
 .plat-cell svg.plat-ic { display: block; }
@@ -9641,6 +9633,7 @@ def _featured_players(store, *, limit: int = 8) -> list[dict]:
                 WHERE COALESCE(mps.is_bot, 0) = 0
                   AND mps.primary_id NOT LIKE 'Unknown%'
                 GROUP BY mps.primary_id
+                HAVING COUNT(DISTINCT mps.match_id) > 20
                 ORDER BY n DESC
             """).fetchall()
     except Exception:
@@ -9699,7 +9692,7 @@ def _splash_html(store, self_primary_id: str | None = None) -> str:
         <div class="splash-hero">
           <img class="splash-logo" src="/static/brand/chum-logo.png" alt="Chumstats" />
           <h1>Chumstats</h1>
-          <p class="splash-tagline">Rocket League match stats for you and your crew &mdash;
+          <p class="splash-tagline">Rocket League match stats for Chum and his friends &mdash;
             goals, boost, positioning, and the story of every game, from everyone who plays.</p>
           <div class="splash-cta">
             <a class="btn-primary" href="/players">Browse all players</a>
