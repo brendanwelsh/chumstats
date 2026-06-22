@@ -20,7 +20,8 @@ is already on the branch:
 
 - Homescreen/splash "doesn't exist" → built in `f9650cc` (neutral splash + quick-jump chips).
 - Map/arena names "not correct" → `arenas.py` corrected in `b905395` (deploy fixes the mapped ones).
-- Console/platform icons "huge" → size caps added in `a15af33`.
+- Console/platform icons "huge" → **CONFIRMED deploy-only**: caps are correct in current
+  code (`svg.plat-ic` 16px, `.sf-chip-ic svg` 20px, overlay `.plat-ico` 12px). Deploy fixes it.
 - Player cards not stacked → `9f3fd97` collapsible cards.
 
 ## [BLOCKED — needs user OK] Deploy the branch to chumstats.com (macmini)
@@ -34,9 +35,7 @@ site → requires explicit go-ahead before executing.
 
 ## [code] genuine fixes to grind (loop works these)
 
-- [ ] **Scaling/console icons** — verify the `.sf-chip-ic` (512-viewBox inlined file svg)
-      and `.plat-ic` caps actually apply in current code; if still oversized, fix the CSS.
-      (May be deploy-only — confirm by rendering locally before assuming a code bug.)
+- [x] ~~**Scaling/console icons**~~ — RESOLVED as deploy-only; caps verified correct in code (see above). No code change needed; deploy fixes the live site.
 - [ ] **Heatmap: remove first touches** — kickoff dead-centre already excluded (`760f8ed`);
       extend to all kickoff first-touches if that's the intent.
 - [ ] **Per-match touches = spot icons, not heatmap** — in the per-match view, render
