@@ -573,7 +573,7 @@ def build_dashboard(store, *, primary_id: str | None = None,
                 MetricLine("Avg saves",   f"{recent_sv:.2f}", ""),
             ])
 
-        # ---- best teammates (min 2 shared matches) ----
+        # ---- best teammates (>5 games together — meaningful sample, not one-offs) ----
         if primary_id and primary_id != "Unknown|0|0":
             tm_rows = con.execute("""
                 SELECT mps_t.name AS name,
@@ -586,7 +586,7 @@ def build_dashboard(store, *, primary_id: str | None = None,
                                               AND NOT (mps_t.primary_id = mps_me.primary_id AND mps_t.name = mps_me.name)
                 WHERE mps_me.primary_id = ?
                 GROUP BY mps_t.name
-                HAVING n >= 2
+                HAVING n > 5
                 ORDER BY (w * 1.0 / n) DESC, n DESC
                 LIMIT 10
             """, (primary_id,)).fetchall()
@@ -596,7 +596,7 @@ def build_dashboard(store, *, primary_id: str | None = None,
                     f"win% {(r['w'] / r['n']) * 100:.0f} over {r['n']} matches",
                 ))
 
-            # ---- toughest opponents ----
+            # ---- toughest opponents (>5 games faced — meaningful rivals only) ----
             opp_rows = con.execute("""
                 SELECT mps_o.name AS name,
                        COUNT(*) AS n,
@@ -607,7 +607,7 @@ def build_dashboard(store, *, primary_id: str | None = None,
                                               AND mps_o.team_num != mps_me.team_num
                 WHERE mps_me.primary_id = ?
                 GROUP BY mps_o.name
-                HAVING n >= 2
+                HAVING n > 5
                 ORDER BY (w * 1.0 / n) ASC, n DESC
                 LIMIT 10
             """, (primary_id,)).fetchall()
