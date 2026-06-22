@@ -1786,6 +1786,34 @@ def _match_history_html(store, primary_id: str | None, name: str | None, *,
     """
 
 
+# Canonical per-player stat columns, score-first to match the Discord embed
+# (bot.py _SB_HEADER). Single source of truth for stat-table column ORDER so the
+# web tables can't drift apart. Tables may append context-specific extras
+# (Touches on the match roster, MVP). Keys map to row/dict fields.
+STAT_COLUMNS = [
+    ("score",   "Score"),
+    ("goals",   "Goals"),
+    ("assists", "Assists"),
+    ("saves",   "Saves"),
+    ("shots",   "Shots"),
+    ("demos",   "Demos"),
+]
+
+
+def _stat_cols_th() -> str:
+    """Header cells for the canonical stat block (see STAT_COLUMNS)."""
+    return "".join(f'<th class="num">{h}</th>' for _, h in STAT_COLUMNS)
+
+
+def _stat_cols_td(r) -> str:
+    """Body cells for the canonical stat block, pulling each key off a row/dict."""
+    keys = r.keys() if hasattr(r, "keys") else r
+    return "".join(
+        f'<td class="num tnum">{(r[k] if k in keys else 0) or 0}</td>'
+        for k, _ in STAT_COLUMNS
+    )
+
+
 def _players_directory_html(store, self_primary_id: str | None = None,
                             include_bots: bool = True,
                             mode_filter: int | None = None,
@@ -1817,14 +1845,17 @@ def _players_directory_html(store, self_primary_id: str | None = None,
     inner_where = (" WHERE " + " AND ".join(inner_clauses)) if inner_clauses else ""
 
     sql = f"""
-        SELECT name, primary_id, n, goals, saves, assists, wins, max_bot AS is_bot,
-               platform, was_teammate, was_opponent
+        SELECT name, primary_id, n, goals, saves, assists, shots, demos, score,
+               wins, max_bot AS is_bot, platform, was_teammate, was_opponent
         FROM (
             SELECT mps.name, mps.primary_id,
                    COUNT(*) AS n,
                    SUM(mps.goals)   AS goals,
                    SUM(mps.saves)   AS saves,
                    SUM(mps.assists) AS assists,
+                   SUM(mps.shots)   AS shots,
+                   SUM(mps.demos)   AS demos,
+                   SUM(mps.score)   AS score,
                    SUM(CASE WHEN mps.team_num = m.winner_team_num THEN 1 ELSE 0 END) AS wins,
                    MAX(mps.is_bot)  AS max_bot,
                    MIN(mps.platform) AS platform,
@@ -1881,9 +1912,7 @@ def _players_directory_html(store, self_primary_id: str | None = None,
             <td class="dim">{kind_str}</td>
             <td class="num tnum">{r["n"]}</td>
             <td class="num tnum"><b>{wins}</b><span class="dim">-{r["n"] - wins}</span> <span class="dim">({winpct:.0f}%)</span></td>
-            <td class="num tnum">{r["goals"] or 0}</td>
-            <td class="num tnum">{r["assists"] or 0}</td>
-            <td class="num tnum">{r["saves"] or 0}</td>
+            {_stat_cols_td(r)}
           </tr>
         """
 
@@ -1936,7 +1965,7 @@ def _players_directory_html(store, self_primary_id: str | None = None,
           <thead><tr>
             <th>Player</th><th>Platform</th><th>Relation</th>
             <th class="num">Matches</th><th class="num">W-L</th>
-            <th class="num">Goals</th><th class="num">Assists</th><th class="num">Saves</th>
+            {_stat_cols_th()}
           </tr></thead>
           <tbody>
             {"".join(_row(r) for r in rows)}
