@@ -1948,27 +1948,18 @@ def _players_directory_html(store, self_primary_id: str | None = None,
           </tr>
         """
 
-    # Relation filter: teammates only / opponents only / both. Filter the
-    # query result client-side since the SQL already returns was_teammate
-    # and was_opponent flags.
-    if relation == "teammates":
-        rows = [r for r in rows if r["was_teammate"]]
-    elif relation == "opponents":
-        rows = [r for r in rows if r["was_opponent"]]
-
+    # No owner-relative "relation" filter — this is a neutral all-friends
+    # leaderboard, not a teammates/opponents-of-Chum view.
     def _params_with(override: dict) -> str:
         parts = []
-        for k, v in [("sort", sort), ("relation", relation)]:
+        for k, v in [("sort", sort)]:
             actual = override.get(k, v)
-            if actual and actual != ("frequency" if k == "sort" else "all"):
+            if actual and actual != "frequency":
                 parts.append(f"{k}={actual}")
         return "?" + "&".join(parts) if parts else ""
     def sort_chip(label: str, s: str) -> str:
         active = " active" if sort == s else ""
         return f'<a class="{active.strip()}" href="/players{_params_with({"sort": s})}">{label}</a>'
-    def relation_chip(label: str, r: str) -> str:
-        active = " active" if relation == r else ""
-        return f'<a class="{active.strip()}" href="/players{_params_with({"relation": r})}">{label}</a>'
     sort_toolbar = f"""
       <div class="toolbar" style="margin: 12px 0 16px">
         <div class="seg" title="Sort players">
@@ -1977,11 +1968,6 @@ def _players_directory_html(store, self_primary_id: str | None = None,
           {sort_chip("Platform", "platform")}
           {sort_chip("Goals",  "goals")}
           {sort_chip("Wins",   "wins")}
-        </div>
-        <div class="seg" title="Filter by relationship">
-          {relation_chip("Everyone", "all")}
-          {relation_chip("Teammates", "teammates")}
-          {relation_chip("Opponents", "opponents")}
         </div>
         <div style="margin-left:auto;font-size:12px;color:var(--text-dim)">
           {len(rows)} player{'s' if len(rows) != 1 else ''}
