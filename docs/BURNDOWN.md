@@ -55,7 +55,7 @@ also includes **auditing every page's datasets for gaps each pass** and **re-scr
 to verify** (Playwright works; `.venv/Scripts/python` + chromium installed). Do these BEFORE
 the older C/D/E below (E is subsumed by the reframe item).
 
-- [ ] **Kill all "Me"/owner framing** — remove the "Me" nav item; brand → `/` (splash);
+- [x] **Kill all "Me"/owner framing** — DONE (core). Removed "Me" nav; brand -> splash; /dashboard redirects to /; neutralized copy (Your insights/goals, you've faced, Your line, vs your average). Full /dashboard code removal can follow later.
       repurpose/remove the `/dashboard` "Career dashboard"; neutralize copy across pages:
       "Every player you've faced" → "Every player faced", "YOUR GOALS / THEIR GOALS" →
       "Goals For / Against", analytics.py "Your line / Your insights" → neutral; drop the
