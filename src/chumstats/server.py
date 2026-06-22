@@ -4333,90 +4333,43 @@ def _kickoff_card_html(playback: dict, players, viewer_pid: str | None,
     touch after match start, or the first touch after a goal. We classify the
     kickoff winner as whichever team touched first."""
     ball = playback.get("ball_track") or []
-    if not ball:
-        return ""
-    # Sort goals from playback events
-    events = playback.get("events") or []
-    goal_times = sorted([e.get("t", 0) for e in events if e.get("kind") == "goal"])
-    # Kickoff windows: (t_start, t_end) - up to 7 seconds after each (re)start
-    starts = [0.0] + [gt + 0.5 for gt in goal_times]  # +0.5s grace after a goal
-    KICKOFF_WINDOW = 7.0
-    kickoffs: list[dict] = []
-    for s in starts:
-        # First touch within the kickoff window
-        first = None
-        for bh in ball:
-            t = bh.get("t", 0)
-            if t < s:
-                continue
-            if t > s + KICKOFF_WINDOW:
-                break
-            first = bh
-            break
-        if first is None:
-            continue
-        kickoffs.append({
-            "start": s,
-            "first_touch_t": first.get("t", 0),
-            "delta": first.get("t", 0) - s,
-            "player": first.get("player"),
-            "team": first.get("team"),
-        })
+    # Kickoffs are sequence-tagged (is_kickoff = the first touch after the match
+    # start and after each goal), so detection works even when uploaded-match
+    # timestamps collapse to one value — the old time-window approach found
+    # nothing then and rendered an empty card.
+    kickoffs = [bh for bh in ball if bh.get("is_kickoff")]
     if not kickoffs:
         return ""
-    # Viewer's team
-    me_row = next(
-        (p for p in players if (viewer_pid and p["primary_id"] == viewer_pid)
-                              or (viewer_name and p["name"] == viewer_name)),
-        None,
-    )
-    me_team = me_row["team_num"] if me_row else None
+    # Neutral Blue-vs-Orange framing (no viewer "you" / "my wins").
     total = len(kickoffs)
-    t0_wins = sum(1 for k in kickoffs if k["team"] == 0)
-    t1_wins = sum(1 for k in kickoffs if k["team"] == 1)
-    avg_delta = sum(k["delta"] for k in kickoffs) / max(1, total)
-    # Per-kickoff rows
+    t0_wins = sum(1 for k in kickoffs if k.get("team") == 0)
+    t1_wins = sum(1 for k in kickoffs if k.get("team") == 1)
     row_html = []
     for i, k in enumerate(kickoffs):
-        delta = f"{k['delta']:.2f}s"
-        team_cls = "team-blue" if k["team"] == 0 else "team-orng" if k["team"] == 1 else ""
-        you_mark = (' <span class="you-marker" style="margin-left:6px">YOU</span>'
-                    if me_team is not None and k["team"] == me_team else '')
-        kind = "Opening" if i == 0 else "Restart"
-        row_html.append(f"""
-          <tr class="row">
-            <td class="dim">{kind}</td>
-            <td class="num tnum">{int(k['start'] // 60)}:{int(k['start'] % 60):02d}</td>
-            <td class="num tnum"><b>{delta}</b></td>
-            <td class="{team_cls}"><b>{html.escape(k['player'] or '?')}</b>{you_mark}</td>
-          </tr>
-        """)
-    my_wins = (t0_wins if me_team == 0 else t1_wins if me_team == 1 else 0)
-    my_losses = total - my_wins
-    record_line = (
-        f'<b class="tnum">{my_wins}-{my_losses}</b> '
-        f'<span class="dim">({my_wins / max(1, total) * 100:.0f}% kickoff win rate)</span>'
-        if me_team is not None
-        else f'<b class="tnum">{t0_wins}-{t1_wins}</b> <span class="dim">(blue-orange)</span>'
-    )
+        team_cls = "team-blue" if k.get("team") == 0 else "team-orng" if k.get("team") == 1 else ""
+        kind = "Opening" if i == 0 else f"Restart {i}"
+        row_html.append(
+            f'<tr class="row"><td class="dim">{kind}</td>'
+            f'<td class="{team_cls}"><b>{html.escape(k.get("player") or "?")}</b></td></tr>'
+        )
     return f"""
-      <div class="card kickoff-card" style="margin-top:14px">
+      <div class="card kickoff-card" style="margin-top:0">
         <div class="section-title">
           <span>Kickoffs</span>
           <span class="dim" style="text-transform:none;letter-spacing:0">
-            {total} kickoff{'s' if total != 1 else ''} this match
-            &middot; avg first touch {avg_delta:.2f}s after start
+            Who won each kickoff (first touch) &middot; {total} this match
           </span>
         </div>
         <div class="kickoff-summary">
-          {record_line}
+          <b class="tnum team-blue">{t0_wins}</b> <span class="dim">Blue</span>
+          &nbsp;&middot;&nbsp;
+          <b class="tnum team-orng">{t1_wins}</b> <span class="dim">Orange</span>
+          <span class="dim">&mdash; kickoffs won</span>
         </div>
         <table class="history" style="margin-top:8px">
           <thead><tr>
-            <th>Type</th>
-            <th class="num">Match time</th>
-            <th class="num">Time to first touch</th>
-            <th>First touch</th>
+            <th>Kickoff</th>
+            <th>Won by (first touch)</th>
           </tr></thead>
           <tbody>{"".join(row_html)}</tbody>
         </table>
