@@ -65,6 +65,9 @@ compare). Loop now cycles back for deeper polish + continues the no-Chum sweep.
   loop run (assert 0==2): the `all_captures` fixture returned [] when the gitignored RL captures
   are absent, so it ran on empty data instead of skipping. Made it `pytest.skip` like its
   siblings. Suite now 17 passed / 15 skipped / 0 failed — no more false-failure noise each fire.
+- **Club detail (/club/<name>)** — reviewed for the first time; already a clean box score
+  (record/matches/roster tiles + a "Their roster" table). Added a leaderboard rank (#) column for
+  consistency. Owner-relative "RECORD VS THEM" framing remains (club-subject-param follow-up).
 
 ### Still to repass (ESPN pass, top-down)
 - [x] **Match · "Us vs them" → "Team comparison"** — DONE. Forced neutral Blue-vs-Orange always; nav chip "Teams"; also dropped the owner-perspective "vs your career" insights card. 0 us/them/your-career leaks live.
