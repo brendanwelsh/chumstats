@@ -7740,6 +7740,11 @@ td.rank, th.rank { color: var(--text-faint); font-weight: 600;
    row doesn't have a dead gap between the score and the stat columns. */
 .history .score-cell { width: 168px; }
 .history .arena-cell { color: var(--text-faint); white-space: nowrap; font-size: 12.5px; }
+/* Player-profile quick nav to subject-parameterized pages. */
+.profile-links { display: flex; gap: 6px; margin: 4px 0 12px; flex-wrap: wrap; }
+.profile-links a { font-size: 12px; font-weight: 600; padding: 4px 12px; border-radius: 999px;
+  border: 1px solid var(--accent-line); color: var(--text); text-decoration: none; }
+.profile-links a:hover { background: var(--card); }
 
 /* Per-player SPA: scrollable tab strip + one visible panel (replaces the
    tall stack of collapsible cards). */
@@ -9854,11 +9859,23 @@ def _dashboard_html(d, store=None, primary_id: str | None = None,
     # Subtitle only when it adds info — otherwise it's just the name twice.
     who_html = (f'<div class="who">{html.escape(d.player_label)}</div>'
                 if d.player_label and d.player_label != page_title else "")
+    # Quick nav to this player's (subject-parameterized) neutral pages, so any
+    # player's matches/opponents/comparison are reachable — not just the owner's.
+    _subjq = (f"?pid={quote(primary_id, safe='')}" if primary_id
+              else (f"?name={quote(name, safe='')}" if name else ""))
+    profile_links = (
+        f'<div class="profile-links">'
+        f'<a href="/history{_subjq}">Matches</a>'
+        f'<a href="/opponents{_subjq}">Opponents</a>'
+        f'<a href="/compare?names={quote(name or "", safe="")}">Compare</a>'
+        f'</div>'
+    ) if (primary_id or name) else ""
     body = f"""
   <div class="profile-header">
     <h1>{html.escape(page_title)} {bot_badge}</h1>
   </div>
   {who_html}
+  {profile_links}
   {filter_html}
   {kpis}
   {form_section}
