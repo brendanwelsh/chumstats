@@ -2799,6 +2799,11 @@ def _build_playback_data(store, match_id: str, started_at: float,
         "Assist":        ("assist",     "Assist"),
     }
 
+    # A kickoff first-touch is the first (non-replay) BallHit after the match
+    # opens and after every goal. Tag those so heatmaps/spot-maps can drop them
+    # — they always land at dead-centre and otherwise dominate the picture.
+    kickoff_pending = True
+
     for r in rows:
         t = max(0.0, r["received_at"] - started_at)
         try:
@@ -2825,6 +2830,8 @@ def _build_playback_data(store, match_id: str, started_at: float,
             esy = round(sy - z_lift, 1)
             players_arr = d.get("Players") or []
             who = players_arr[0] if players_arr else {}
+            is_kickoff = kickoff_pending
+            kickoff_pending = False
             ball_track.append({
                 "t": round(t, 2),
                 "x": round(x, 0), "y": round(y, 0), "z": round(z, 0),
@@ -2834,6 +2841,7 @@ def _build_playback_data(store, match_id: str, started_at: float,
                 "player": who.get("Name") or "",
                 "team": who.get("TeamNum") if who.get("TeamNum") in (0, 1) else None,
                 "speed": round(float(ball.get("PostHitSpeed") or 0), 0),
+                "is_kickoff": is_kickoff,
             })
 
         elif e == "GoalScored":
@@ -2841,6 +2849,8 @@ def _build_playback_data(store, match_id: str, started_at: float,
             name = scorer.get("Name") or ""
             if not name:
                 continue  # duplicate envelope after the real goal
+            # Play restarts with a kickoff after every goal.
+            kickoff_pending = True
             team = scorer.get("TeamNum")
             assister = (d.get("Assister") or {}).get("Name") or ""
             imp = d.get("ImpactLocation") or {}
@@ -3982,6 +3992,10 @@ def _ball_heatmap_svg(playback: dict, player_filter: str | None = None,
     ball = playback.get("ball_track") or []
     if player_filter:
         ball = [bh for bh in ball if bh["player"] == player_filter]
+    # Drop kickoff first-touches. Per-match tracks are sequence-tagged
+    # (is_kickoff) so we drop them precisely; the lifetime aggregate has no
+    # sequence, so it falls back to the dead-centre box below.
+    ball = [bh for bh in ball if not bh.get("is_kickoff")]
     if exclude_center:
         R = _KICKOFF_CENTER_UU
         ball = [bh for bh in ball
