@@ -63,9 +63,9 @@ the older C/D/E below (E is subsumed by the reframe item).
       compact top horizontal bar (ballchasing-style) — no left column, so the overlap is
       eliminated by construction. Removed the redundant inline mode/bots toolbars on
       history + opponents (now in the bar). Verified live across pages.
-- [x] **Black-screen flash on navigation** — DONE. Theme was applied at end-of-body (paint dark, then switch). Now set `data-theme` in a tiny `<head>` script before first paint + `color-scheme` meta. No more flash.
-      `<meta name="color-scheme" content="dark light">`, set html bg immediately, remove any
-      bg transition that flashes.
+- [x] **Black-screen flash on navigation** — DONE. Theme was applied at end-of-body (paint
+      dark, then switch). Now `data-theme` is set in a tiny `<head>` script before first paint
+      + a `color-scheme` meta. No more flash.
 - [x] **Scrollable 6-player selector** — DONE. Match detail per-player breakdown is now a
       scrollable tab selector + one visible panel (SPA, JS toggle, no reload); top-nav chips
       drive it. Collapsible `<details>` removed.
