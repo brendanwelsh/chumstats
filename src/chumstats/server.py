@@ -355,16 +355,18 @@ def make_app(broadcaster: Broadcaster, *, store=None,
 
     @_gated_get("/history")
     async def history_page(include_bots: int = 0, mode: int | None = None,
-                            sort: str = "recent"):
+                            window: str | None = None, sort: str = "recent"):
         if store is None:
             return HTMLResponse("<p>No DB configured</p>")
         mode_filter = mode if mode in (1, 2, 3, 4) else None
+        window_days = {"today": 1, "7d": 7, "30d": 30}.get(window or "", None)
         if sort not in ("recent", "score", "goals", "saves", "best"):
             sort = "recent"
         return HTMLResponse(_history_page_html(
             store, self_primary_id, self_name,
             include_bots=bool(include_bots),
             mode_filter=mode_filter,
+            window_days=window_days,
             sort=sort,
         ))
 
@@ -1599,7 +1601,8 @@ def _kpi_tiles_from_dashboard(d) -> str:
 def _match_history_rows(store, primary_id: str | None, name: str | None,
                         *, limit: int = 50,
                         include_bots: bool = True,
-                        mode_filter: int | None = None):
+                        mode_filter: int | None = None,
+                        window_days: int | None = None):
     """Shared query for recent matches. Returns sqlite Row objects.
 
     `team_size` is derived as max(team0_count, team1_count) so it reflects the
@@ -1631,6 +1634,10 @@ def _match_history_rows(store, primary_id: str | None, name: str | None,
     if mode_filter is not None:
         where_clauses.append(f"{team_size_sql} = ?")
         args.append(mode_filter)
+    if window_days and window_days > 0:
+        import time as _time
+        where_clauses.append("m.started_at >= ?")
+        args.append(_time.time() - window_days * 86400)
     where_sql = " AND ".join(where_clauses)
     # Per-match team touches (used for possession indicator in history row)
     t0_touches_sql = """(
@@ -1992,10 +1999,12 @@ def _not_found_html(name: str) -> str:
 def _history_page_html(store, primary_id, name, *,
                        include_bots=True,
                        mode_filter: int | None = None,
+                       window_days: int | None = None,
                        sort: str = "recent") -> str:
     rows = _match_history_rows(
         store, primary_id, name, limit=2000,
         include_bots=include_bots, mode_filter=mode_filter,
+        window_days=window_days,
     )
     # Sort options. "recent" is the source order (already DESC by started_at).
     if sort == "score":
