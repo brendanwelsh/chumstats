@@ -280,7 +280,7 @@ Real walkthrough; convergence was premature. Work top-down, test, commit, deploy
 
 ### Filters (HIGH)
 - [x] **Filters APPLY + persist across page nav** — DONE. Root cause: stored-filter redirect was gated by a session-wide flag (fired once/session). Now nav links carry the filters + a self-guarding per-load fallback redirect. Verified: /history all=383, ?mode=2=166; Matches nav from /players?mode=2 → /history?mode=2.
-- [ ] **Platform (opponent) filter doesn't actually filter** — verify + fix everywhere it's shown.
+- [x] **Platform filter** — DONE. /history opponent-platform applies (383→227 PS4); the DIRECTORY was using the opponent-platform EXISTS (Steam matched ~all: 937→922) → fixed to the player's OWN platform (Steam 44/Epic 186/PS4 384/Xbox 300/Switch 23 = 937) + relabeled 'Platform'.
 - [ ] **Top filter bar is 2 lines on /history** — make it 1 row / cleaner / balanced.
 
 ### Matches / history (HIGH)
