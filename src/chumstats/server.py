@@ -6057,9 +6057,9 @@ def _clan_page_html(store, members: list[str], *, self_name: str | None = None,
         rivals_html = f"""
           <div class="card" style="margin-top:14px;padding:0;overflow:hidden">
             <div class="section-title" style="padding:14px 18px 6px">
-              <span>Rivalries{' &mdash; <b style="color:var(--accent)">' + html.escape(our_team_name) + '</b> vs.' if our_team_name else ''}</span>
+              <span>Rivalries</span>
               <span class="dim" style="text-transform:none;letter-spacing:0">
-                Other named clubs we've matched up against.
+                Other named clubs matched up against.
               </span>
             </div>
             <table class="history">
