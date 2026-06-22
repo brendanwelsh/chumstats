@@ -56,11 +56,12 @@ ssh welsh-macmini 'cd ~/ballshark && git fetch origin rebrand-chumstats \
 - [x] **Per-match touches = spot icons, not heatmap** — DONE. `_touch_spots_svg`
       renders one `.tspot` marker per touch (kickoff dropped) for the per-match roster
       mini-map; lifetime/career keeps the density heatmap.
-- [ ] **Demo-location map** — investigate whether demo events carry x/y location in the
-      captured data; if yes, add a demo map alongside the goal/shot maps.
-- [ ] **Spatial-data gap analysis** — enumerate captured location data (ball + player
-      positions, goals, shots, touches, demos); list what maps we *could* add and what's
-      missing; write findings into this file.
+- [x] **Demo-location map** — INVESTIGATED → **NOT POSSIBLE**. The `Demolish`
+      `StatfeedEvent` payload is only `{EventName, Type, MainTarget, SecondaryTarget}`
+      (attacker/victim names) — **no X/Y/Z**. Same for every StatfeedEvent (Save,
+      Assist, EpicSave, Shot). RL's Stats API doesn't emit positions for these, so a
+      demo map can't be built from captured data.
+- [x] **Spatial-data gap analysis** — DONE (see "## Spatial data" below).
 - [ ] **Arena names: unverified ids** — give real names to `uf_*`, `mall_*`, `paname_*`,
       `stadium_10a_p`, `neotokyo_arcade_p` (currently title-case fallback). Needs a source.
 - [ ] **A — persist game length** — add `regulation_seconds`/`overtime_seconds` (+ statfeed)
@@ -73,6 +74,31 @@ ssh welsh-macmini 'cd ~/ballshark && git fetch origin rebrand-chumstats \
 ## Housekeeping
 
 - [x] Push `rebrand-chumstats`; delete stale `origin/fix/local-portal-scope`. (done)
+
+---
+
+## Spatial data — what carries location, what's mappable
+
+Captured `raw_events` types: BallHit, GoalScored, CrossbarHit, UpdateState (ticks),
+StatfeedEvent, + lifecycle.
+
+**Has location (X/Y):**
+- `BallHit` → `Ball.Location` — **MAPPED** (touch heatmap + per-match spot map).
+- `GoalScored` → `ImpactLocation` — **MAPPED** (goal map).
+- `CrossbarHit` → `BallLocation` — available, **not mapped** (could add a crossbar map; minor).
+- `UpdateState` ticks → `Game.Cars[].Location` (every player) + `Ball.Location` —
+  available but tick-heavy and **pruned after ~14 days** (recent matches only). Could
+  power a true player-positioning heatmap / ball-possession-zone map (bigger feature).
+
+**No location (names only) → cannot be mapped:**
+- `StatfeedEvent` (Demolish, Save, EpicSave, Assist, Shot, …) — attacker/victim names
+  only. So **demo / save / assist location maps are impossible** from this data. (Shot
+  *origin* is approximated via the pre-goal BallHit, not the Shot statfeed.)
+
+**Optional net-new maps (need user OK — not auto-built by the loop):**
+1. Crossbar-hit map — trivial; location already captured.
+2. Player-positioning heatmap from `UpdateState` car positions — higher value, but
+   tick-dependent (recent matches only) + heavier to compute/render.
 
 ---
 
