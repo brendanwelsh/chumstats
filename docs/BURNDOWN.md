@@ -70,7 +70,10 @@ ssh welsh-macmini 'cd ~/ballshark && git fetch origin rebrand-chumstats \
 - [x] **A — persist game length** — DONE. Added `regulation_seconds`/`overtime_seconds`
       columns + additive migration; persisted in `save_match` + upload path + sync payload.
       (Statfeed stays recoverable from kept raw_events — no column needed.) Migrates on deploy.
-- [ ] **B — identity PK migration** — `match_player_stats` PK → `(match_id, primary_id, team_num)` + migration.
+- [x] **B — identity PK migration** — DONE. `match_player_stats` re-keyed to
+      `(match_id, primary_id, team_num)` via drift-proof rebuild (swap PK clause in live
+      DDL, INSERT OR IGNORE). Idempotent; runs on startup. Tested: data preserved,
+      same-name/diff-pid rows coexist, re-init no-ops. (Schema migration — runs on deploy.)
 - [ ] **C — stat-line consistency** — one shared score-first `STAT_COLUMNS` across all web tables.
 - [ ] **D — filter consistency** — add `platform` filter to opponents/compare/clan/club; `window` to history.
 - [ ] **E — multi-user reframe** — neutralize "Your line / Your insights" labels; make `/history` subject-parameterized (`?pid=`).
