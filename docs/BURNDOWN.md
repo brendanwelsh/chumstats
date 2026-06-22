@@ -320,8 +320,8 @@ Real walkthrough; convergence was premature. Work top-down, test, commit, deploy
 
 ## ⚡⚡⚡ User feedback batch #2 (2026-06-22 pm) — rapid walkthrough
 - [x] Splash: only players with >20 matches in "Jump to a player"; tagline → "for Chum and his friends".
-- [ ] **OWNER-LENS: "with / vs" is still framed around me.** Audit EVERY stat/section "is this from MY lens?". Remove the directory with/vs column (+ relation filter is owner-relative too).
-- [ ] **Platform LOGOS in the UI.** Directory platform column → logo (not text); platform filter icons smaller + more padding; all icon boxes the SAME square shape; same shape in the column.
+- [x] **OWNER-LENS with/vs column REMOVED** from the directory (the lens-of-me leak). Relation FILTER kept (opt-in; flag: still owner-relative). STILL TODO: audit remaining sections for owner-lens.
+- [x] **Platform column → icons (not text)** in square boxes; filter icons shrunk to 15px in 30px square boxes (more padding). NOTE: icons are the app's abstract concept-drawings, not brand logos — recognizable-logo redesign is a separate optional task.
 - [ ] **"Time near-empty %" looks broken** (0.2/0.0/0.0/8%) — investigate; any stat like that is invalid.
 - [ ] **Compare: replace "Pro tier" column with the FIELD AVERAGE** (avg of everyone, by the active sort) as the far-right column.
 - [ ] **Clubs: "Club record 179-169 / 51% / 348 matches" shouldn't be one tile** — split/restructure.
