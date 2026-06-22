@@ -3300,7 +3300,7 @@ def _match_compare_html(players, viewer_pid, viewer_name,
     if total:
         def share(pl):
             return " ".join(
-                f'<span class="cmp-pp">{html.escape((p["name"] or "")[:12])} '
+                f'<span class="cmp-pp">{html.escape(p["name"] or "")} '
                 f'{round((p["touches"] or 0) / total * 100)}%</span>'
                 for p in sorted(pl, key=lambda p: -(p["touches"] or 0))
             )
