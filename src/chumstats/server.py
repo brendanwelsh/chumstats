@@ -2463,15 +2463,17 @@ def _match_detail_html(store, match_id: str, viewer_pid: str | None, viewer_name
             bpm = (p["boost_used"] or 0) / (duration / 60.0)
             bpm_tile = f'<li><b>{bpm:.0f}</b> <span>BPM</span></li>'
 
-        # Mini touch heatmap (only rendered when this player has touches).
+        # Mini touch-spot map (only rendered when this player has touches).
+        # Per-match shows discrete spots, not a density heatmap — a handful of
+        # touches in one game reads truer as markers than as a blurred field.
         mini_heatmap = ""
         if my_touches:
-            # Slug the player name so the gradient ids stay unique per SVG.
+            # Slug the player name so any per-SVG ids stay unique.
             name_slug = "".join(ch if ch.isalnum() else "_" for ch in p["name"])
             # Per-match mini: keep the literal pitch orientation (matches the
             # playback above) since the player is on one team this match.
-            hm = _ball_heatmap_svg(playback_data, player_filter=p["name"],
-                                   compact=True, key=name_slug, orient=False)
+            hm = _touch_spots_svg(playback_data, player_filter=p["name"],
+                                  compact=True, key=name_slug, orient=False)
             mini_heatmap = (
                 f'<div class="rc-adv-section">'
                 f'<div class="rc-adv-title">Where they touched the ball '
@@ -4013,6 +4015,54 @@ def _ball_heatmap_svg(playback: dict, player_filter: str | None = None,
             for bh in ball
         ]
     return _heat_pitch_svg(ball, svg, compact, key)
+
+
+def _touch_spots_svg(playback: dict, player_filter: str | None = None,
+                     compact: bool = True, key: str = "", orient: bool = False) -> str:
+    """Per-match touch *spot* map: one marker per ball touch on a pitch, with
+    kickoff first-touches dropped. A density heatmap is misleading on a single
+    match's handful of touches — discrete spots show exactly where contact
+    happened (and overlap naturally darkens busy areas). Lifetime/career views
+    still use the density heatmap (`_ball_heatmap_svg`)."""
+    ball = playback.get("ball_track") or []
+    if player_filter:
+        ball = [bh for bh in ball if bh["player"] == player_filter]
+    ball = [bh for bh in ball if not bh.get("is_kickoff")]
+    if not ball:
+        return ""
+    svg = playback["svg"]
+    vb_w, vb_h = svg["vb_w"], svg["vb_h"]
+    pad_x, pad_y = svg["pad_x"], svg["pad_y"]
+    pitch_w, pitch_h = svg["pitch_w"], svg["pitch_h"]
+    if orient:
+        cx = pad_x + pitch_w / 2
+        cy = pad_y + pitch_h / 2
+        ball = [
+            ({**bh, "sx": 2 * cx - bh["sx"], "sy": 2 * cy - bh["sy"]}
+             if bh.get("team") == 1 else bh)
+            for bh in ball
+        ]
+    r = 3.2 if compact else 4.5
+    dots = "".join(
+        f'<circle class="tspot" cx="{bh["sx"]:.1f}" cy="{bh["sy"]:.1f}" r="{r}"/>'
+        for bh in ball
+    )
+    pitch_cls = "hm-pitch hm-pitch-compact" if compact else "hm-pitch"
+    return (
+        f'<svg viewBox="0 0 {vb_w} {vb_h}" class="{pitch_cls}" '
+        f'xmlns="http://www.w3.org/2000/svg">'
+        f'<rect class="pb-field" x="{pad_x:.1f}" y="{pad_y:.1f}" '
+        f'width="{pitch_w}" height="{pitch_h}" />'
+        f'<line class="pb-midline" x1="{vb_w/2:.1f}" y1="{pad_y:.1f}" '
+        f'x2="{vb_w/2:.1f}" y2="{pad_y + pitch_h:.1f}" />'
+        f'<circle class="pb-midcircle" cx="{vb_w/2:.1f}" cy="{vb_h/2:.1f}" r="48" fill="none" />'
+        f'<rect class="pb-net pb-net-blue" x="{pad_x - 10:.1f}" '
+        f'y="{pad_y + pitch_h/2 - 60:.1f}" width="10" height="120" />'
+        f'<rect class="pb-net pb-net-orng" x="{pad_x + pitch_w:.1f}" '
+        f'y="{pad_y + pitch_h/2 - 60:.1f}" width="10" height="120" />'
+        f'<g class="tspots">{dots}</g>'
+        f'</svg>'
+    )
 
 
 def _heat_pitch_svg(ball: list, svg: dict, compact: bool, key: str,
@@ -8696,6 +8746,9 @@ table.history th .rl-icon,
   height: auto;
   display: block;
 }
+/* Per-match touch spots: one marker per touch (overlap darkens, so density
+   still reads) — clearer than a density heatmap on a single match's ~40 touches. */
+.tspot { fill: var(--accent); fill-opacity: 0.5; stroke: var(--bg-elev); stroke-width: 0.6; }
 .hm-layer { mix-blend-mode: screen; }
 [data-theme="light"] .hm-layer { mix-blend-mode: multiply; }
 .hm-legend {
