@@ -2,12 +2,29 @@
 
 ## How the loop works (read this every fire)
 
-Loop: `/loop 15min "complete all the burndown"` (cron job `0d3a0624`).
-Each fire: read this file, pick the next unchecked **[code]** item top-down,
-implement + test (`.venv/Scripts/python -m pytest -q`), commit, check it off here
-(commit that too), repeat. **Do NOT auto-run items marked [BLOCKED — needs user OK].**
-When all `[code]` items are done: push the branch, delete stale
-`origin/fix/local-portal-scope`, then notify the user and `CronDelete 0d3a0624`.
+**ACTIVE LOOP: `*/10 * * * *` ESPN scoreboard redesign (cron `344e94cc`).** Supersedes the
+old 15-min burndown (`0d3a0624`, deleted — all finite items done). Each fire: pick ONE page
+(rotate: match → player profile → players dir → results/history → opponents → clubs → compare)
+and make it read like an **ESPN box score / ballchasing.gg** — full-width team-grouped tables,
+stats in columns spanning the page (NOT split cramped panels / inline word-soup), team-vs-team
+side-by-side, scoreboard readability, balanced. Test, commit (no AI trailer), deploy to
+chumstats.com, screenshot to verify, log below. Also keep the 4-point validation sweep. Never
+finishes — keep iterating balance changes.
+
+## ESPN redesign log
+- **Match · Players pane** — replaced cramped one-player-at-a-time panels (combat/activity/
+  highlight word-soup) with full-width team-grouped box-score tables: *Involvement & positioning*
+  (touches/share/thirds/demos/bars/goal%) + *Boost & movement* (BPM/boost/empty/full/spd/SS/
+  ground/air/wall, "—" when no spectator coverage) + a touch-map grid. Verified live.
+- **Match · structure** — nav chips now SWAP panes (overview/timeline/goalmap/us-vs-them/kickoff/
+  players) instead of anchor-scroll; rosters side-by-side; all "YOU" framing removed; arenas
+  normalized in the career per-arena breakdown.
+
+### Still to repass (ESPN pass, top-down)
+- [ ] **Match · "Us vs them" → neutral "Blue vs Orange"** (owner-perspective label remains).
+- [ ] **Player profile** — radar chart is weak; make the career stats a clean box score; the
+      `Blazed / Blazed` double-name + tiny win% sub-label need tightening.
+- [ ] **Players directory / opponents / clubs / compare / results** — same box-score treatment.
 
 ---
 
