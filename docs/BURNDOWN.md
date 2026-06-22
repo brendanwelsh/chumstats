@@ -322,7 +322,7 @@ Real walkthrough; convergence was premature. Work top-down, test, commit, deploy
 - [x] Splash: only players with >20 matches in "Jump to a player"; tagline → "for Chum and his friends".
 - [x] **OWNER-LENS with/vs column REMOVED** from the directory (the lens-of-me leak). Relation FILTER kept (opt-in; flag: still owner-relative). STILL TODO: audit remaining sections for owner-lens.
 - [x] **Platform column → icons (not text)** in square boxes; filter icons shrunk to 15px in 30px square boxes (more padding). NOTE: icons are the app's abstract concept-drawings, not brand logos — recognizable-logo redesign is a separate optional task.
-- [ ] **"Time near-empty %" looks broken** (0.2/0.0/0.0/8%) — investigate; any stat like that is invalid.
+- [x] **"Time near-empty %" — REMOVED** (was invalid: boost<=1 ~never fires → 0% for everyone). Gone from Compare, profile, match box-score; ingest threshold fixed to <=12 for future data.
 - [ ] **Compare: replace "Pro tier" column with the FIELD AVERAGE** (avg of everyone, by the active sort) as the far-right column.
 - [ ] **Clubs: "Club record 179-169 / 51% / 348 matches" shouldn't be one tile** — split/restructure.
 - [ ] **Club heatmap is useless** — make it "where we score from" (shot heatmap) instead.
