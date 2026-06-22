@@ -9729,17 +9729,20 @@ def _dashboard_html(d, store=None, primary_id: str | None = None,
     form_section = _recent_form_html(store, primary_id, name, include_bots=include_bots)
 
     detail_sections: list[str] = []
-    # The generic "Recent form (last 10)" group renders as a flat table of
-    # ASCII checkmarks; we replace it with a real form-dot strip above.
-    skip_titles = {"Overview", "Per-match averages", "Recent form (last 10)"}
+    teammate_sections: list[str] = []
+    # Online-vs-offline removed per feedback; teammates get their own tab; the
+    # "Recent form (last 10)" group renders as the form-dot strip instead.
+    skip_titles = {"Overview", "Per-match averages", "Recent form (last 10)",
+                   "Online vs offline"}
     for g in d.all_groups():
         if not g.lines or g.title in skip_titles:
             continue
-        body = "\n".join(
+        rows = "\n".join(
             f'<tr><td>{ml.label}</td><td><b>{ml.value}</b></td><td class="cmp">{ml.comparison}</td></tr>'
             for ml in g.lines
         )
-        detail_sections.append(f'<section><h2>{g.title}</h2><table>{body}</table></section>')
+        sec = f'<section><h2>{g.title}</h2><table>{rows}</table></section>'
+        (teammate_sections if "teammate" in g.title.lower() else detail_sections).append(sec)
 
     page_title = "Career dashboard" if is_self else f"{name or d.player_label}"
     active = "dashboard" if is_self else ""
@@ -9774,6 +9777,33 @@ def _dashboard_html(d, store=None, primary_id: str | None = None,
         f'<a href="/compare?names={quote(name or "", safe="")}">Compare</a>'
         f'</div>'
     ) if (primary_id or name) else ""
+    # Tabbed SPA (mirror the match page): one pane visible at a time, no long
+    # scroll. Overview is the landing; Matches sits last.
+    panes = [("overview", "Overview", f"{kpis}{form_section}{radar}")]
+    if detail_sections:
+        panes.append(("breakdown", "Breakdown",
+                      f'<div class="detail-grid">{"".join(detail_sections)}</div>'))
+    if teammate_sections:
+        panes.append(("teammates", "Teammates",
+                      f'<div class="detail-grid">{"".join(teammate_sections)}</div>'))
+    if ball_section:
+        panes.append(("heatmap", "Heatmap", ball_section))
+    panes.append(("matches", "Matches", history))
+    nav = ('<nav class="match-nav" id="profile-nav">'
+           + "".join(f'<button type="button" class="mn-chip{" active" if i == 0 else ""}" '
+                     f'data-target="{k}">{lbl}</button>'
+                     for i, (k, lbl, _) in enumerate(panes))
+           + '</nav>')
+    panes_html = "".join(
+        f'<section class="md-pane{" active" if i == 0 else ""}" data-pane="{k}">{c}</section>'
+        for i, (k, lbl, c) in enumerate(panes))
+    pane_js = ("<script>(function(){var nav=document.getElementById('profile-nav');"
+               "if(!nav)return;function show(n){document.querySelectorAll('.md-pane')"
+               ".forEach(function(p){p.classList.toggle('active',p.dataset.pane===n);});"
+               "nav.querySelectorAll('.mn-chip').forEach(function(c){"
+               "c.classList.toggle('active',c.dataset.target===n);});}"
+               "nav.querySelectorAll('.mn-chip').forEach(function(el){"
+               "el.addEventListener('click',function(){show(el.dataset.target);});});})();</script>")
     body = f"""
   <div class="profile-header">
     <h1>{html.escape(page_title)} {bot_badge}</h1>
@@ -9781,16 +9811,17 @@ def _dashboard_html(d, store=None, primary_id: str | None = None,
   {who_html}
   {profile_links}
   {filter_html}
-  {kpis}
-  {form_section}
-  {radar}
-  {ball_section}
-  {history}
-  <style>.detail-grid{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;align-items:start}}@media(max-width:760px){{.detail-grid{{grid-template-columns:1fr}}}}</style>
-  <div class="detail-grid">{''.join(detail_sections)}</div>
+  <style>
+    .detail-grid{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;align-items:start}}
+    @media(max-width:760px){{.detail-grid{{grid-template-columns:1fr}}}}
+    #profile-nav{{position:static}}
+    .kpi-row{{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}}
+  </style>
+  {nav}
+  {panes_html}
+  {pane_js}
 """
-    # Use the shared chrome so the global filter sidebar shows up on /dashboard
-    # too (was previously bypassed via its own <!doctype> wrapper).
+    # Use the shared chrome so the global filter bar shows up on the profile too.
     return _page_wrap(d.player_label, body, active=active)
 
 
