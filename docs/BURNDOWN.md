@@ -326,11 +326,12 @@ Real walkthrough; convergence was premature. Work top-down, test, commit, deploy
 - [~] **Compare "Pro tier" → FIELD AVERAGE** — DEFERRED (needs care): the table mixes total/per-match/%/derived metrics + multiple data sources; a correct field-avg needs per-player windowed aggregation at matching scale (or reworking all count metrics to per-match first). Do as a focused task, not a quick loop fire.
 - [x] **Clubs "Club record" tile split** — DONE. Now Record / Win rate / Matches separate tiles (was one crammed tile). Verified.
 - [x] **Club heatmap → "Where the club scores from"** — DONE. Now the union of members' goal-shot locations (768 goals, concentrated at the attacking net) instead of the useless dense touch blob. Verified. (Minor nit: shared heatmap legend still says "touches".)
-- [ ] **Mobile / tiny-window pass** — fix spacing/vertical/horizontal in compacted view across pages.
-- [ ] **The date gets huge on mobile** — shrink it; shorter date format generally.
+- [x] **Mobile / tiny-window pass** — DONE. All 6 main pages (players/clan/history/match/compare/profile) now 0 page-overflow at 390px: wrapped the wide directory + all-matches tables in .tscroll (scroll in-box), and made the compare slot-pickers wrap (auto-fit). Match box-score already scrolled internally.
+- [x] **Date shrunk** — DONE. 'Jun 21, 2026 at 7:34 PM PDT' (wrapped ~7 lines) → 'Jun 21, 7:34 PM' on one line (dropped 'at', timezone, current-year; time{nowrap}).
 - [ ] **"UF Night" arena name** — not a real map name; fix (unmapped-id fallback).
 
 
 ## 🔁 Ongoing QA audit log (continuous — does NOT self-delete)
 Each fire: finish batch #2 remainders, then a fresh pass for erroneous statlines / clunky-overlapping UI (mobile 390px + tiny desktop) / broken filters / @ChumtheWaters owner-lens. Fix ONE concrete thing, log it here.
 - Removed the owner-relative Teammates/Opponents relation filter from /players (neutral all-friends leaderboard).
+- Mobile pass: compact one-line dates + .tscroll on directory/all-matches tables + auto-fit compare slot-pickers → all 6 main pages 0 overflow at 390px.
