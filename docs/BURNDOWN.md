@@ -264,3 +264,13 @@ cadence than every 10 min, or winding down, since per-fire yield is dropping.
   0 null arena/scores/winner/started_at, 0 matches with <2 players, 0 null name/platform/Unknown-pid
   (non-bot), 0 negative stats. Expected-only: 18 zero-tick rows (no-coverage opponents), 3 ties
   (forfeit/abandoned, winner still set), 7 unmapped arenas (documented no-source fallback). DB is clean.
+- **Validation sweep (accuracy) — players directory top row (PASS, no fix)** — recomputed
+  @ChumtheWaters' directory aggregate from central.db: all 8 values match the live page exactly
+  (394 matches, 212-182/54%, score 116505, goals 442, assists 178, saves 179, shots 888, demos 362).
+
+## Loop re-cadenced to hourly (2026-06-22)
+4 consecutive clean validation passes (overlap, profile accuracy, full DB audit, directory accuracy)
++ the redesign/no-Chum work complete → the loop has converged. Slowed the cron from */10 to hourly to
+act as a regression monitor instead of churning every 10 min on a finished app. Restore 10-min anytime
+with `/loop 10m <prompt>`, or re-point it at a specific target. Genuine remaining work is optional
+(per-game-rate directory sorting) or structural-but-not-a-real-gap (clubs data scope is inherent).
