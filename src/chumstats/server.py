@@ -6111,9 +6111,16 @@ def _clan_page_html(store, members: list[str], *, self_name: str | None = None,
       <div class="section-eyebrow">Our club</div>
       <div class="kpi-row">
         <div class="kpi primary">
-          <div class="kpi-label">Club record</div>
+          <div class="kpi-label">Record</div>
           <div class="kpi-value tnum">{wins}-{losses}</div>
-          <div class="kpi-foot">{win_pct:.0f}% win rate &middot; {n_matches} matches</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-label">Win rate</div>
+          <div class="kpi-value tnum">{win_pct:.0f}%</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-label">Matches</div>
+          <div class="kpi-value tnum">{n_matches}</div>
         </div>
         <div class="kpi">
           <div class="kpi-label">{_stat_icon_html("Goals")}Goals</div>
