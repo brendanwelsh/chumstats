@@ -74,7 +74,7 @@ ssh welsh-macmini 'cd ~/ballshark && git fetch origin rebrand-chumstats \
       `(match_id, primary_id, team_num)` via drift-proof rebuild (swap PK clause in live
       DDL, INSERT OR IGNORE). Idempotent; runs on startup. Tested: data preserved,
       same-name/diff-pid rows coexist, re-init no-ops. (Schema migration — runs on deploy.)
-- [ ] **C — stat-line consistency** — one shared score-first `STAT_COLUMNS` across all web tables.
+- [x] **C — stat-line consistency** — DONE. Added single-source STAT_COLUMNS + _stat_cols_th/_td; players directory now score-first with the full block; other tables already canonical.
 - [ ] **D — filter consistency** — add `platform` filter to opponents/compare/clan/club; `window` to history.
 - [ ] **E — multi-user reframe** — neutralize "Your line / Your insights" labels; make `/history` subject-parameterized (`?pid=`).
 
