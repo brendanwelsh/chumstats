@@ -9840,7 +9840,10 @@ def _dashboard_html(d, store=None, primary_id: str | None = None,
             for ml in g.lines
         )
         sec = f'<section><h2>{g.title}</h2><table>{rows}</table></section>'
-        (teammate_sections if "teammate" in g.title.lower() else detail_sections).append(sec)
+        # "Best teammates" + "Toughest opponents" both belong on the relationships
+        # tab (side-by-side, balanced) — not split across Teammates / Breakdown.
+        _is_rel = "teammate" in g.title.lower() or "opponent" in g.title.lower()
+        (teammate_sections if _is_rel else detail_sections).append(sec)
 
     page_title = "Career dashboard" if is_self else f"{name or d.player_label}"
     active = "dashboard" if is_self else ""
@@ -9881,7 +9884,7 @@ def _dashboard_html(d, store=None, primary_id: str | None = None,
         panes.append(("breakdown", "Breakdown",
                       f'<div class="detail-grid">{"".join(detail_sections)}</div>'))
     if teammate_sections:
-        panes.append(("teammates", "Teammates",
+        panes.append(("teammates", "Teammates &amp; opponents",
                       f'<div class="detail-grid">{"".join(teammate_sections)}</div>'))
     if ball_section:
         panes.append(("heatmap", "Heatmap", ball_section))
