@@ -320,7 +320,7 @@ Real walkthrough; convergence was premature. Work top-down, test, commit, deploy
 
 ## ⚡⚡⚡ User feedback batch #2 (2026-06-22 pm) — rapid walkthrough
 - [x] Splash: only players with >20 matches in "Jump to a player"; tagline → "for Chum and his friends".
-- [x] **OWNER-LENS with/vs column REMOVED** from the directory (the lens-of-me leak). Relation FILTER kept (opt-in; flag: still owner-relative). STILL TODO: audit remaining sections for owner-lens.
+- [x] **OWNER-LENS fully removed from public stat pages** — with/vs column AND the Teammates/Opponents relation filter (both owner-relative) gone from the directory. Audited "your/you" text: all confined to owner-context (live-capture screen, OBS overlay, /about setup docs) — not the public leaderboard/profiles/matches/compare/clubs.
 - [x] **Platform column → icons (not text)** in square boxes; filter icons shrunk to 15px in 30px square boxes (more padding). NOTE: icons are the app's abstract concept-drawings, not brand logos — recognizable-logo redesign is a separate optional task.
 - [x] **"Time near-empty %" — REMOVED** (was invalid: boost<=1 ~never fires → 0% for everyone). Gone from Compare, profile, match box-score; ingest threshold fixed to <=12 for future data.
 - [~] **Compare "Pro tier" → FIELD AVERAGE** — DEFERRED (needs care): the table mixes total/per-match/%/derived metrics + multiple data sources; a correct field-avg needs per-player windowed aggregation at matching scale (or reworking all count metrics to per-match first). Do as a focused task, not a quick loop fire.
@@ -329,3 +329,8 @@ Real walkthrough; convergence was premature. Work top-down, test, commit, deploy
 - [ ] **Mobile / tiny-window pass** — fix spacing/vertical/horizontal in compacted view across pages.
 - [ ] **The date gets huge on mobile** — shrink it; shorter date format generally.
 - [ ] **"UF Night" arena name** — not a real map name; fix (unmapped-id fallback).
+
+
+## 🔁 Ongoing QA audit log (continuous — does NOT self-delete)
+Each fire: finish batch #2 remainders, then a fresh pass for erroneous statlines / clunky-overlapping UI (mobile 390px + tiny desktop) / broken filters / @ChumtheWaters owner-lens. Fix ONE concrete thing, log it here.
+- Removed the owner-relative Teammates/Opponents relation filter from /players (neutral all-friends leaderboard).
