@@ -394,28 +394,10 @@ def make_app(broadcaster: Broadcaster, *, store=None,
         return HTMLResponse(_about_html())
 
     @_gated_get("/opponents")
-    async def opponents_page(include_bots: int = 0, mode: int | None = None,
-                              platform: str | None = None,
-                              pid: str | None = None, name: str | None = None,
-                              limit: int = 50):
-        if store is None:
-            return HTMLResponse("<p>No DB configured</p>")
-        mode_filter = mode if mode in (1, 2, 3, 4) else None
-        # Subject: any player via ?pid= / ?name=, else the configured owner.
-        is_self = not (pid or name)
-        subj_pid = pid or self_primary_id
-        subj_name = name or self_name
-        if pid and not name:
-            with store._conn() as con:
-                r = con.execute("SELECT name FROM match_player_stats WHERE "
-                                "primary_id = ? ORDER BY rowid DESC LIMIT 1", (pid,)).fetchone()
-                if r:
-                    subj_name = r["name"]
-        return HTMLResponse(_opponents_page_html(
-            store, subj_pid, subj_name,
-            include_bots=bool(include_bots), mode_filter=mode_filter,
-            platform_filter=platform or None, limit=limit, is_self=is_self,
-        ))
+    async def opponents_page():
+        # Retired — redundant with All Players (same data). Any old link / bookmark
+        # lands on the directory, where the with/vs relation split lives.
+        return RedirectResponse(url="/players")
 
     @_gated_get("/compare")
     async def compare_page(
@@ -2732,17 +2714,10 @@ def _match_detail_html(store, match_id: str, viewer_pid: str | None, viewer_name
         _mn_chip("players", "Players"),
     ]
     all_pl = blue_players + orng_players
-    # Top-nav player chips just jump to the Players pane (the box score shows
-    # every player at once — no per-player selection needed).
-    _pl_chips = []
-    for _p in all_pl:
-        _tc = "team-blue" if _p["team_num"] == 0 else "team-orng"
-        _pl_chips.append(
-            f'<button type="button" class="mn-chip mn-player {_tc}" data-target="players">'
-            f'<span class="mn-swatch"></span>{html.escape(_p["name"] or "")}</button>'
-        )
-    match_nav = ('<nav class="match-nav">' + "".join(c for c in _sec_chips if c)
-                 + '<span class="mn-sep"></span>' + "".join(_pl_chips) + '</nav>')
+    # Section tabs only — the per-player name chips were redundant (the Players
+    # tab's box score shows every player at once) and read as "weird beside the
+    # pages". Clean separation: nav = pages; the Players tab = players.
+    match_nav = '<nav class="match-nav">' + "".join(c for c in _sec_chips if c) + '</nav>'
 
     # ---- Per-player advanced stats as ESPN/ballchasing box scores ------------
     # Full-width team-grouped tables (all players in rows, stats in columns)
@@ -5895,6 +5870,40 @@ def _clan_page_html(store, members: list[str], *, self_name: str | None = None,
     clan_total_d = sum(t["demos"]   for t in member_totals.values())
     clan_total_mvp = sum(t["mvps"]  for t in member_totals.values())
 
+    # Per-member breakdown table — each member's stats in club matches, so the
+    # club page shows "everyone's stats all in one" (sorted by score).
+    _mrows = []
+    for m in sorted(members, key=lambda nm: -member_totals.get(nm, {}).get("score", 0)):
+        t = member_totals.get(m, {})
+        mt = t.get("matches", 0)
+        if not mt:
+            continue
+        w = t["wins"]
+        _mrows.append(
+            f'<tr class="row"><td><a class="player-link" href="/player/{quote(m, safe="")}">'
+            f'{html.escape(m)}</a></td>'
+            f'<td class="num tnum">{mt}</td>'
+            f'<td class="num tnum"><b>{w}</b>-{mt - w}</td>'
+            f'<td class="num tnum">{t["goals"]}</td><td class="num tnum">{t["assists"]}</td>'
+            f'<td class="num tnum">{t["saves"]}</td><td class="num tnum">{t["shots"]}</td>'
+            f'<td class="num tnum">{t["demos"]}</td><td class="num tnum">{t["mvps"]}</td></tr>'
+        )
+    members_table = (
+        '<div class="card" style="margin-top:14px;padding:0;overflow:hidden">'
+        '<div class="section-title" style="padding:14px 18px 6px"><span>Club members</span>'
+        '<span class="dim" style="text-transform:none;letter-spacing:0">'
+        'Each member&rsquo;s stats in club matches.</span></div>'
+        '<table class="history"><thead><tr><th>Member</th>'
+        f'<th class="num">Matches</th><th class="num">W-L</th>'
+        f'<th class="num">{_stat_icon_html("Goals")}Goals</th>'
+        f'<th class="num">{_stat_icon_html("Assists")}Assists</th>'
+        f'<th class="num">{_stat_icon_html("Saves")}Saves</th>'
+        f'<th class="num">{_stat_icon_html("Shots")}Shots</th>'
+        f'<th class="num">{_stat_icon_html("Demos")}Demos</th>'
+        f'<th class="num">{_stat_icon_html("MVP")}MVPs</th></tr></thead>'
+        f'<tbody>{"".join(_mrows)}</tbody></table></div>'
+    ) if _mrows else ""
+
     # ---- Rivalries: us vs other teams --------------------------------------
     # For each clan-match, find our team's name and the opposing team's name.
     # Group by opposing team name. Skip default "Blue"/"Orange" names — only
@@ -6132,6 +6141,8 @@ def _clan_page_html(store, members: list[str], *, self_name: str | None = None,
           <div class="kpi-value tnum">{clan_total_mvp}</div>
         </div>
       </div>
+
+      {members_table}
 
       {heatmap_html}
 
@@ -9834,7 +9845,6 @@ def _dashboard_html(d, store=None, primary_id: str | None = None,
     profile_links = (
         f'<div class="profile-links">'
         f'<a href="/history{_subjq}">Matches</a>'
-        f'<a href="/opponents{_subjq}">Opponents</a>'
         f'<a href="/compare?names={quote(name or "", safe="")}">Compare</a>'
         f'</div>'
     ) if (primary_id or name) else ""
