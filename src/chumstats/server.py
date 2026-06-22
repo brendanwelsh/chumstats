@@ -2659,8 +2659,12 @@ def _match_detail_html(store, match_id: str, viewer_pid: str | None, viewer_name
         cov = ticks / max(int(duration * 30), 1)
         has_mov = cov >= 0.70 and ticks >= 200
         ext = derived.get(p["name"]) or _empty_derived()
-        my_touches = player_touches.get(p["name"], 0)
-        team_tot = team_touches.get(p["team_num"], 0) or 1
+        # Use the official `touches` stat (matches the roster + team-comparison),
+        # not the playback BallHit count, which undercounts and would show a
+        # different number for the same player on the same page.
+        my_touches = p["touches"] or 0
+        team_tot = sum((q["touches"] or 0) for q in all_pl
+                       if q["team_num"] == p["team_num"]) or 1
         dsign = 1 if p["team_num"] == 0 else -1
         dn = nn = on = 0
         for bh in playback_data["ball_track"]:
