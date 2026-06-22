@@ -66,8 +66,9 @@ the older C/D/E below (E is subsumed by the reframe item).
 - [ ] **Black-screen flash on navigation** — dark `--bg` paints before content (FOUC). Add
       `<meta name="color-scheme" content="dark light">`, set html bg immediately, remove any
       bg transition that flashes.
-- [x] **Scrollable 6-player selector** — DONE. Match detail per-player breakdown is now a scrollable tab selector + one visible panel (SPA, JS toggle, no reload); top-nav chips drive it. Collapsible <details> removed.
-      scrollable segmented selector across the up-to-6 players; one-page-app layout.
+- [x] **Scrollable 6-player selector** — DONE. Match detail per-player breakdown is now a
+      scrollable tab selector + one visible panel (SPA, JS toggle, no reload); top-nav chips
+      drive it. Collapsible `<details>` removed.
 - [ ] **Pressure & share always 50/50** — data bug; find the calc, fix or remove if not real.
 - [ ] **Touches-per-player half-bar** (match history) — broken/half-rendered; fix or remove.
 - [ ] **Data-gap audit (RECURRING)** — each pass, audit one page's datasets vs the DB; flag
