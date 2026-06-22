@@ -5714,13 +5714,13 @@ def _club_detail_html(store, club_name: str,
       <div class="page-head">
         <div>
           <h1><span class="club-name" title="{html.escape(club_name)}">{html.escape(club_name)}</span></h1>
-          <div class="sub">Head-to-head detail. We played them {len(rows)} time{'s' if len(rows) != 1 else ''}.</div>
+          <div class="sub">Head-to-head record across {len(rows)} recorded match{'es' if len(rows) != 1 else ''}.</div>
         </div>
       </div>
 
       <div class="kpi-row">
         <div class="kpi primary">
-          <div class="kpi-label">Record vs them</div>
+          <div class="kpi-label">Head-to-head</div>
           <div class="kpi-value tnum">{wins}-{losses}</div>
           <div class="kpi-foot">{win_pct:.0f}% win rate</div>
         </div>
@@ -5761,7 +5761,7 @@ def _club_detail_html(store, club_name: str,
 
       <div class="card" style="margin-top:14px;padding:0;overflow:hidden">
         <div class="section-title" style="padding:14px 18px 6px">
-          <span>Matches vs them</span>
+          <span>Recorded matches</span>
         </div>
         <table class="history">
           <thead><tr>
