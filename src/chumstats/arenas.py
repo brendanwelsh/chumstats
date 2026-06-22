@@ -5,11 +5,12 @@ live overlay). RL ships two id conventions (RLBot CamelCase package names like
 ``Stadium_P`` and ballchasing's lower-cased ``stadium_p``); UPK names are
 case-insensitive, so we always normalise the id to lower-case before lookup.
 
-Names reconciled from RLBot's game_map_dict + RLMapChanger + the RL wiki. A few
-ids that appear in real captures but aren't in those lists (e.g. ``paname_*``,
-``uf_*``, ``mall_*``, ``stadium_10a_p``, ``neotokyo_arcade_p``) are NOT guessed
--- they fall through to a cleaned title-case and get logged once so they can be
-verified against ballchasing's authoritative /api/maps later.
+Names reconciled from RLBot's game_map_dict + RLMapChanger + the RL wiki.
+``neotokyo_arcade_p`` / ``beach_night_grs_p`` / ``stadium_10a_p`` are added as
+verified variants. The remaining opaque capture-only ids (``paname_*``, ``uf_*``,
+``mall_*``) are NOT in any public map list, so we render them as "Unknown arena"
+(NOT a fabricated title-case like "UF Night", which read as a real map but isn't)
+and log them once so the table can be extended if they're ever identified.
 
 Notes baked in from research:
 - Psyonix labels BOTH fog and rain weather variants "(Stormy)".
@@ -99,6 +100,10 @@ ARENA_NICE = {
     # --- Mode arenas ---
     "shattershot_p":        "Core 707 (Dropshot)",
     "hoopsstadium_p":       "Dunk House (Hoops)",
+    # --- Variant ids confirmed from capture data (2026-06) ---
+    "neotokyo_arcade_p":    "Neo Tokyo (Arcade)",
+    "beach_night_grs_p":    "Salty Shores (Night, Pitched)",
+    "stadium_10a_p":        "DFH Stadium (10th Anniversary)",
 }
 
 _unknown_logged: set[str] = set()
@@ -116,8 +121,9 @@ def arena_nice(arena: str | None) -> str:
         return name
     if key not in _unknown_logged:
         _unknown_logged.add(key)
-        log.info("unmapped arena id %r -> falling back to title-case", arena)
-    cleaned = arena[:-2] if key.endswith("_p") else arena
-    cleaned = cleaned.replace("_", " ").strip()
-    parts = [p if p.isupper() else p.capitalize() for p in cleaned.split()]
-    return " ".join(parts) or "Unknown arena"
+        log.info("unmapped arena id %r -> shown as 'Unknown arena'", arena)
+    # Don't fabricate a friendly name from an opaque internal id — e.g.
+    # "UF_Night_P" title-cased to "UF Night", which reads like a real map but
+    # isn't. Show a neutral label; the id is logged so the table can be extended
+    # once the map is identified.
+    return "Unknown arena"
