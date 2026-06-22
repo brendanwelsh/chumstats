@@ -74,6 +74,9 @@ compare). Loop now cycles back for deeper polish + continues the no-Chum sweep.
   (0 leaks live). Left intentional copy (splash pitch, /about setup docs, the owner-stream overlay
   YOU marker). Cleanup follow-up: delete the dead _personal_insights_card_html (uncalled, holds the
   old "vs your career" strings).
+- **Cleanup — deleted dead `_personal_insights_card_html`** — the uncalled 'vs your career' card
+  (removed from the match page earlier) is now gone from the codebase: 0 'vs your career' strings
+  left, no-Chum sweep surface is clean. No behavior change (match page still 200 + all 6 panes).
 
 ### Still to repass (ESPN pass, top-down)
 - [x] **Match · "Us vs them" → "Team comparison"** — DONE. Forced neutral Blue-vs-Orange always; nav chip "Teams"; also dropped the owner-perspective "vs your career" insights card. 0 us/them/your-career leaks live.
