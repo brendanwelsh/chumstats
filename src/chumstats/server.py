@@ -4608,7 +4608,7 @@ PortNumber=49123</pre>
         <pre class="codeblock">{
   "Event": "PlayerInfo",
   "Data": {
-    "Name": "ChumtheWaters",
+    "Name": "Octane_Ace",
     "Goals": 2, "Assists": 1,
     "Saves": 3, "Shots": 5,
     "Demos": 0, "Score": 540
@@ -9609,10 +9609,11 @@ def _splash_html(store, self_primary_id: str | None = None) -> str:
     chips = []
     for p in _featured_players(store):
         name = p.get("name") or "Player"
-        is_self = bool(self_primary_id and p.get("pid") == self_primary_id)
-        meta = f"{p.get('n', 0)} matches" + (" · you" if is_self else "")
+        # Neutral all-players landing: the owner is just one of the chips — no
+        # "· you" tag, no self-highlight.
+        meta = f"{p.get('n', 0)} matches"
         chips.append(
-            f'<a class="splash-chip{" self" if is_self else ""}" '
+            f'<a class="splash-chip" '
             f'href="/player/{quote(name, safe="")}">'
             f'<span class="splash-chip-name">{html.escape(name)}</span>'
             f'<span class="splash-chip-meta">{html.escape(meta)}</span></a>'
