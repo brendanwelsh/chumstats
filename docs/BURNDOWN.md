@@ -70,7 +70,7 @@ the older C/D/E below (E is subsumed by the reframe item).
       scrollable tab selector + one visible panel (SPA, JS toggle, no reload); top-nav chips
       drive it. Collapsible `<details>` removed.
 - [x] **Pressure & share always 50/50** — DONE. Root cause: uploaded matches batch all BallHits under one received_at, so time-interval possession/pressure collapsed (0% / 50-50). Recomputed from touch counts + positions ("Touch share" / "Field tilt"). Verified varied (38/62, 57/43).
-- [ ] **Touches-per-player half-bar** (match history) — broken/half-rendered; fix or remove.
+- [x] **Touches-per-player half-bar** (match history) — DONE. Removed the per-row touch-share bar (read as half a bar chart); the list is cleaner, touch share/field tilt live on the match page.
 - [ ] **Data-gap audit (RECURRING)** — each pass, audit one page's datasets vs the DB; flag
       missing / placeholder / always-constant values; fix or document. Screenshot to verify.
 - [x] **Club "1ST DAY PEWPING" noise** — removed the our-team-name suffix from the /clan title
