@@ -3312,11 +3312,16 @@ def _match_events_html(playback: dict) -> str:
     seek. Goals carry a running score; every name is escaped (attacker-
     controllable). Reuses the shared .pb-event* classes (also used by the live
     feed)."""
+    events = playback.get("events") or []
+    # Uploaded matches collapse every event timestamp to one value, so a per-event
+    # M:SS would just repeat (e.g. "8:29" on every row). Detect that and show a
+    # play ordinal (#1, #2, …) instead — honest, since the list is already ordered.
+    has_timing = len({round(ev.get("t", 0), 1) for ev in events}) > 2
     rows = []
     b = o = 0  # running score, blue-orange
-    for ev in (playback.get("events") or []):
+    for i, ev in enumerate(events):
         t = ev.get("t", 0)
-        ts = f"{int(t // 60)}:{int(t % 60):02d}"
+        ts = (f"{int(t // 60)}:{int(t % 60):02d}" if has_timing else f"#{i + 1}")
         team = ev.get("team")
         team_cls = "team-blue" if team == 0 else "team-orng" if team == 1 else ""
         kind = ev.get("kind", "")
