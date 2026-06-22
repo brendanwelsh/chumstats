@@ -46,6 +46,10 @@ compare). Loop now cycles back for deeper polish + continues the no-Chum sweep.
 - **Player profile** — added quick-nav links (Matches / Opponents / Compare) to the player's
   subject-parameterized pages (`/history?pid=`, `/opponents?pid=`, `/compare?names=`). The
   subject-param features are now discoverable from any profile, not just the owner's. Verified live.
+- **Validation sweep (data accuracy)** — caught lifetime air/wall/ground summing to ~97%
+  (72/19/5) on the profile MOVEMENT section + compare table — same normalization bug as the
+  match page, but the lifetime paths in analytics.py weren't fixed. Normalized both to the
+  position-tick sum; now 74.4/20.1/5.6 = 100. Verified live.
 
 ### Still to repass (ESPN pass, top-down)
 - [x] **Match · "Us vs them" → "Team comparison"** — DONE. Forced neutral Blue-vs-Orange always; nav chip "Teams"; also dropped the owner-perspective "vs your career" insights card. 0 us/them/your-career leaks live.
