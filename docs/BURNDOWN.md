@@ -296,10 +296,10 @@ Real walkthrough; convergence was premature. Work top-down, test, commit, deploy
 - [~] **Remove the Opponents page** — nav link removed; TODO: retire route + fold into Players, drop profile quick-nav link — redundant with All Players (same data); fold any unique value into Players.
 
 ### Player profile → SPA (HIGH)
-- [ ] **Make the profile a tabbed SPA like the match page** — no long scroll; sections behind tabs, not stacked side-by-side.
-- [ ] **Match history at the very BOTTOM** of the profile.
-- [ ] **Remove the Online-vs-Offline section.**
-- [ ] **Balance the KPI tiles** (5+2 uneven → even grid) + the boost/movement section lengths.
+- [x] **Profile = tabbed SPA** — DONE. Overview/Breakdown/Teammates/Heatmap/Matches panes; one visible at a time, no long scroll (mirrors the match page).
+- [x] **Match history at the bottom** — DONE. It's the last tab (Matches).
+- [x] **Remove Online-vs-Offline** — DONE (dropped from the profile groups).
+- [x] **Balance KPI tiles** — DONE. Even auto-fit grid (7 tiles in one balanced row, was 5+2). (Boost/movement now live in the Breakdown tab.)
 - [ ] **Tighten tiles** (opponents/clubs/profile) — text centered/fit, not jammed top-left.
 
 ### Compare
