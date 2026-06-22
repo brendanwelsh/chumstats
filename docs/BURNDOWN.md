@@ -317,3 +317,15 @@ Real walkthrough; convergence was premature. Work top-down, test, commit, deploy
 
 ### Layout
 - [x] **W-L column 1 line** — DONE. white-space:nowrap keeps '212-182 (54%)' on one line; no more layout shift.
+
+## ⚡⚡⚡ User feedback batch #2 (2026-06-22 pm) — rapid walkthrough
+- [x] Splash: only players with >20 matches in "Jump to a player"; tagline → "for Chum and his friends".
+- [ ] **OWNER-LENS: "with / vs" is still framed around me.** Audit EVERY stat/section "is this from MY lens?". Remove the directory with/vs column (+ relation filter is owner-relative too).
+- [ ] **Platform LOGOS in the UI.** Directory platform column → logo (not text); platform filter icons smaller + more padding; all icon boxes the SAME square shape; same shape in the column.
+- [ ] **"Time near-empty %" looks broken** (0.2/0.0/0.0/8%) — investigate; any stat like that is invalid.
+- [ ] **Compare: replace "Pro tier" column with the FIELD AVERAGE** (avg of everyone, by the active sort) as the far-right column.
+- [ ] **Clubs: "Club record 179-169 / 51% / 348 matches" shouldn't be one tile** — split/restructure.
+- [ ] **Club heatmap is useless** — make it "where we score from" (shot heatmap) instead.
+- [ ] **Mobile / tiny-window pass** — fix spacing/vertical/horizontal in compacted view across pages.
+- [ ] **The date gets huge on mobile** — shrink it; shorter date format generally.
+- [ ] **"UF Night" arena name** — not a real map name; fix (unmapped-id fallback).
