@@ -77,6 +77,12 @@ compare). Loop now cycles back for deeper polish + continues the no-Chum sweep.
 - **Cleanup — deleted dead `_personal_insights_card_html`** — the uncalled 'vs your career' card
   (removed from the match page earlier) is now gone from the codebase: 0 'vs your career' strings
   left, no-Chum sweep surface is clean. No behavior change (match page still 200 + all 6 panes).
+- **Validation sweep (accuracy) — box-score touches mismatch** — recomputed match E8F71FB2 from
+  central.db, diffed vs the live page. Team comparison + roster matched (goals==scoreline, touch
+  39/61, shots 4/8, saves 3/2, demos 1/1), BUT the box-score Involvement "Touches" showed the
+  playback BallHit count (44/59/…) while the roster showed the official `touches` stat (48/65/…) —
+  two different numbers for one player on one page. Switched the box-score to p['touches'] + the
+  team column-sum; now 48/23/65/45, consistent across the page. Verified live.
 
 ### Still to repass (ESPN pass, top-down)
 - [x] **Match · "Us vs them" → "Team comparison"** — DONE. Forced neutral Blue-vs-Orange always; nav chip "Teams"; also dropped the owner-perspective "vs your career" insights card. 0 us/them/your-career leaks live.
