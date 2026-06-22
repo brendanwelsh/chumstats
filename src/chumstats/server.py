@@ -1867,11 +1867,11 @@ def _players_directory_html(store, self_primary_id: str | None = None,
             WHERE match_id = m.id GROUP BY team_num
         )) = {int(mode_filter)}""")
     if platform_filter:
-        # Filter to matches where the OPPONENT team had a player on this platform.
+        # All-players directory: filter to players ON this platform (their own
+        # account platform) — the intuitive meaning here, not the opponent-
+        # platform EXISTS used on /history (where Steam matched ~everything).
         inner_clauses.append(
-            f"EXISTS (SELECT 1 FROM match_player_stats opp_p "
-            f"WHERE opp_p.match_id = m.id AND opp_p.team_num != mps.team_num "
-            f"AND opp_p.platform LIKE '%' || {repr(platform_filter)} || '%')"
+            f"mps.platform LIKE '%' || {repr(platform_filter)} || '%'"
         )
     if window_days and window_days > 0:
         import time as _time
@@ -6089,7 +6089,7 @@ def _filter_sidebar(active: str, force_hidden: bool = False) -> str:
     ic_switch = _PLATFORM_ICONS["switch"]
     platform = section("platform", f"""
         <div class="sf-section">
-          <div class="sf-title">Opponent platform</div>
+          <div class="sf-title">Platform</div>
           <div class="sf-tip">Matches where the other team had a player on this platform.</div>
           <div class="sf-group sf-platform" data-filter="platform">
             <a class="sf-chip" data-val="" title="All platforms">All</a>
