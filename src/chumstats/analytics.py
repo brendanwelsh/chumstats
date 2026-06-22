@@ -19,6 +19,7 @@ import sqlite3
 from dataclasses import dataclass, field
 from typing import Iterable
 
+from .arenas import arena_nice
 from .session import MatchSummary, PlayerLine
 
 # Movement / boost / positioning are SPECTATOR-only per-player fields: the Stats
@@ -522,7 +523,7 @@ def build_dashboard(store, *, primary_id: str | None = None,
                 continue
             n = r["n"]; w = r["w"]
             d.arenas.lines.append(MetricLine(
-                r["arena"], f"{w}-{n - w}", f"win% {(w / n) * 100:.0f}",
+                arena_nice(r["arena"]), f"{w}-{n - w}", f"win% {(w / n) * 100:.0f}",
             ))
 
         # ---- by mode ----

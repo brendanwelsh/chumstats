@@ -1065,7 +1065,7 @@ def _mvp_callout_html(players, viewer_pid: str | None, viewer_name: str | None) 
         team_cls = "team-blue" if p["team_num"] == 0 else "team-orng"
         is_self = (viewer_pid and p["primary_id"] == viewer_pid) or \
                   (viewer_name and p["name"] == viewer_name and not viewer_pid)
-        self_tag = ' <span class="hero-mvp-you">YOU</span>' if is_self else ""
+        self_tag = ""  # neutral all-players view — no "you" framing
         href = f"/player/{quote(p['name'], safe='')}"
         name_html = (f'<span class="hero-mvp-name">{html.escape(p["name"])}</span>'
                      if p["is_bot"] else
@@ -1719,7 +1719,7 @@ def _mvp_cell_html(mvp: dict | None, *, viewer_is_mvp: bool = False) -> str:
     name_html = (f'<span class="mvp-name">{html.escape(name)}</span>'
                  if mvp["is_bot"] else
                  f'<a class="mvp-name" href="{href}" onclick="event.stopPropagation()">{html.escape(name)}</a>')
-    you = ' <span class="mvp-you">YOU</span>' if viewer_is_mvp else ''
+    you = ''  # neutral all-players view — no "you" framing
     icon = _rl_icon_html("MVP", size=14, alt="")
     return (
         f'<span class="mvp-cell {team_cls}" title="MVP of this match">'
@@ -2293,7 +2293,7 @@ def _match_detail_html(store, match_id: str, viewer_pid: str | None, viewer_name
                         (viewer_name and p["name"] == viewer_name and not viewer_pid)
             mvp = " <span class='chip mvp'>MVP</span>" if p["is_mvp"] else ""
             bot = " <span class='chip bot'>BOT</span>" if p["is_bot"] else ""
-            you = " <span class='you-marker'>YOU</span>" if is_viewer else ""
+            you = ""  # neutral all-players view — no "you" framing
             href = f"/player/{quote(p['name'], safe='')}"
             link_cls = "player-link self" if is_viewer else "player-link"
             nm = html.escape(p["name"] or "")  # attacker-controllable
@@ -2365,7 +2365,7 @@ def _match_detail_html(store, match_id: str, viewer_pid: str | None, viewer_name
         is_viewer = (viewer_pid and p["primary_id"] == viewer_pid and p["name"] == viewer_name)
         team_class = "team-blue" if p["team_num"] == 0 else "team-orng"
         color = "var(--team-blue)" if p["team_num"] == 0 else "var(--team-orng)"
-        marker = " <span class='you-marker' style='margin-left:6px'>YOU</span>" if is_viewer else ""
+        marker = ""  # neutral all-players view — no "you" framing
         mvp = " <span class='chip mvp' style='margin-left:6px'>MVP</span>" if p["is_mvp"] else ""
         bot = " <span class='chip bot' style='margin-left:6px'>BOT</span>" if p["is_bot"] else ""
         slug = "".join(ch if ch.isalnum() else "_" for ch in (p["name"] or "")) or "p"
@@ -2603,38 +2603,35 @@ def _match_detail_html(store, match_id: str, viewer_pid: str | None, viewer_name
         match_context = "Regulation"
         match_context_class = "reg"
 
-    # Sticky in-page nav: jump chips for each section + each player. CSS-only
-    # (position:sticky + #anchors), no JS.
-    def _mn_chip(href, label, cls=""):
-        return f'<a class="mn-chip {cls}" href="{href}">{label}</a>'
+    # In-page section nav: a REAL tab-swap (show one pane, hide the rest) via the
+    # JS below — not anchor-scroll down a long page. Player chips jump to the
+    # Players pane and select that player. Neutral all-players view: no "you".
+    def _mn_chip(target, label, cls=""):
+        return (f'<button type="button" class="mn-chip {cls}" '
+                f'data-target="{target}">{label}</button>')
     _sec_chips = [
-        _mn_chip("#overview", "Overview"),
-        _mn_chip("#timeline", "Timeline"),
-        _mn_chip("#goalmap", "Goal map") if playback_data.get("goals") else "",
-        _mn_chip("#compare", "Us vs them"),
-        _mn_chip("#kickoff", "Kickoff"),
-        _mn_chip("#players", "Players"),
+        _mn_chip("overview", "Overview", "active"),
+        _mn_chip("timeline", "Timeline"),
+        _mn_chip("goalmap", "Goal map") if playback_data.get("goals") else "",
+        _mn_chip("compare", "Us vs them"),
+        _mn_chip("kickoff", "Kickoff"),
+        _mn_chip("players", "Players"),
     ]
     all_pl = blue_players + orng_players
-    def _is_viewer_pl(_p):
-        return bool(viewer_pid and _p["primary_id"] == viewer_pid and _p["name"] == viewer_name)
-    # The player shown first: the viewer if they're in this match, else top score.
-    active_pl = next((p for p in all_pl if _is_viewer_pl(p)), all_pl[0] if all_pl else None)
+    active_pl = all_pl[0] if all_pl else None
     _pl_chips, _pp_tabs = [], []
     for _p in all_pl:
         _ps = "".join(ch if ch.isalnum() else "_" for ch in (_p["name"] or "")) or "p"
         _tc = "team-blue" if _p["team_num"] == 0 else "team-orng"
-        _you = " <span class='mn-you'>YOU</span>" if _is_viewer_pl(_p) else ""
         _act = " active" if _p is active_pl else ""
-        # Top-nav quick chip: jump to the players section + select this player.
         _pl_chips.append(
-            f'<a class="mn-chip mn-player {_tc}" href="#players" data-pp="pp-{_ps}">'
-            f'<span class="mn-swatch"></span>{html.escape(_p["name"] or "")}{_you}</a>'
+            f'<button type="button" class="mn-chip mn-player {_tc}" '
+            f'data-target="players" data-pp="pp-{_ps}">'
+            f'<span class="mn-swatch"></span>{html.escape(_p["name"] or "")}</button>'
         )
-        # In-section scrollable selector tab.
         _pp_tabs.append(
             f'<button type="button" class="pp-tab {_tc}{_act}" data-pp="pp-{_ps}">'
-            f'<span class="mn-swatch"></span>{html.escape(_p["name"] or "")}{_you}</button>'
+            f'<span class="mn-swatch"></span>{html.escape(_p["name"] or "")}</button>'
         )
     match_nav = ('<nav class="match-nav">' + "".join(c for c in _sec_chips if c)
                  + '<span class="mn-sep"></span>' + "".join(_pl_chips) + '</nav>')
@@ -2692,44 +2689,67 @@ def _match_detail_html(store, match_id: str, viewer_pid: str | None, viewer_name
 
       {match_nav}
 
-      <div id="overview" class="mn-target">
-        {_roster_card(0)}
-        {_roster_card(1)}
-      </div>
-
-      {_personal_insights_card_html(store, players, viewer_pid, viewer_name, match_id)}
-
-      {_match_events_html(playback_data)}
-
-      {_goal_map_html(playback_data)}
-
-      {_match_compare_html(players, viewer_pid, viewer_name, t0_name, t1_name, playback_data)}
-
-      <div id="kickoff" class="mn-target">
-        {_kickoff_card_html(playback_data, players, viewer_pid, viewer_name)}
-      </div>
-
-      {_match_insights_html(playback_data, t0_name, t1_name)}
-
-      <div class="card mn-target" id="players" style="margin-top:14px">
-        <div class="section-title">
-          <span>Per-player breakdown</span>
-          <span class="dim" style="text-transform:none;letter-spacing:0">
-            Pick a player &mdash; combat, highlights, movement &amp; touch map.
-          </span>
+      <section class="md-pane active" data-pane="overview">
+        <div class="md-rosters">
+          {_roster_card(0)}
+          {_roster_card(1)}
         </div>
-        <div class="pp-selector" role="tablist">{pp_tabs}</div>
-        <div class="pp-panels">{pp_panels}</div>
-      </div>
+      </section>
+
+      <section class="md-pane" data-pane="timeline">
+        {_match_events_html(playback_data)}
+      </section>
+
+      <section class="md-pane" data-pane="goalmap">
+        {_goal_map_html(playback_data)}
+      </section>
+
+      <section class="md-pane" data-pane="compare">
+        {_match_compare_html(players, viewer_pid, viewer_name, t0_name, t1_name, playback_data)}
+        {_match_insights_html(playback_data, t0_name, t1_name)}
+        {_personal_insights_card_html(store, players, viewer_pid, viewer_name, match_id)}
+      </section>
+
+      <section class="md-pane" data-pane="kickoff">
+        {_kickoff_card_html(playback_data, players, viewer_pid, viewer_name)}
+      </section>
+
+      <section class="md-pane" data-pane="players">
+        <div class="card" style="margin-top:0">
+          <div class="section-title">
+            <span>Per-player breakdown</span>
+            <span class="dim" style="text-transform:none;letter-spacing:0">
+              Pick a player &mdash; combat, highlights, movement &amp; touch map.
+            </span>
+          </div>
+          <div class="pp-selector" role="tablist">{pp_tabs}</div>
+          <div class="pp-panels">{pp_panels}</div>
+        </div>
+      </section>
       <script>
       (function(){{
-        var sec = document.getElementById('players'); if(!sec) return;
-        function activate(id){{
+        var nav = document.querySelector('.match-nav'); if(!nav) return;
+        function showPane(name){{
+          document.querySelectorAll('.md-pane').forEach(function(p){{
+            p.classList.toggle('active', p.dataset.pane === name);
+          }});
+          document.querySelectorAll('.mn-chip').forEach(function(c){{
+            if(!c.dataset.pp) c.classList.toggle('active', c.dataset.target === name);
+          }});
+          nav.scrollIntoView({{block:'nearest'}});
+        }}
+        function activatePlayer(id){{
           document.querySelectorAll('.player-panel').forEach(function(p){{ p.classList.toggle('active', p.id === id); }});
           document.querySelectorAll('.pp-tab').forEach(function(t){{ t.classList.toggle('active', t.dataset.pp === id); }});
         }}
-        document.querySelectorAll('.pp-tab,[data-pp]').forEach(function(el){{
-          el.addEventListener('click', function(){{ if (el.dataset.pp) activate(el.dataset.pp); }});
+        document.querySelectorAll('.mn-chip').forEach(function(el){{
+          el.addEventListener('click', function(){{
+            if (el.dataset.target) showPane(el.dataset.target);
+            if (el.dataset.pp) activatePlayer(el.dataset.pp);
+          }});
+        }});
+        document.querySelectorAll('.pp-tab').forEach(function(el){{
+          el.addEventListener('click', function(){{ if (el.dataset.pp) activatePlayer(el.dataset.pp); }});
         }});
       }})();
       </script>
@@ -7558,9 +7578,13 @@ table.history tr.match-row:hover { background: var(--card-hover); }
 .match-nav .mn-chip {
   font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 999px;
   color: var(--text-faint); text-decoration: none; white-space: nowrap;
-  border: 1px solid transparent;
+  border: 1px solid transparent; background: none; cursor: pointer;
+  font-family: inherit; line-height: 1.4;
 }
 .match-nav .mn-chip:hover { color: var(--text); background: var(--card); }
+.match-nav .mn-chip.active {
+  color: var(--text); background: var(--card); border-color: var(--accent-line);
+}
 .match-nav .mn-sep { width: 1px; align-self: stretch; background: var(--accent-line); margin: 2px 4px; }
 .match-nav .mn-player .mn-swatch {
   display: inline-block; width: 7px; height: 7px; border-radius: 50%;
@@ -7568,7 +7592,11 @@ table.history tr.match-row:hover { background: var(--card-hover); }
 }
 .match-nav .mn-player.team-blue .mn-swatch { background: var(--team-blue); }
 .match-nav .mn-player.team-orng .mn-swatch { background: var(--team-orng); }
-.match-nav .mn-you { font-size: 9px; font-weight: 800; color: var(--accent); margin-left: 4px; }
+/* Swappable section panes — only the active pane shows (a real SPA, not scroll). */
+.md-pane { display: none; }
+.md-pane.active { display: block; }
+.md-rosters { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: start; }
+@media (max-width: 760px) { .md-rosters { grid-template-columns: 1fr; } }
 .mn-target, #timeline, #goalmap, .radar-card[id] { scroll-margin-top: 64px; }
 
 /* Per-player SPA: scrollable tab strip + one visible panel (replaces the
