@@ -2005,7 +2005,7 @@ def _history_page_html(store, primary_id, name, *,
                        mode_filter: int | None = None,
                        sort: str = "recent") -> str:
     rows = _match_history_rows(
-        store, primary_id, name, limit=200,
+        store, primary_id, name, limit=2000,
         include_bots=include_bots, mode_filter=mode_filter,
     )
     # Sort options. "recent" is the source order (already DESC by started_at).
@@ -6083,8 +6083,8 @@ def _clan_page_html(store, members: list[str], *, self_name: str | None = None,
     body = f"""
       <div class="page-head">
         <div>
-          <h1>Opposing clubs{' &middot; <span style="color:var(--accent)">' + html.escape(our_team_name) + '</span>' if our_team_name else ''}</h1>
-          <div class="sub">Every named club we have played against, and our head-to-head record vs each.</div>
+          <h1>Opposing clubs</h1>
+          <div class="sub">Every named club played against, and the head-to-head record vs each.</div>
         </div>
       </div>
 

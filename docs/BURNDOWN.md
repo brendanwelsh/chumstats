@@ -47,6 +47,37 @@ ssh welsh-macmini 'cd ~/ballshark && git fetch origin rebrand-chumstats \
 
 ---
 
+## ⚡ P0 — UI/UX overhaul + de-"Me" reframe (June 2026 audit; screenshots in `.shots/`)
+
+Goal: an **all-matches / all-players** tracker like **ballchasing.gg** — tight, professional,
+**no overlap**, **no "Me"/owner framing**, one-page feel. The loop's standing mission now
+also includes **auditing every page's datasets for gaps each pass** and **re-screenshotting
+to verify** (Playwright works; `.venv/Scripts/python` + chromium installed). Do these BEFORE
+the older C/D/E below (E is subsumed by the reframe item).
+
+- [ ] **Kill all "Me"/owner framing** — remove the "Me" nav item; brand → `/` (splash);
+      repurpose/remove the `/dashboard` "Career dashboard"; neutralize copy across pages:
+      "Every player you've faced" → "Every player faced", "YOUR GOALS / THEIR GOALS" →
+      "Goals For / Against", analytics.py "Your line / Your insights" → neutral; drop the
+      hardcoded @ChumtheWaters self.
+- [ ] **Filter overlap (left) + redundancy** — sidebar overlaps at the user's width (asked
+      20+ times; width-specific — chips overflow when narrow). Harden: `min-width:0` +
+      overflow guards on `.side-filters`/`.sf-chip`; verify 1200–1500px. Remove the REDUNDANT
+      inline mode/bots filter row that duplicates the sidebar (seen on /opponents).
+- [ ] **Black-screen flash on navigation** — dark `--bg` paints before content (FOUC). Add
+      `<meta name="color-scheme" content="dark light">`, set html bg immediately, remove any
+      bg transition that flashes.
+- [ ] **Scrollable 6-player selector** — replace per-player dropdowns (match detail) with a
+      scrollable segmented selector across the up-to-6 players; one-page-app layout.
+- [ ] **Pressure & share always 50/50** — data bug; find the calc, fix or remove if not real.
+- [ ] **Touches-per-player half-bar** (match history) — broken/half-rendered; fix or remove.
+- [ ] **Data-gap audit (RECURRING)** — each pass, audit one page's datasets vs the DB; flag
+      missing / placeholder / always-constant values; fix or document. Screenshot to verify.
+- [x] **Club "1ST DAY PEWPING" noise** — removed the our-team-name suffix from the /clan title
+      (it was the user's own RL club name leaking onto the opponent-clubs page).
+- [x] **>200 matches** — history limit 200 → 2000 (proper pagination/infinite-scroll is the
+      real follow-up for ballchasing-style scale).
+
 ## [code] genuine fixes to grind (loop works these)
 
 - [x] ~~**Scaling/console icons**~~ — RESOLVED as deploy-only; caps verified correct in code (see above). No code change needed; deploy fixes the live site.
