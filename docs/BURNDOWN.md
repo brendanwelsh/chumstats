@@ -25,6 +25,9 @@ finishes — keep iterating balance changes.
 - **Players directory** — already a clean full-width box score; added a leaderboard **rank (#)**
   column (ESPN-standings style), verified live. NOTE for a no-Chum pass: the RELATION column
   (teammate/opponent) is relative to the configured owner — owner-centric framing to revisit.
+- **Results / history** — killed the dead gap between score and stat columns by adding a
+  venue **Arena** column (normalized names) + capping the score-cell width, so each row reads
+  as a balanced scoreboard line. Verified live.
 
 ### Still to repass (ESPN pass, top-down)
 - [x] **Match · "Us vs them" → "Team comparison"** — DONE. Forced neutral Blue-vs-Orange always; nav chip "Teams"; also dropped the owner-perspective "vs your career" insights card. 0 us/them/your-career leaks live.
