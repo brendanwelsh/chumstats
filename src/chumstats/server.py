@@ -5959,34 +5959,28 @@ def _clan_page_html(store, members: list[str], *, self_name: str | None = None,
           </tr>
         """)
 
-    # Combined touch heatmap: union of every member's lifetime touch data.
-    # _lifetime_touch_data returns a playback-shaped dict; we merge ball_track
-    # lists across members for a unified heatmap.
-    merged_track = []
-    merged_thirds = {"def": 0, "neu": 0, "off": 0}
-    member_match_ids: set[str] = set()
+    # Combined SHOT heatmap: union of every member's goal-shot locations (where
+    # the club scores from). The merged TOUCH heatmap was a useless dense blob;
+    # shots are sparse + meaningful.
+    merged_shots = []
     for nm in members:
-        td = _lifetime_touch_data(store, nm)
-        merged_track.extend(td["ball_track"])
-        for k in merged_thirds:
-            merged_thirds[k] += td["thirds"][k]
-        if td.get("matches_with_touches"):
-            # Note: this is a per-player count; clan-level dedup is approximate.
-            pass
+        sd = _lifetime_shot_data(store, nm)
+        merged_shots.extend(sd.get("ball_track") or [])
     combined = {
-        "ball_track": merged_track,
+        "ball_track": merged_shots,
         "svg": {"vb_w": 880, "vb_h": 380, "pitch_w": 800, "pitch_h": 320,
                 "pad_x": 40.0, "pad_y": 30.0},
     }
-    heatmap_svg = _ball_heatmap_svg(combined, key="clan") if merged_track else ""
+    heatmap_svg = _ball_heatmap_svg(combined, key="clan", exclude_center=False) if merged_shots else ""
     heatmap_html = (
         f"""
           <div class="card" style="margin-top:14px">
             <div class="section-title">
-              <span>Where the club touches the ball</span>
+              <span>Where the club scores from</span>
               <span class="dim" style="text-transform:none;letter-spacing:0">
-                {len(merged_track)} touches across every match these {len(members)} players appeared in,
-                rotated so the club always attacks &#8594; (right).
+                Shot location of {len(merged_shots)} goal{'s' if len(merged_shots) != 1 else ''}
+                across every match these {len(members)} players appeared in,
+                rotated so the club attacks &#8594; (right).
               </span>
             </div>
             <div class="hm-wrap">{heatmap_svg}</div>
