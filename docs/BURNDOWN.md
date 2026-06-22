@@ -247,3 +247,16 @@ StatfeedEvent, + lifecycle.
 ---
 
 _Source of truth for the autonomous burndown loop. Update checkboxes as items land._
+- **Validation sweep (accuracy) — player profile KPIs (PASS, no fix)** — recomputed Blazed's profile
+  headline numbers from central.db with the same bot filter and diffed vs the live page. ALL 7 match:
+  matches 81, W-L 33-48, goals 37 → 0.46/match, shooting 39.4%, MVPs 3, clean sheets 10, goal diff -38.
+  Career KPIs are accurate.
+
+## Convergence note
+The big offenders are resolved across ~16 fires: every page box-score'd, no-Chum reframe complete +
+clean, real bugs fixed (empty kickoff pane, timeline timestamp collapse, box-score touches mismatch,
+air/wall/ground sum-to-100 on 3 surfaces, green test suite), and accuracy verified on both a match and
+a profile. Validation passes are now mostly coming back clean — the loop is in steady-state /
+diminishing returns. Remaining genuine work: club-subject-parameterization (structural; data defaults
+to the owner but all labels are neutral) + periodic accuracy spot-checks. Worth considering a lower
+cadence than every 10 min, or winding down, since per-fire yield is dropping.
