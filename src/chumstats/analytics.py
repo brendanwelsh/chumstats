@@ -462,14 +462,20 @@ def build_dashboard(store, *, primary_id: str | None = None,
         # opponent profiles the data is a ~10% replay sample, so we omit it
         # rather than show a misleading number.
         if matches and (ticks / matches) >= SPECTATOR_TICKS_PER_MATCH:
+            # Ground/air/wall partition POSITION time; normalise to their own sum
+            # so they total 100% (some ticks lack a clean position classification,
+            # which otherwise left them at e.g. 72/19/5 = 97%). Supersonic is a
+            # speed state (independent of position) so it stays vs total ticks.
+            pos_ticks = ((row["ticks_ground"] or 0) + (row["ticks_air"] or 0)
+                         + (row["ticks_wall"] or 0)) or 1
             d.movement.lines.extend([
                 MetricLine("Avg speed", f"{(row['speed_sum'] or 0) / ticks:.1f} km/h",
                            f"max {row['speed_max'] or 0:.1f} km/h"),
                 MetricLine("Supersonic", _pct(row["ticks_super"] or 0, ticks, 1),
                            "time at 2200+ uu/s (79.2 km/h)"),
-                MetricLine("In air",     _pct(row["ticks_air"] or 0, ticks, 1), ""),
-                MetricLine("On wall",    _pct(row["ticks_wall"] or 0, ticks, 1), ""),
-                MetricLine("On ground",  _pct(row["ticks_ground"] or 0, ticks, 1), ""),
+                MetricLine("In air",     _pct(row["ticks_air"] or 0, pos_ticks, 1), ""),
+                MetricLine("On wall",    _pct(row["ticks_wall"] or 0, pos_ticks, 1), ""),
+                MetricLine("On ground",  _pct(row["ticks_ground"] or 0, pos_ticks, 1), ""),
                 MetricLine("BPM", f"{(row['boost_used'] or 0) / (ticks / 30 / 60):.0f}",
                            "boost used per minute (gameplay time)"),
             ])
@@ -810,15 +816,21 @@ def build_comparison(store, a_primary_id: str | None = None, a_name: str | None 
         add_adv("Supersonic %",
             (a.get("ticks_super") or 0) / a_ticks if a_ticks else None,
             (b.get("ticks_super") or 0) / b_ticks if b_ticks else None, kind="pct")
+        # Ground/air/wall partition POSITION time → normalise to their own sum so
+        # the three total 100% (unclassified ticks otherwise leave them short).
+        a_pos = ((a.get("ticks_ground") or 0) + (a.get("ticks_air") or 0)
+                 + (a.get("ticks_wall") or 0)) or 1
+        b_pos = ((b.get("ticks_ground") or 0) + (b.get("ticks_air") or 0)
+                 + (b.get("ticks_wall") or 0)) or 1
         add_adv("In air %",
-            (a.get("ticks_air") or 0) / a_ticks if a_ticks else None,
-            (b.get("ticks_air") or 0) / b_ticks if b_ticks else None, kind="pct")
+            (a.get("ticks_air") or 0) / a_pos if a_ticks else None,
+            (b.get("ticks_air") or 0) / b_pos if b_ticks else None, kind="pct")
         add_adv("On wall %",
-            (a.get("ticks_wall") or 0) / a_ticks if a_ticks else None,
-            (b.get("ticks_wall") or 0) / b_ticks if b_ticks else None, kind="pct")
+            (a.get("ticks_wall") or 0) / a_pos if a_ticks else None,
+            (b.get("ticks_wall") or 0) / b_pos if b_ticks else None, kind="pct")
         add_adv("On ground %",
-            (a.get("ticks_ground") or 0) / a_ticks if a_ticks else None,
-            (b.get("ticks_ground") or 0) / b_ticks if b_ticks else None, kind="pct")
+            (a.get("ticks_ground") or 0) / a_pos if a_ticks else None,
+            (b.get("ticks_ground") or 0) / b_pos if b_ticks else None, kind="pct")
         # Absolute boost/match is sample-dependent (a mostly-opponent player has
         # only ~10% of ticks), unlike the ratio stats above. Suppress it unless
         # we have near-full per-match coverage (~6000 of a ~9000-tick game).
