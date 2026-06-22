@@ -356,6 +356,7 @@ def make_app(broadcaster: Broadcaster, *, store=None,
     @_gated_get("/history")
     async def history_page(include_bots: int = 0, mode: int | None = None,
                             window: str | None = None, platform: str | None = None,
+                            pid: str | None = None, name: str | None = None,
                             sort: str = "recent"):
         if store is None:
             return HTMLResponse("<p>No DB configured</p>")
@@ -363,13 +364,23 @@ def make_app(broadcaster: Broadcaster, *, store=None,
         window_days = {"today": 1, "7d": 7, "30d": 30}.get(window or "", None)
         if sort not in ("recent", "score", "goals", "saves", "best"):
             sort = "recent"
+        # Subject: any player via ?pid= / ?name=, else the configured owner.
+        is_self = not (pid or name)
+        subj_pid = pid or self_primary_id
+        subj_name = name or self_name
+        if pid and not name:
+            with store._conn() as con:
+                r = con.execute("SELECT name FROM match_player_stats WHERE "
+                                "primary_id = ? ORDER BY rowid DESC LIMIT 1", (pid,)).fetchone()
+                if r:
+                    subj_name = r["name"]
         return HTMLResponse(_history_page_html(
-            store, self_primary_id, self_name,
+            store, subj_pid, subj_name,
             include_bots=bool(include_bots),
             mode_filter=mode_filter,
             window_days=window_days,
             platform_filter=platform or None,
-            sort=sort,
+            sort=sort, is_self=is_self,
         ))
 
     @_gated_get("/match/{match_id}")
@@ -1782,9 +1793,12 @@ def _match_history_html(store, primary_id: str | None, name: str | None, *,
     """
     if not show_section_chrome:
         return table_html
+    # "View all" goes to this subject's full history (?pid=), so it works on any
+    # player's profile — not just the configured owner.
+    view_all = f"/history?pid={quote(primary_id, safe='')}" if primary_id else "/history"
     return f"""
       <section>
-        <h2>Recent matches <a href="/history" class="see-all">view all</a></h2>
+        <h2>Recent matches <a href="{view_all}" class="see-all">view all</a></h2>
         {table_html}
       </section>
     """
@@ -2009,7 +2023,8 @@ def _history_page_html(store, primary_id, name, *,
                        mode_filter: int | None = None,
                        window_days: int | None = None,
                        platform_filter: str | None = None,
-                       sort: str = "recent") -> str:
+                       sort: str = "recent",
+                       is_self: bool = True) -> str:
     rows = _match_history_rows(
         store, primary_id, name, limit=2000,
         include_bots=include_bots, mode_filter=mode_filter,
@@ -2129,7 +2144,7 @@ def _history_page_html(store, primary_id, name, *,
     body = f"""
       <div class="page-head">
         <div>
-          <h1>Match history</h1>
+          <h1>{"Match history" if is_self else html.escape(name or "") + " — matches"}</h1>
           <div class="sub">{total} match{'es' if total != 1 else ''} shown{filter_summary}</div>
         </div>
       </div>
