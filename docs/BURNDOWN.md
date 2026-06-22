@@ -260,3 +260,7 @@ a profile. Validation passes are now mostly coming back clean — the loop is in
 diminishing returns. Remaining genuine work: club-subject-parameterization (structural; data defaults
 to the owner but all labels are neutral) + periodic accuracy spot-checks. Worth considering a lower
 cadence than every 10 min, or winding down, since per-fire yield is dropping.
+- **Validation sweep (data) — full central-DB audit (PASS, no fix)** — 394 matches / 1933 player rows.
+  0 null arena/scores/winner/started_at, 0 matches with <2 players, 0 null name/platform/Unknown-pid
+  (non-bot), 0 negative stats. Expected-only: 18 zero-tick rows (no-coverage opponents), 3 ties
+  (forfeit/abandoned, winner still set), 7 unmapped arenas (documented no-source fallback). DB is clean.
