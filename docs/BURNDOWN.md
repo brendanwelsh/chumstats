@@ -21,7 +21,7 @@ finishes — keep iterating balance changes.
   normalized in the career per-arena breakdown.
 
 ### Still to repass (ESPN pass, top-down)
-- [ ] **Match · "Us vs them" → neutral "Blue vs Orange"** (owner-perspective label remains).
+- [x] **Match · "Us vs them" → "Team comparison"** — DONE. Forced neutral Blue-vs-Orange always; nav chip "Teams"; also dropped the owner-perspective "vs your career" insights card. 0 us/them/your-career leaks live.
 - [ ] **Player profile** — radar chart is weak; make the career stats a clean box score; the
       `Blazed / Blazed` double-name + tiny win% sub-label need tightening.
 - [ ] **Players directory / opponents / clubs / compare / results** — same box-score treatment.
