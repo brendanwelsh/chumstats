@@ -50,9 +50,9 @@ After the loop lands code items + pushes, run the above so chumstats.com updates
 - [x] **Heatmap: remove first touches** — DONE. Sequence-tag kickoff first-touches
       (first non-replay BallHit after start + after each goal) in `_build_playback_data`;
       `_ball_heatmap_svg` drops tagged touches; lifetime keeps the centre-box fallback.
-- [ ] **Per-match touches = spot icons, not heatmap** — in the per-match view, render
-      each touch as a discrete spot/marker; keep the density heatmap only for the
-      aggregate/career view (too few touches per match for a meaningful heatmap).
+- [x] **Per-match touches = spot icons, not heatmap** — DONE. `_touch_spots_svg`
+      renders one `.tspot` marker per touch (kickoff dropped) for the per-match roster
+      mini-map; lifetime/career keeps the density heatmap.
 - [ ] **Demo-location map** — investigate whether demo events carry x/y location in the
       captured data; if yes, add a demo map alongside the goal/shot maps.
 - [ ] **Spatial-data gap analysis** — enumerate captured location data (ball + player
