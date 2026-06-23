@@ -4880,6 +4880,7 @@ def _player_breakdown_html(store, primary_id: str | None, name: str | None,
         ]),
         ("Boost timing", "single", [
             ("BPM (boost used per minute)", num(bpm, "{:.0f}")),
+            ("Time boosting %", num(tickpct(r.get('ticks_boosting')), "{:.1f}%")),
             ("Time at 100 boost %", num(tickpct(r.get('ticks_full')), "{:.1f}%")),
         ]),
         ("Ball positioning (across matches)", "single", [
@@ -5158,6 +5159,8 @@ def _compare_page_html(store, slots: list[str], *, self_name: str | None = None,
              bpm_vals, True),
             # "Time near-empty %" removed — boost<=1 almost never fires (0% for
             # everyone), so the stat was invalid. See session.py threshold note.
+            ("Time boosting %", lambda v: f"{v*100:.1f}%",
+             [pct_if(r.get("ticks"), r.get("ticks_boosting")) for r in rows], True),
             ("Time at 100 boost %", lambda v: f"{v*100:.1f}%",
              [pct_if(r.get("ticks"), r.get("ticks_full")) for r in rows], True),
         ]),
@@ -10045,6 +10048,7 @@ def _dashboard_html(d, store=None, primary_id: str | None = None,
     active = "dashboard" if is_self else ""
 
     is_bot = False
+    plat = None
     if store and (name or primary_id):
         try:
             with store._conn() as con:
@@ -10052,9 +10056,20 @@ def _dashboard_html(d, store=None, primary_id: str | None = None,
                 arg = primary_id or name
                 row = con.execute(f"SELECT MAX(is_bot) AS b FROM match_player_stats WHERE {where}", (arg,)).fetchone()
                 is_bot = bool(row and row["b"])
+                # Most-used platform for this player, so their account platform is
+                # visible on the profile itself — it was otherwise only on the
+                # directory / match roster (a stat you had to leave to find).
+                prow = con.execute(
+                    f"SELECT platform FROM match_player_stats WHERE {where} "
+                    f"AND platform NOT IN ('', 'Unknown') "
+                    f"GROUP BY platform ORDER BY COUNT(*) DESC LIMIT 1", (arg,)).fetchone()
+                if prow:
+                    plat = prow["platform"]
         except Exception:
             pass
     bot_badge = '<span class="profile-bot-badge">BOT ACCOUNT</span>' if is_bot else ""
+    plat_badge = (f'<span class="profile-plat" title="{html.escape(plat)}">'
+                  f'{_platform_icon_html(plat, size=20)}</span>') if plat else ""
 
     # Bot-filter chip - default is "Filter Bot matches" ON (include_bots=False).
     base_path = "/dashboard" if is_self else f"/player/{quote(name, safe='')}"
@@ -10108,7 +10123,7 @@ def _dashboard_html(d, store=None, primary_id: str | None = None,
                "el.addEventListener('click',function(){show(el.dataset.target);});});})();</script>")
     body = f"""
   <div class="profile-header">
-    <h1>{html.escape(page_title)} {bot_badge}</h1>
+    <h1>{html.escape(page_title)} {plat_badge}{bot_badge}</h1>
   </div>
   {who_html}
   {profile_links}
@@ -10120,6 +10135,7 @@ def _dashboard_html(d, store=None, primary_id: str | None = None,
     .rel-grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,480px));gap:14px;align-items:start;justify-content:center}}
     #profile-nav{{position:static}}
     .kpi-row{{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}}
+    .profile-plat{{display:inline-flex;vertical-align:middle;margin:0 4px;opacity:.85}}
   </style>
   {nav}
   {panes_html}
