@@ -19,7 +19,6 @@ import sqlite3
 from dataclasses import dataclass, field
 from typing import Iterable
 
-from .arenas import arena_nice
 from .session import MatchSummary, PlayerLine
 
 # Movement / boost / positioning are SPECTATOR-only per-player fields: the Stats
@@ -323,7 +322,6 @@ class Dashboard:
     movement: MetricGroup = field(default_factory=lambda: MetricGroup("Movement (lifetime)"))
     boost: MetricGroup = field(default_factory=lambda: MetricGroup("Boost (lifetime)"))
     records: MetricGroup = field(default_factory=lambda: MetricGroup("Single-match records"))
-    arenas: MetricGroup = field(default_factory=lambda: MetricGroup("By arena"))
     modes: MetricGroup = field(default_factory=lambda: MetricGroup("Online vs offline"))
     recent_form: MetricGroup = field(default_factory=lambda: MetricGroup("Recent form (last 10)"))
     teammates: MetricGroup = field(default_factory=lambda: MetricGroup("Best teammates"))
@@ -332,7 +330,7 @@ class Dashboard:
     def all_groups(self) -> Iterable[MetricGroup]:
         return (
             self.overview, self.averages, self.movement, self.boost,
-            self.records, self.recent_form, self.modes, self.arenas,
+            self.records, self.recent_form, self.modes,
             self.teammates, self.opponents,
         )
 
@@ -489,7 +487,7 @@ def build_dashboard(store, *, primary_id: str | None = None,
                 MetricLine("Avg speed", f"{(row['speed_sum'] or 0) / ticks:.1f} km/h",
                            f"max {row['speed_max'] or 0:.1f} km/h"),
                 MetricLine("Supersonic", _pct(row["ticks_super"] or 0, ticks, 1),
-                           "time at 2200+ uu/s (79.2 km/h)"),
+                           "share of play at top speed"),
                 MetricLine("In air",     _pct(row["ticks_air"] or 0, pos_ticks, 1), ""),
                 MetricLine("On wall",    _pct(row["ticks_wall"] or 0, pos_ticks, 1), ""),
                 MetricLine("On ground",  _pct(row["ticks_ground"] or 0, pos_ticks, 1), ""),
@@ -530,24 +528,9 @@ def build_dashboard(store, *, primary_id: str | None = None,
                 MetricLine("Score in a match",   str(rec["max_score"] or 0), ""),
             ])
 
-        # ---- by arena ----
-        arena_rows = con.execute(f"""
-            SELECT m.arena AS arena,
-                   COUNT(*) AS n,
-                   SUM(CASE WHEN mps.team_num = m.winner_team_num THEN 1 ELSE 0 END) AS w
-            FROM match_player_stats mps
-            JOIN matches m ON m.id = mps.match_id
-            WHERE mps.{where}{bot_filter}
-            GROUP BY m.arena
-            ORDER BY n DESC
-        """, (arg,)).fetchall()
-        for r in arena_rows:
-            if not r["arena"]:
-                continue
-            n = r["n"]; w = r["w"]
-            d.arenas.lines.append(MetricLine(
-                arena_nice(r["arena"]), f"{w}-{n - w}", f"win% {(w / n) * 100:.0f}",
-            ))
+        # By-arena breakdown removed: most arena ids can't be resolved to a real
+        # name (they'd show "Unknown arena"), so the split was noise. The arena
+        # still shows per-match where it IS known.
 
         # ---- by mode ----
         mode_rows = con.execute(f"""

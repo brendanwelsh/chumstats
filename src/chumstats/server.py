@@ -2318,6 +2318,11 @@ def _match_detail_html(store, match_id: str, viewer_pid: str | None, viewer_name
         extras = con.execute("SELECT * FROM match_extras WHERE match_id = ?", (match_id,)).fetchone()
 
     arena = _arena_nice(m["arena"] or "")
+    # Unresolvable arena ids render as "" (no "Unknown arena" noise) — guard the
+    # separators so we never leave a dangling "·" when there's no arena name.
+    arena_crumb = f"{arena} &middot; " if arena else ""
+    arena_meta = (f'<span>{arena}</span>'
+                  '<span class="hero-meta-sep">&middot;</span>') if arena else ""
     # Render the start timestamp as ISO-8601 so a small <time> formatter can
     # rewrite it to 12hr local on the client. Server-side fallback is also
     # 12hr-ish so it's readable even if JS doesn't run.
@@ -2861,9 +2866,7 @@ def _match_detail_html(store, match_id: str, viewer_pid: str | None, viewer_name
       <div class="breadcrumb">
         <a href="/history">&larr; Matches</a>
         <span style="margin:0 6px">/</span>
-        <span>{arena} &middot;
-          <time datetime="{started_iso}">{started_fallback}</time>
-        </span>
+        <span>{arena_crumb}<time datetime="{started_iso}">{started_fallback}</time></span>
       </div>
 
       <header class="match-hero">
@@ -2884,8 +2887,7 @@ def _match_detail_html(store, match_id: str, viewer_pid: str | None, viewer_name
             <span class="hero-ctx-pill {match_context_class}">{match_context}</span>
           </div>
           <div class="hero-meta">
-            <span>{arena}</span>
-            <span class="hero-meta-sep">&middot;</span>
+            {arena_meta}
             <time datetime="{started_iso}">{started_fallback}</time>
             <span class="hero-meta-sep">&middot;</span>
             <span>{mode}</span>

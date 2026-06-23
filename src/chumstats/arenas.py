@@ -114,16 +114,16 @@ def arena_nice(arena: str | None) -> str:
     title-cased form (trailing ``_P`` and underscores stripped) and are logged
     once so the table can be extended after verification."""
     if not arena:
-        return "Unknown arena"
+        return ""
     key = arena.lower()
     name = ARENA_NICE.get(key)
     if name is not None:
         return name
     if key not in _unknown_logged:
         _unknown_logged.add(key)
-        log.info("unmapped arena id %r -> shown as 'Unknown arena'", arena)
+        log.info("unmapped arena id %r -> hidden (no friendly name)", arena)
     # Don't fabricate a friendly name from an opaque internal id — e.g.
     # "UF_Night_P" title-cased to "UF Night", which reads like a real map but
-    # isn't. Show a neutral label; the id is logged so the table can be extended
-    # once the map is identified.
-    return "Unknown arena"
+    # isn't. And don't show "Unknown arena" noise either — just render nothing;
+    # the id is logged so the table can be extended once the map is identified.
+    return ""
