@@ -337,6 +337,23 @@ class Dashboard:
         )
 
 
+def valid_match_sql(lead: str = " AND ") -> str:
+    """Predicate that drops physically-impossible (corrupt) matches from
+    aggregates: any match where a player's goals exceed their team's score —
+    impossible in real RL, and the signature of a freeplay/training session
+    that got uploaded before the ingest guard existed. Always-on and
+    non-destructive: the raw rows stay in the DB; they're just excluded from
+    totals/averages so one junk upload can't inflate the leaderboard. `lead`
+    is the clause prefix — " AND " to append to an existing WHERE, "" to use
+    as a standalone term, " WHERE " to open a fresh one."""
+    return (
+        f"{lead}match_id NOT IN (SELECT cz.match_id FROM match_player_stats cz "
+        "JOIN matches cm ON cm.id = cz.match_id "
+        "WHERE cz.goals > (CASE WHEN cz.team_num = 0 THEN cm.team0_score "
+        "ELSE cm.team1_score END))"
+    )
+
+
 def build_dashboard(store, *, primary_id: str | None = None,
                     name: str | None = None,
                     include_bots: bool = True,
@@ -382,7 +399,7 @@ def build_dashboard(store, *, primary_id: str | None = None,
         cutoff = _time.time() - window_days * 86400
         window_sql = f" AND m.started_at >= {cutoff}"
     # Concatenate all filters
-    bot_filter = bot_filter + mode_filter_sql + platform_sql + window_sql
+    bot_filter = bot_filter + mode_filter_sql + platform_sql + window_sql + valid_match_sql()
 
     with store._conn() as con:
         # ---- overview ----
@@ -689,6 +706,7 @@ def _lifetime_row(con, primary_id: str | None, name: str | None,
         import time as _time
         cutoff = _time.time() - window_days * 86400
         extras += f" AND m.started_at >= {cutoff}"
+    extras += valid_match_sql()
     row = con.execute(f"""
         SELECT
             COUNT(*) AS matches,

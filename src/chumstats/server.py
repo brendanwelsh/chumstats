@@ -1572,6 +1572,8 @@ def _radar_block_for_player(store, primary_id: str | None, name: str | None,
         " AND match_id IN (SELECT m.id FROM matches m WHERE NOT EXISTS "
         "(SELECT 1 FROM match_player_stats x WHERE x.match_id = m.id AND x.is_bot = 1))"
     )
+    from .analytics import valid_match_sql
+    bot_filter += valid_match_sql()
     with store._conn() as con:  # type: ignore[attr-defined]
         row = con.execute(f"""
             SELECT
@@ -1586,13 +1588,14 @@ def _radar_block_for_player(store, primary_id: str | None, name: str | None,
         # Reference = the field of per-player per-match averages (regulars only).
         # Scaling against the best regular's average (not a freak single game)
         # keeps the bars meaningful instead of a tiny blob near zero.
-        field = con.execute("""
+        field = con.execute(f"""
             SELECT AVG(ag) mg, MAX(ag) xg, AVG(aa) ma, MAX(aa) xa,
                    AVG(asv) msv, MAX(asv) xsv, AVG(ash) msh, MAX(ash) xsh,
                    AVG(ad) md, MAX(ad) xd
             FROM (SELECT AVG(goals) ag, AVG(assists) aa, AVG(saves) asv,
                          AVG(shots) ash, AVG(demos) ad
-                  FROM match_player_stats GROUP BY primary_id HAVING COUNT(*) >= 5)
+                  FROM match_player_stats {valid_match_sql(lead='WHERE ')}
+                  GROUP BY primary_id HAVING COUNT(*) >= 5)
         """).fetchone()
     if not row or not row["n"]:
         return ""
@@ -1915,6 +1918,10 @@ def _players_directory_html(store, self_primary_id: str | None = None,
         import time as _time
         cutoff = _time.time() - window_days * 86400
         inner_clauses.append(f"m.started_at >= {cutoff}")
+    # Always drop physically-impossible (corrupt) matches from the leaderboard,
+    # independent of the bot filter — a bad upload shouldn't inflate any total.
+    from .analytics import valid_match_sql
+    inner_clauses.append(valid_match_sql(lead=""))
     inner_where = (" WHERE " + " AND ".join(inner_clauses)) if inner_clauses else ""
 
     sql = f"""
