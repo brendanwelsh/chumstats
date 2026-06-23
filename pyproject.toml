@@ -6,6 +6,7 @@ build-backend = "hatchling.build"
 name = "chumstats"
 version = "0.0.1"
 description = "Rocket League Stats API ingest, session/lifetime tracker, and overlay backend."
+license = { text = "MIT" }
 requires-python = ">=3.11"
 dependencies = [
     "pydantic>=2.7",

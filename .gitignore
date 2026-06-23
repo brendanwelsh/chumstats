@@ -37,11 +37,13 @@ PRODUCT.md
 .agents/
 .design/
 skills-lock.json
-# Working/scratch screenshot dirs (docs/screenshots/ is the published set)
+# Working/scratch screenshot dirs (docs/images/ is the published set)
+.shots/
 docs/audit/
 docs/overlap/
 docs/boost_audit/
 docs/screens/
+docs/screenshots/
 
 # local UI preview scratch
 .uipreview.py
