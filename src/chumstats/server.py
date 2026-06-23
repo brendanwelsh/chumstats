@@ -4771,6 +4771,142 @@ PortNumber=49123</pre>
     return _page_wrap("How it works", body, active="about")
 
 
+def _player_breakdown_html(store, primary_id: str | None, name: str | None,
+                           *, include_bots: bool = False) -> str:
+    """One player's full lifetime stat sheet — the SAME comprehensive set the
+    Compare page shows (volume / efficiency / combat / highlights / per-stat
+    output / movement / boost / ball positioning), rendered single-column for
+    the profile Breakdown tab. Reuses the compare data helpers (_lifetime_row /
+    _lifetime_derived / _lifetime_touch_data) so the numbers match /compare
+    exactly. Keep the metric set in sync with _compare_page_html's `sections`."""
+    if not store or not (primary_id or name):
+        return ""
+    from .analytics import _lifetime_row
+    with store._conn() as con:
+        r = _lifetime_row(con, primary_id, name)
+    if not r or not r.get("matches"):
+        return ""
+    d = _lifetime_derived(store, name) if name else _empty_derived()
+    td = _lifetime_touch_data(store, name) if name else None
+
+    m = r.get("matches") or 0
+    wins = r.get("wins") or 0
+    ticks = r.get("ticks") or 0
+
+    def sd(a, b):
+        return (a or 0) / b if b else 0.0
+
+    def tickpct(n):
+        """Tick-share % — needs ~1000 ticks of coverage to be representative."""
+        return (n or 0) / ticks * 100 if ticks >= 1000 else None
+
+    def third(key):
+        thirds = td.get("thirds") if td else None
+        if not thirds:
+            return None
+        t = sum(thirds.values())
+        return thirds.get(key, 0) / t * 100 if t else None
+
+    def num(v, fmt):
+        return fmt.format(v) if isinstance(v, (int, float)) else "n/a"
+
+    gp = (d.get("goal_participation_num", 0) / d["goal_participation_den"] * 100) \
+        if d.get("goal_participation_den") else None
+    ags = (d.get("goal_speed_sum", 0) / d["goal_count"]) if d.get("goal_count") else None
+    bpm = ((r.get("boost_used") or 0) / (ticks / 30 / 60)) if ticks >= 1000 else None
+    avg_speed = sd(r.get("speed_sum"), ticks) if ticks >= 1000 else None
+    boost_tot = r.get("boost_used") if ticks >= 1000 else None
+    boost_avg = sd(r.get("boost_used"), m) if ticks >= 1000 else None
+    dg, dr = d.get("demos_given", 0), d.get("demos_received", 0)
+    kd = "∞" if (dr == 0 and dg > 0) else (f"{dg / dr:.2f}" if dr else "n/a")
+
+    sections = [
+        ("Volume", "single", [
+            ("Matches", f"{m:.0f}"), ("Wins", f"{wins:.0f}"),
+            ("Losses", f"{m - wins:.0f}"), ("MVPs", f"{r.get('mvp') or 0:.0f}"),
+        ]),
+        ("Efficiency", "single", [
+            ("Win rate", num(sd(wins, m) * 100, "{:.1f}%")),
+            ("MVP rate", num(sd(r.get('mvp'), m) * 100, "{:.1f}%")),
+            ("Shooting %", num(sd(r.get('goals'), r.get('shots')) * 100, "{:.1f}%")),
+            ("Score / touch", num(sd(r.get('score'), r.get('touches')), "{:.2f}")),
+            ("Goal participation", num(gp, "{:.1f}%")),
+            ("Avg goal speed (kph)", num(ags, "{:.0f}")),
+        ]),
+        ("Combat", "single", [
+            ("Demos delivered (total)", f"{dg:.0f}"),
+            ("Demos received (total)", f"{dr:.0f}"),
+            ("Demos delivered / match", num(sd(dg, m), "{:.2f}")),
+            ("Demos received / match", num(sd(dr, m), "{:.2f}")),
+            ("Demo K/D", kd),
+            ("Crossbar hits", f"{d.get('crossbar_hits', 0):.0f}"),
+        ]),
+        ("Highlights (special moments)", "single", [
+            ("Epic saves", f"{d.get('n_epicsave', 0):.0f}"),
+            ("Aerial goals", f"{d.get('n_aerialgoal', 0):.0f}"),
+            ("Bicycle hits", f"{d.get('n_bicyclehit', 0):.0f}"),
+            ("Flip resets", f"{d.get('n_flipreset', 0):.0f}"),
+            ("Hat tricks", f"{d.get('n_hattrick', 0):.0f}"),
+            ("Long goals", f"{d.get('n_longgoal', 0):.0f}"),
+            ("Backwards goals", f"{d.get('n_backwardsgoal', 0):.0f}"),
+            ("Saviors", f"{d.get('n_savior', 0):.0f}"),
+            ("Low fives", f"{d.get('n_lowfive', 0):.0f}"),
+            ("Total highlights", f"{d.get('highlights', 0):.0f}"),
+        ]),
+        ("Per-stat output (total · per match)", "totavg", [
+            ("Goals", f"{r.get('goals') or 0:.0f}", num(sd(r.get('goals'), m), "{:.2f}")),
+            ("Assists", f"{r.get('assists') or 0:.0f}", num(sd(r.get('assists'), m), "{:.2f}")),
+            ("Saves", f"{r.get('saves') or 0:.0f}", num(sd(r.get('saves'), m), "{:.2f}")),
+            ("Shots", f"{r.get('shots') or 0:.0f}", num(sd(r.get('shots'), m), "{:.2f}")),
+            ("Demos", f"{r.get('demos') or 0:.0f}", num(sd(r.get('demos'), m), "{:.2f}")),
+            ("Score", f"{r.get('score') or 0:,.0f}", num(sd(r.get('score'), m), "{:,.0f}")),
+            ("Touches", f"{r.get('touches') or 0:,.0f}", num(sd(r.get('touches'), m), "{:.1f}")),
+        ]),
+        ("Movement (where they are on the field)", "single", [
+            ("Supersonic %", num(tickpct(r.get('ticks_super')), "{:.1f}%")),
+            ("Time in air %", num(tickpct(r.get('ticks_air')), "{:.1f}%")),
+            ("Time on wall %", num(tickpct(r.get('ticks_wall')), "{:.1f}%")),
+            ("Time on ground %", num(tickpct(r.get('ticks_ground')), "{:.1f}%")),
+            ("Avg speed", num(avg_speed, "{:.1f}")),
+        ]),
+        ("Boost (total · per match)", "totavg", [
+            ("Boost used", num(boost_tot, "{:,.0f}"), num(boost_avg, "{:,.0f}")),
+        ]),
+        ("Boost timing", "single", [
+            ("BPM (boost used per minute)", num(bpm, "{:.0f}")),
+            ("Time at 100 boost %", num(tickpct(r.get('ticks_full')), "{:.1f}%")),
+        ]),
+        ("Ball positioning (across matches)", "single", [
+            ("Ball touches", num(td.get('touches') if td else None, "{:,.0f}")),
+            ("Defensive third %", num(third('def'), "{:.1f}%")),
+            ("Neutral third %", num(third('neu'), "{:.1f}%")),
+            ("Offensive third %", num(third('off'), "{:.1f}%")),
+        ]),
+    ]
+
+    out = ['<div class="card breakdown-card" style="padding:0;overflow:hidden">',
+           '<table class="compare-table breakdown-table"><tbody>']
+    for sec_name, kind, metric_rows in sections:
+        out.append(
+            f'<tr class="compare-section-row"><td colspan="2">{sec_name}</td></tr>')
+        for mrow in metric_rows:
+            if kind == "single":
+                label, val = mrow
+                out.append(
+                    f'<tr><td class="compare-metric">{_stat_icon_html(label)}{label}</td>'
+                    f'<td class="compare-val">{val}</td></tr>')
+            else:
+                label, tot, avg = mrow
+                avg_html = (f'<div class="compare-avg">{avg} / match</div>'
+                            if avg != "n/a" else "")
+                out.append(
+                    f'<tr><td class="compare-metric">{_stat_icon_html(label)}{label}</td>'
+                    f'<td class="compare-val compare-totavg">'
+                    f'<div class="compare-tot">{tot}</div>{avg_html}</td></tr>')
+    out.append('</tbody></table></div>')
+    return "".join(out)
+
+
 def _compare_page_html(store, slots: list[str], *, self_name: str | None = None,
                        include_bots: bool = False,
                        mode_filter: int | None = None,
@@ -8351,6 +8487,14 @@ p, li { max-width: 72ch; }
 }
 .compare-table tr.compare-section-row:first-child td { border-top: 0; }
 
+/* Single-player Breakdown sheet (profile tab): 2-col, value right-aligned so
+   the metric column takes the remaining width. */
+.breakdown-table { table-layout: auto; }
+.breakdown-table td.compare-metric { width: 100%; }
+.breakdown-table td.compare-val { text-align: right; white-space: nowrap; }
+.breakdown-table td.compare-totavg .compare-tot,
+.breakdown-table td.compare-totavg .compare-avg { text-align: right; }
+
 /* Compact mode (optional, body.compact) */
 body.compact section, body.compact .card { padding: 14px 16px; }
 body.compact .page-head { margin-bottom: 16px; }
@@ -9865,8 +10009,11 @@ def _dashboard_html(d, store=None, primary_id: str | None = None,
     teammate_sections: list[str] = []
     # Online-vs-offline removed per feedback; teammates get their own tab; the
     # "Recent form (last 10)" group renders as the form-dot strip instead.
+    # Movement/Boost are skipped here because the full Breakdown stat sheet below
+    # (matching /compare) already covers them — only "Single-match records" and
+    # the relationship groups still flow through this loop.
     skip_titles = {"Overview", "Per-match averages", "Recent form (last 10)",
-                   "Online vs offline"}
+                   "Online vs offline", "Movement (lifetime)", "Boost (lifetime)"}
     for g in d.all_groups():
         if not g.lines or g.title in skip_titles:
             continue
@@ -9915,9 +10062,15 @@ def _dashboard_html(d, store=None, primary_id: str | None = None,
     # Tabbed SPA (mirror the match page): one pane visible at a time, no long
     # scroll. Overview is the landing; Matches sits last.
     panes = [("overview", "Overview", f"{kpis}{form_section}{radar}")]
-    if detail_sections:
-        panes.append(("breakdown", "Breakdown",
-                      f'<div class="detail-grid">{"".join(detail_sections)}</div>'))
+    # Breakdown = the full Compare stat sheet for this player, plus any extra
+    # groups (single-match records) the sheet doesn't cover.
+    breakdown_sheet = _player_breakdown_html(store, primary_id, name,
+                                             include_bots=include_bots)
+    breakdown_extra = (f'<div class="detail-grid">{"".join(detail_sections)}</div>'
+                       if detail_sections else "")
+    breakdown_pane = breakdown_sheet + breakdown_extra
+    if breakdown_pane.strip():
+        panes.append(("breakdown", "Breakdown", breakdown_pane))
     if teammate_sections:
         panes.append(("teammates", "Teammates &amp; opponents",
                       f'<div class="rel-grid">{"".join(teammate_sections)}</div>'))
