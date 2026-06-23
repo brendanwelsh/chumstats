@@ -1724,6 +1724,12 @@ def _match_history_rows(store, primary_id: str | None, name: str | None,
             "AND op2.team_num != mps.team_num AND op2.platform LIKE '%' || ? || '%')")
         args.append(platform_filter)
     where_sql = " AND ".join(where_clauses)
+    # Drop physically-impossible (corrupt) matches so the History summary and
+    # recent-form strip match the rest of the profile (overview/leaderboard
+    # already apply this). Hides the offending rows too, which is desirable —
+    # a "11 goals in a 4-goal game" row is exactly what we don't want shown.
+    from .analytics import valid_match_sql
+    where_sql += valid_match_sql()
     # Per-match team touches (used for possession indicator in history row)
     t0_touches_sql = """(
         SELECT COALESCE(SUM(touches), 0) FROM match_player_stats
@@ -6312,12 +6318,20 @@ def _clan_page_html(store, members: list[str], *, self_name: str | None = None,
           <div class="kpi-value tnum">{clan_total_g}</div>
         </div>
         <div class="kpi">
+          <div class="kpi-label">{_stat_icon_html("Assists")}Assists</div>
+          <div class="kpi-value tnum">{clan_total_a}</div>
+        </div>
+        <div class="kpi">
           <div class="kpi-label">{_stat_icon_html("Saves")}Saves</div>
           <div class="kpi-value tnum">{clan_total_s}</div>
         </div>
         <div class="kpi">
           <div class="kpi-label">{_stat_icon_html("Shots")}Shots</div>
           <div class="kpi-value tnum">{clan_total_sh}</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-label">{_stat_icon_html("Demos")}Demos</div>
+          <div class="kpi-value tnum">{clan_total_d}</div>
         </div>
         <div class="kpi">
           <div class="kpi-label">{_stat_icon_html("MVP")}MVPs</div>

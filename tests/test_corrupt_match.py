@@ -53,6 +53,23 @@ def test_corrupt_match_excluded_from_aggregates(tmp_path):
     assert row["matches"] == 1
 
 
+def test_corrupt_match_excluded_from_history(tmp_path):
+    """The History tab and recent-form strip pull rows from _match_history_rows,
+    which must apply the same corrupt-match filter as the profile aggregates —
+    otherwise a player's History totals/win-rate contradict their overview on
+    the very same page."""
+    from chumstats.server import _match_history_rows
+    store = Store(str(tmp_path / "t.db"))
+    _insert_match(store, "GOOD", team0_score=3, team1_score=1, me_goals=2,
+                  started=1000.0)
+    _insert_match(store, "BADD", team0_score=4, team1_score=0, me_goals=11,
+                  started=2000.0)
+    rows = _match_history_rows(store, ME, None, limit=2000)
+    ids = {r["id"] for r in rows}
+    assert "GOOD" in ids
+    assert "BADD" not in ids, "corrupt match leaked into History/recent-form rows"
+
+
 def test_clean_match_still_counts(tmp_path):
     """Guard must not over-reach: a normal match where goals <= team score is
     kept (the cap is goals > team score, so goals == team score is valid)."""
