@@ -2015,7 +2015,7 @@ def _players_directory_html(store, self_primary_id: str | None = None,
     """
     body = f"""
       <h1>All players</h1>
-      <p class="caption">Everyone we've recorded in any match. Click a name to see their full stats.</p>
+      <p class="caption">Every player from any recorded match. Click a name to see their full stats.</p>
       {sort_toolbar}
       <section class="tscroll">
         <table class="players-table">
