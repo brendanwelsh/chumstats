@@ -931,62 +931,72 @@ _RL_ICON_FOR_EVENT: dict[str, str] = {
 }
 
 
+_BRAND_PATH_CACHE: dict[str, str] = {}
+
+
+def _brand_path_d(slug: str) -> str:
+    """The first <path d="..."> from a brand-logo SVG in overlay/icons/brands
+    (cached). Lets us inline the real, recognizable logo as a monochrome
+    currentColor mark instead of a hand-drawn approximation."""
+    if slug not in _BRAND_PATH_CACHE:
+        d = ""
+        try:
+            raw = (OVERLAY_DIR / "icons" / "brands" / f"{slug}.svg").read_text(encoding="utf-8")
+            i = raw.find('d="')
+            if i != -1:
+                d = raw[i + 3:raw.find('"', i + 3)]
+        except OSError:
+            d = ""
+        _BRAND_PATH_CACHE[slug] = d
+    return _BRAND_PATH_CACHE[slug]
+
+
 def _platform_icon_html(platform: str | None, size: int = 14) -> str:
-    """Return a small SVG icon for a player's platform. Original concept
-    drawings (not trademarked logos) - shared by the sidebar filter and
-    per-row platform badges across the site."""
+    """Small monochrome brand logo for a player's platform, in currentColor so
+    it themes with the surrounding text (real logos read on both light + dark,
+    unlike the brand-colour files). Shared by the sidebar filter and the
+    per-row platform badges. Steam/Epic/PlayStation use the real logo paths;
+    Xbox/Switch use clean geometric marks of the same logos."""
     if not platform:
         return ''
     p = platform.lower()
     sz = f'width="{size}" height="{size}"'
+
+    def _logo(slug: str, title: str) -> str:
+        d = _brand_path_d(slug)
+        if not d:
+            return ''
+        return (
+            f'<svg class="plat-ic" viewBox="0 0 24 24" {sz} fill="currentColor" '
+            f'role="img" aria-label="{title}"><title>{title}</title>'
+            f'<path d="{d}"/></svg>'
+        )
+
     if "steam" in p:
-        return (
-            f'<svg class="plat-ic" viewBox="0 0 24 24" {sz} '
-            'fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" '
-            'title="Steam">'
-            '<circle cx="12" cy="12" r="8"/>'
-            '<circle cx="12" cy="12" r="2.4" fill="currentColor"/>'
-            '<path d="M12 2 V5.5 M12 18.5 V22 M2 12 H5.5 M18.5 12 H22 M5 5 L7.5 7.5 M16.5 16.5 L19 19 M5 19 L7.5 16.5 M16.5 7.5 L19 5"/>'
-            '</svg>'
-        )
+        return _logo("steam", "Steam")
     if "epic" in p:
-        return (
-            f'<svg class="plat-ic" viewBox="0 0 24 24" {sz} fill="currentColor" title="Epic">'
-            '<rect x="2.5" y="2" width="19" height="20" fill="none" stroke="currentColor" stroke-width="2"/>'
-            '<rect x="6.5" y="6"  width="11" height="2.5"/>'
-            '<rect x="6.5" y="10.75" width="8.5" height="2.5"/>'
-            '<rect x="6.5" y="15.5" width="11" height="2.5"/>'
-            '</svg>'
-        )
+        return _logo("epic", "Epic")
     if "ps" in p or "playstation" in p:
-        return (
-            f'<svg class="plat-ic" viewBox="0 0 24 24" {sz} '
-            'fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round" '
-            'title="PlayStation">'
-            '<path d="M5 9 Q5 6 8 6 H16 Q19 6 19 9 V14 Q19 17 16 17 H13.5 L12 19 L10.5 17 H8 Q5 17 5 14 Z"/>'
-            '<line x1="7" y1="11" x2="9" y2="11"/>'
-            '<line x1="8" y1="10" x2="8" y2="12"/>'
-            '<circle cx="14.5" cy="10.5" r="0.7" fill="currentColor"/>'
-            '<circle cx="16.5" cy="12.5" r="0.7" fill="currentColor"/>'
-            '</svg>'
-        )
+        return _logo("playstation", "PlayStation")
     if "xbox" in p:
         return (
-            f'<svg class="plat-ic" viewBox="0 0 24 24" {sz} '
-            'fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" title="Xbox">'
-            '<circle cx="12" cy="12" r="9"/>'
-            '<line x1="7.5" y1="7.5" x2="16.5" y2="16.5"/>'
-            '<line x1="16.5" y1="7.5" x2="7.5" y2="16.5"/>'
+            f'<svg class="plat-ic" viewBox="0 0 24 24" {sz} fill="none" '
+            'stroke="currentColor" stroke-width="1.6" stroke-linecap="round" '
+            'role="img" aria-label="Xbox"><title>Xbox</title>'
+            '<circle cx="12" cy="12" r="11"/>'
+            '<path d="M6 18c2.2-4.2 6-6.8 6-6.8s3.8 2.6 6 6.8"/>'
+            '<path d="M7 6.2C9.4 7.6 12 10.6 12 10.6s2.6-3 5-4.4"/>'
             '</svg>'
         )
     if "switch" in p or "nintendo" in p:
         return (
-            f'<svg class="plat-ic" viewBox="0 0 24 24" {sz} '
-            'fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" title="Switch">'
-            '<rect x="2" y="3" width="20" height="18"/>'
-            '<rect x="7.5" y="5.5" width="9" height="13" fill="none"/>'
-            '<circle cx="4.75" cy="8" r="1" fill="currentColor"/>'
-            '<circle cx="19.25" cy="16" r="1" fill="currentColor"/>'
+            f'<svg class="plat-ic" viewBox="0 0 24 24" {sz} fill="none" '
+            'stroke="currentColor" stroke-width="1.6" '
+            'role="img" aria-label="Nintendo Switch"><title>Nintendo Switch</title>'
+            '<rect x="3" y="2.5" width="7" height="19" rx="3.5"/>'
+            '<rect x="14" y="2.5" width="7" height="19" rx="3.5"/>'
+            '<circle cx="6.5" cy="7" r="1.4" fill="currentColor" stroke="none"/>'
+            '<circle cx="17.5" cy="17" r="1.4" fill="currentColor" stroke="none"/>'
             '</svg>'
         )
     return ''
