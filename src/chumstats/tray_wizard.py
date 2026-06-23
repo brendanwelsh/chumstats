@@ -182,9 +182,10 @@ class WizardApp:
             try:
                 data = _whoami(url, key)
             except Exception as e:
+                msg = str(e)
                 self.root.after(0, lambda: (
                     btn.config(state="normal"),
-                    status.config(text=str(e), foreground="#a00"),
+                    status.config(text=msg, foreground="#a00"),
                 ))
                 return
 
@@ -287,9 +288,10 @@ class WizardApp:
                 from .config_wizard import run_wizard
                 rep = run_wizard(enable=True, rate=30)
             except Exception as e:
+                msg = f"Error: {e}"
                 self.root.after(0, lambda: (
                     run_btn.config(state="normal"),
-                    status.config(text=f"Error: {e}", foreground="#a00"),
+                    status.config(text=msg, foreground="#a00"),
                 ))
                 return
 
@@ -394,9 +396,10 @@ class SettingsDialog:
                         foreground="#070"),
                 ))
             except Exception as e:
+                msg = str(e)
                 self.root.after(0, lambda: (
                     btn.config(state="normal"),
-                    self.status.config(text=str(e), foreground="#a00"),
+                    self.status.config(text=msg, foreground="#a00"),
                 ))
         threading.Thread(target=worker, daemon=True).start()
 
