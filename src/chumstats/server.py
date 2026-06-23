@@ -6468,7 +6468,7 @@ def _filter_sidebar(active: str, force_hidden: bool = False) -> str:
       <aside class="side-filters" id="side-filters">
         {mode}{platform}{window}{sample}{bots}
         <div class="sf-foot">
-          <a class="sf-clear" id="sf-clear">Clear all</a>
+          <a class="sf-clear" id="sf-clear" title="Reset all filters">&times; Clear filters</a>
         </div>
       </aside>
     """
@@ -6523,8 +6523,21 @@ _SIDEBAR_FILTER_JS = """<script>
     });
   });
 
-  // Clear button: blow away localStorage filters + go to current path with no params.
+  // Light up the Clear button (accent + count) only when a non-default filter is
+  // set, so it doubles as a visible "filters are active" indicator — the faint
+  // always-on link was too easy to miss (cue: a stuck Platform=PS filter).
+  var DEFAULTS = { include_bots: '0', last: '20' };
+  var activeCount = 0;
+  KEYS.forEach(function(k) {
+    var cur = effective(k);
+    if (cur !== '' && cur !== (DEFAULTS[k] || '')) activeCount++;
+  });
   var clr = document.getElementById('sf-clear');
+  if (activeCount > 0) {
+    sb.classList.add('sf-has-active');
+    if (clr) clr.textContent = '× Clear filters (' + activeCount + ')';
+  }
+  // Clear button: blow away localStorage filters + go to current path with no params.
   if (clr) clr.addEventListener('click', function(ev) {
     ev.preventDefault();
     KEYS.forEach(function(k) { setStored(k, null); });
@@ -6929,17 +6942,37 @@ svg.plat-ic { width: 15px; height: 15px; flex: 0 0 auto; }
   letter-spacing: 0.04em;
 }
 .side-filters .sf-foot {
-  margin: 0;
+  margin: 0 0 0 auto;   /* push the Clear button to the far right of the bar */
   padding: 0;
   border: none;
 }
 .side-filters .sf-clear {
-  font-size: 11px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 30px;
+  padding: 0 11px;
+  font-size: 11.5px;
+  font-weight: 600;
   color: var(--text-dim);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
   cursor: pointer;
   text-decoration: none;
+  white-space: nowrap;
+  transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
 }
-.side-filters .sf-clear:hover { color: var(--accent); }
+.side-filters .sf-clear:hover { color: var(--text); border-color: var(--border-strong); }
+/* When any filter is active, the Clear button lights up accent + shows a count,
+   so an applied filter (e.g. a stuck Platform=PS) is impossible to miss. */
+.side-filters.sf-has-active .sf-clear {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+  font-weight: 700;
+}
+.side-filters.sf-has-active .sf-clear:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
 .topnav {
   display: grid;
   grid-template-columns: auto 1fr auto;
