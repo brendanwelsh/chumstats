@@ -225,12 +225,14 @@ def run_live(
     socket is always read promptly regardless of disk/network latency (see the
     module docstring for the freeze this prevents).
 
-    Finalization happens on three triggers so we never lose a completed match
-    even when the user leaves early:
-      1. Next MatchCreated arrives (most common - between matches in a session).
-      2. MatchDestroyed arrives (clean exit through the post-game screen).
-      3. Socket closes with an ended agg (user quit RL without going through
-         the full post-game screen). Most common for the "leave matches a lot
+    Finalization happens on three triggers so we never lose a match even when
+    the user leaves early. Each one force-salvages an un-ended-but-played match
+    from its final scores (see finalize(force=True)), so a forfeit / early-leave
+    that never got a MatchEnded is still recorded instead of discarded:
+      1. Next MatchCreated arrives (left a match and requeued).
+      2. MatchDestroyed arrives (exit to menu — clean post-game OR a forfeit;
+         a leaving client gets MatchDestroyed but never the final MatchEnded).
+      3. Socket closes (user quit RL). Most common for the "leave matches a lot
          when done" workflow.
     """
     # Pending raw_events, flushed in one transaction instead of one per packet.
@@ -291,7 +293,10 @@ def run_live(
 
         if event_name == "MatchCreated":
             if agg is not None:
-                _commit(agg, "next match started")
+                # The previous match never got a MatchDestroyed before this new
+                # one started => the user left it early and requeued. force=True
+                # salvages it from its final scores (no-op when it ended cleanly).
+                _commit(agg, "next match started", force=not agg.ended)
             agg = MatchAggregator()
 
         # If we missed MatchCreated (server restarted mid-match), spawn an
@@ -325,7 +330,15 @@ def run_live(
             on_event(event_name, raw)
 
         if event_name == "MatchDestroyed" and agg is not None:
-            _commit(agg, "MatchDestroyed")
+            # MatchDestroyed with no preceding MatchEnded = the user forfeited /
+            # left before the game broadcast its result (a leaving client never
+            # receives MatchEnded). force=True salvages it from the final team
+            # scores, the same way the socket-close path does, so a real abandoned
+            # game isn't silently dropped. finalize() still returns None for a
+            # genuine abort (no tick state / no play, or a tied score with no
+            # inferable winner), so empty lobby-cancels stay dropped. When the
+            # match DID end cleanly, force is a no-op (winner already known).
+            _commit(agg, "MatchDestroyed", force=not agg.ended)
             agg = None
 
         return agg

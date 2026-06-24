@@ -69,6 +69,33 @@ def _match_stream() -> bytes:
     )
 
 
+def _forfeit_stream() -> bytes:
+    """A forfeited / left-early match: like _match_stream but the client never
+    receives MatchEnded — the player left before the game broadcast its result,
+    so the stream ends on MatchDestroyed ALONE. The fixed ingest must salvage it
+    by inferring the winner from the final 1-0 score; pre-fix it was discarded.
+    UpdateState carries a goal so the match has meaningful play (not an abort)."""
+    update = {
+        "MatchGuid": GUID,
+        "Players": [
+            {"Name": "Me", "PrimaryId": "Steam|123|0", "TeamNum": 0,
+             "Score": 100, "Goals": 1, "Speed": 1500, "Boost": 50},
+        ],
+        "Game": {
+            "Teams": [
+                {"Name": "Blue", "TeamNum": 0, "Score": 1},
+                {"Name": "Orange", "TeamNum": 1, "Score": 0},
+            ],
+            "Arena": "TestArena",
+        },
+    }
+    return (
+        _envelope("MatchCreated", {"MatchGuid": GUID})
+        + _envelope("UpdateState", update)
+        + _envelope("MatchDestroyed", {"MatchGuid": GUID})  # NB: no MatchEnded
+    )
+
+
 def _burst() -> bytes:
     """A large stream of cheap, valid packets sent right after MatchDestroyed.
     MatchPaused is a no-op for the aggregator and isn't adopted as a new match,
@@ -185,6 +212,75 @@ def test_drain_keeps_reading_while_finalize_is_slow():
     finally:
         store.release.set()
         server_done.set()
+        try:
+            listener.close()
+        except OSError:
+            pass
+
+
+def test_forfeit_without_matchended_is_salvaged_on_destroy(tmp_path):
+    """Regression for the dropped-forfeit bug: a match that ends on MatchDestroyed
+    with NO preceding MatchEnded (user left / forfeited) must still be SAVED, with
+    the winner inferred from the final scores. Before the fix the MatchDestroyed
+    path called finalize(force=False), which returned None and silently discarded
+    every abandoned game."""
+    from chumstats.store import Store
+
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+    port = listener.getsockname()[1]
+
+    store = Store(str(tmp_path / "forfeit.db"))
+    session = SessionTracker(self_name="Me")
+    matched: list = []
+    done = threading.Event()
+
+    def serve() -> None:
+        try:
+            conn, _ = listener.accept()
+        except OSError:
+            return
+        conn.sendall(_forfeit_stream())
+        done.wait(timeout=15)
+        try:
+            conn.close()
+        except OSError:
+            pass
+
+    srv = threading.Thread(target=serve, name="fake-rl", daemon=True)
+    srv.start()
+
+    def on_match(s) -> None:
+        matched.append(s)
+        done.set()
+
+    worker = threading.Thread(
+        target=lambda: ingest.run_live(
+            store, session, host="127.0.0.1", port=port,
+            on_match=on_match, reconnect_delay=60.0,
+        ),
+        name="ingest-under-test", daemon=True,
+    )
+    worker.start()
+    try:
+        assert _wait_for(lambda: len(matched) == 1, timeout=15), (
+            "forfeit (MatchDestroyed without MatchEnded) was not saved"
+        )
+        s = matched[0]
+        assert s.winner_team_num == 0          # 1 > 0 -> team 0 inferred
+        assert (s.team0_score, s.team1_score) == (1, 0)
+        # Sanity: the stream genuinely carried no MatchEnded.
+        with store._conn() as c:
+            ended = c.execute(
+                "SELECT COUNT(*) FROM raw_events WHERE event='MatchEnded'"
+            ).fetchone()[0]
+            n_matches = c.execute("SELECT COUNT(*) FROM matches").fetchone()[0]
+        assert ended == 0
+        assert n_matches == 1
+    finally:
+        done.set()
         try:
             listener.close()
         except OSError:
