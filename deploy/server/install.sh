@@ -71,17 +71,6 @@ sed -e "s|@VENV_DIR@|$VENV_DIR|g" \
     -e "s|@DATA_DIR@|$DATA_DIR|g" \
     "$INSTALL_DIR/deploy/server/$PLIST_NAME.template" > "$PLIST_DEST"
 
-# 5b. Remove any pre-rename LaunchAgent so the old service can't keep running
-#     and fight the new one for the port. (One-time chumstats rebrand cleanup.)
-for legacy in com.ballshark.server; do
-    if launchctl print "gui/$(id -u)/$legacy" >/dev/null 2>&1 \
-       || [ -f "$HOME/Library/LaunchAgents/$legacy.plist" ]; then
-        echo "==> removing pre-rename service $legacy"
-        launchctl bootout "gui/$(id -u)/$legacy" 2>/dev/null || true
-        rm -f "$HOME/Library/LaunchAgents/$legacy.plist"
-    fi
-done
-
 # 6. Stop existing (if any) then load.
 launchctl bootout "gui/$(id -u)/com.chumstats.server" 2>/dev/null || true
 launchctl bootstrap "gui/$(id -u)" "$PLIST_DEST"

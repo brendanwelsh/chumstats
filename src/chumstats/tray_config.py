@@ -22,23 +22,13 @@ from pathlib import Path
 
 
 def app_dir() -> Path:
-    """Per-user writable directory for chumstats state. Migrates a pre-rename
-    dir (`ballshark`, or older `carball`) to `chumstats` once, so anyone who
-    installed an old build keeps their local DB + config."""
+    """Per-user writable directory for chumstats state."""
     if platform.system() == "Windows":
         base = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
         root = Path(base)
     else:
         root = Path(os.environ.get("XDG_DATA_HOME") or (Path.home() / ".local" / "share"))
     p = root / "chumstats"
-    for legacy_name in ("ballshark", "carball"):
-        legacy = root / legacy_name
-        try:
-            if legacy.is_dir() and not p.exists():
-                legacy.rename(p)
-                break
-        except OSError:
-            pass
     p.mkdir(parents=True, exist_ok=True)
     return p
 
@@ -48,28 +38,12 @@ def config_path() -> Path:
 
 
 def db_path() -> Path:
-    """Friend bundle default: %LOCALAPPDATA%\\chumstats\\chumstats.db. Dev override:
-    set CHUMSTATS_DB (or legacy BALLSHARK_DB / CARBALL_DB) to your checkout's DB
-    and the tray respects it."""
-    override = (os.environ.get("CHUMSTATS_DB")
-                or os.environ.get("BALLSHARK_DB")
-                or os.environ.get("CARBALL_DB"))
+    """Friend bundle default: %LOCALAPPDATA%\\chumstats\\chumstats.db. Dev
+    override: set CHUMSTATS_DB to your checkout's DB and the tray respects it."""
+    override = os.environ.get("CHUMSTATS_DB")
     if override:
         return Path(override)
-    d = app_dir()
-    new = d / "chumstats.db"
-    if not new.exists():
-        # Migrate a pre-rename DB file (+ WAL/SHM sidecars) if present.
-        for old_stem in ("ballshark.db", "carball.db"):
-            for suffix in ("", "-wal", "-shm", "-journal"):
-                o = d / (old_stem + suffix)
-                n = d / ("chumstats.db" + suffix)
-                try:
-                    if o.exists() and not n.exists():
-                        o.rename(n)
-                except OSError:
-                    pass
-    return new
+    return app_dir() / "chumstats.db"
 
 
 @dataclass
@@ -115,11 +89,9 @@ def load() -> TrayConfig:
     if not cfg.rl_player_primary_id:
         cfg.rl_player_primary_id = os.environ.get("RL_PLAYER_PRIMARY_ID") or ""
     if not cfg.remote_url:
-        cfg.remote_url = (os.environ.get("CHUMSTATS_REMOTE_URL")
-                          or os.environ.get("BALLSHARK_REMOTE_URL") or "")
+        cfg.remote_url = os.environ.get("CHUMSTATS_REMOTE_URL") or ""
     if not cfg.api_key:
-        cfg.api_key = (os.environ.get("CHUMSTATS_API_KEY")
-                       or os.environ.get("BALLSHARK_API_KEY") or "")
+        cfg.api_key = os.environ.get("CHUMSTATS_API_KEY") or ""
     return cfg
 
 

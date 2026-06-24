@@ -13,7 +13,6 @@ from pathlib import Path
 
 _RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 _VALUE_NAME = "Chumstats"
-_LEGACY_VALUE_NAMES = ("Ballshark",)  # pre-rename Run entries to clean up
 
 
 def is_supported() -> bool:
@@ -60,9 +59,6 @@ def enable() -> None:
     if not is_supported():
         return
     import winreg  # type: ignore
-    # Drop any pre-rename Run entry so we don't double-launch from two names.
-    for legacy in _LEGACY_VALUE_NAMES:
-        _delete_value(legacy)
     with winreg.CreateKey(winreg.HKEY_CURRENT_USER, _RUN_KEY) as k:
         winreg.SetValueEx(k, _VALUE_NAME, 0, winreg.REG_SZ, _command())
 
@@ -71,8 +67,6 @@ def disable() -> None:
     if not is_supported():
         return
     _delete_value(_VALUE_NAME)
-    for legacy in _LEGACY_VALUE_NAMES:
-        _delete_value(legacy)
 
 
 def set_enabled(on: bool) -> None:

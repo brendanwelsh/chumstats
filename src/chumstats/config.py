@@ -51,40 +51,12 @@ _load_env()
 
 
 def _env(*names: str, default: str | None = None) -> str | None:
-    """First non-empty env var among `names`. New CHUMSTATS_* names are passed
-    first, legacy BALLSHARK_* / CARBALL_* names as fallback so pre-rename `.env`
-    files and already-deployed installs keep working."""
+    """First non-empty env var among `names`, else `default`."""
     for n in names:
         v = os.environ.get(n)
         if v:
             return v
     return default
-
-
-def _migrate_legacy_home_dir() -> None:
-    """One-time rename of the dev data dir to ~/.chumstats, walking the rename
-    history (~/.carball -> ~/.ballshark -> ~/.chumstats). No-op if the new dir
-    already exists or no legacy dir does. (The tray's friend bundle migrates its
-    own %LOCALAPPDATA% dir in tray_config.app_dir.)"""
-    new = Path.home() / ".chumstats"
-    for legacy in (".ballshark", ".carball"):
-        old = Path.home() / legacy
-        try:
-            if old.is_dir() and not new.exists():
-                old.rename(new)
-                break
-        except OSError:
-            pass
-    # Rename the DB file (+ SQLite WAL/SHM sidecars) inside the dir.
-    for old_stem in ("ballshark.db", "carball.db"):
-        for suffix in ("", "-wal", "-shm", "-journal"):
-            o = new / (old_stem + suffix)
-            n = new / ("chumstats.db" + suffix)
-            try:
-                if o.exists() and not n.exists():
-                    o.rename(n)
-            except OSError:
-                pass
 
 
 @dataclass
@@ -121,7 +93,7 @@ class Settings:
 
     # Sync fidelity. False (default, "summary"): push match summaries + lifecycle
     # events + touches/goals, but NOT the 30 Hz UpdateState tick firehose — keeps
-    # the central DB small. True ("full", BALLSHARK_SYNC_FULL_RAW=1): push the
+    # the central DB small. True ("full", CHUMSTATS_SYNC_FULL_RAW=1): push the
     # complete raw stream including ticks, so the central server is a full raw
     # archive you can re-derive any future stat from (bigger DB + uploads).
     sync_full_raw: bool = False
@@ -133,15 +105,9 @@ class Settings:
 
     @classmethod
     def from_env(cls) -> "Settings":
-        db_override = _env("CHUMSTATS_DB", "BALLSHARK_DB", "CARBALL_DB")
-        if not db_override:
-            # Only migrate the default ~/.chumstats dir when we'll actually use
-            # it. Never move data out from under an explicit DB path (e.g. the
-            # central server pointing at a fixed file).
-            _migrate_legacy_home_dir()
-        port = int(_env("CHUMSTATS_SERVER_PORT", "BALLSHARK_SERVER_PORT", "CARBALL_SERVER_PORT", default="5050"))
+        port = int(_env("CHUMSTATS_SERVER_PORT", default="5050"))
         return cls(
-            db_path=db_override or str(Path.home() / ".chumstats" / "chumstats.db"),
+            db_path=_env("CHUMSTATS_DB") or str(Path.home() / ".chumstats" / "chumstats.db"),
             rl_host=os.environ.get("RL_HOST", "127.0.0.1"),
             rl_port=int(os.environ.get("RL_PORT", "49123")),
             discord_token=os.environ.get("DISCORD_TOKEN") or None,
@@ -150,13 +116,13 @@ class Settings:
             player_name=os.environ.get("RL_PLAYER_NAME") or None,
             player_primary_id=os.environ.get("RL_PLAYER_PRIMARY_ID") or None,
             friends=[s.strip() for s in (os.environ.get("RL_FRIENDS") or "").split(",") if s.strip()],
-            server_host=_env("CHUMSTATS_SERVER_HOST", "BALLSHARK_SERVER_HOST", "CARBALL_SERVER_HOST", default="0.0.0.0"),
+            server_host=_env("CHUMSTATS_SERVER_HOST", default="0.0.0.0"),
             server_port=port,
-            public_url=(_env("CHUMSTATS_PUBLIC_URL", "BALLSHARK_PUBLIC_URL", "CARBALL_PUBLIC_URL")
+            public_url=(_env("CHUMSTATS_PUBLIC_URL")
                         or f"http://chumstats.local:{port}").rstrip("/"),
-            remote_url=_env("CHUMSTATS_REMOTE_URL", "BALLSHARK_REMOTE_URL", "CARBALL_REMOTE_URL") or None,
-            api_key=_env("CHUMSTATS_API_KEY", "BALLSHARK_API_KEY", "CARBALL_API_KEY") or None,
-            sync_full_raw=(_env("CHUMSTATS_SYNC_FULL_RAW", "BALLSHARK_SYNC_FULL_RAW", "CARBALL_SYNC_FULL_RAW", default="")
+            remote_url=_env("CHUMSTATS_REMOTE_URL") or None,
+            api_key=_env("CHUMSTATS_API_KEY") or None,
+            sync_full_raw=(_env("CHUMSTATS_SYNC_FULL_RAW", default="")
                            or "").strip().lower() in ("1", "true", "yes", "full"),
-            tick_keep_days=int(_env("CHUMSTATS_TICK_KEEP_DAYS", "BALLSHARK_TICK_KEEP_DAYS", "CARBALL_TICK_KEEP_DAYS", default="14")),
+            tick_keep_days=int(_env("CHUMSTATS_TICK_KEEP_DAYS", default="14")),
         )

@@ -84,8 +84,7 @@ def cmd_run(args: argparse.Namespace) -> int:
             # Set by the tray bundle. Defaults to False so dev `chumstats run` keeps
             # its full local dashboard for the user developing this.
             friend_mode = (
-                (os.environ.get("CHUMSTATS_FRIEND_MODE")
-                 or os.environ.get("BALLSHARK_FRIEND_MODE") or "").strip().lower()
+                (os.environ.get("CHUMSTATS_FRIEND_MODE") or "").strip().lower()
                 in ("1", "true", "yes")
             )
             broadcaster = Broadcaster()
