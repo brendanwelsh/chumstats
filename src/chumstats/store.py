@@ -497,7 +497,10 @@ class Store:
                             parsed = None
                     yield event_name, raw, parsed
 
-            summaries = run_aggregation(_iter())
+            # force=True: salvage forfeits / early-leaves (MatchDestroyed with no
+            # MatchEnded) the same way the live ingest does, so this recovery path
+            # actually recovers them instead of re-dropping them.
+            summaries = run_aggregation(_iter(), force=True)
 
         saved = 0
         for s in summaries:
@@ -554,7 +557,9 @@ class Store:
                 yield event_name, raw, parsed
 
         replaced = 0
-        for s in run_aggregation(_iter()):
+        # force=True so a re-derive keeps forfeits/early-leaves (no MatchEnded)
+        # instead of dropping them — consistent with the live ingest path.
+        for s in run_aggregation(_iter(), force=True):
             if s.match_id in with_ticks:
                 self.save_match(s)  # INSERT OR REPLACE -> overwrite + restamp version
                 replaced += 1

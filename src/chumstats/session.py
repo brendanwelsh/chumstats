@@ -617,21 +617,35 @@ class SessionTracker:
 
 # --- convenience runner over an iterable of (event_name, parsed) -----------
 
-def run_aggregation(events: Iterable[tuple[str, dict, object]]) -> list[MatchSummary]:
+def run_aggregation(events: Iterable[tuple[str, dict, object]],
+                    force: bool = False) -> list[MatchSummary]:
     """Run a full event stream through aggregation, returning every
-    finalized match. Aborted matches (no MatchEnded) are dropped.
+    finalized match.
+
+    By default an aborted match (one that never got a MatchEnded) is dropped.
+    With force=True, a match that ended without a MatchEnded but had real play
+    is salvaged by inferring the winner from its final scores — mirroring the
+    live ingest's finalize(force=True) so the offline recovery/reprocess paths
+    (Store.backfill_from_raw_events, Store.reaggregate_matches) don't silently
+    drop the forfeits the live path now keeps. Genuine aborts (no tick state /
+    no play, or a tied score with no inferable winner) still return None.
 
     Accepts (event_name, raw_dict, parsed) triples.
     """
     summaries: list[MatchSummary] = []
     agg: MatchAggregator | None = None
 
+    def _emit(a: MatchAggregator) -> None:
+        # force-salvage only when the match never ended cleanly; once
+        # winner_team_num is known, force is a no-op (matches the live paths).
+        s = a.finalize(force=force and not a.ended)
+        if s:
+            summaries.append(s)
+
     for event_name, raw, parsed in events:
         if event_name == "MatchCreated":
-            if agg is not None and agg.ended:
-                s = agg.finalize()
-                if s:
-                    summaries.append(s)
+            if agg is not None:
+                _emit(agg)
             agg = MatchAggregator()
 
         if agg is None:
@@ -640,15 +654,10 @@ def run_aggregation(events: Iterable[tuple[str, dict, object]]) -> list[MatchSum
         agg.handle(event_name, parsed, raw=raw)
 
         if event_name == "MatchDestroyed":
-            if agg.ended:
-                s = agg.finalize()
-                if s:
-                    summaries.append(s)
+            _emit(agg)
             agg = None
 
-    if agg is not None and agg.ended:
-        s = agg.finalize()
-        if s:
-            summaries.append(s)
+    if agg is not None:
+        _emit(agg)
 
     return summaries
