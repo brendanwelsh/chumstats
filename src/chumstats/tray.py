@@ -131,16 +131,21 @@ class ServerProcess:
     def log_path(self) -> Path:
         return self._log_path
 
+    def cli_argv(self, *extra: str) -> list[str]:
+        """Base argv to invoke the chumstats CLI with `extra` appended.
+
+        Frozen (PyInstaller) build: sys.executable IS Chumstats.exe, re-exec'd
+        with the --cli sentinel that chumstats-tray.pyw routes to the CLI entry
+        point. Dev: `python -m chumstats.cli`."""
+        if getattr(sys, "frozen", False):
+            return [sys.executable, "--cli", *extra]
+        return [sys.executable, "-m", "chumstats.cli", *extra]
+
     def _argv(self) -> list[str]:
         cfg = tray_config.load()
         db = str(tray_config.db_path())
         me = cfg.rl_player_name or "(unknown)"
-        if getattr(sys, "frozen", False):
-            # PyInstaller bundle: sys.executable IS Chumstats.exe.
-            # Re-exec ourselves with the --cli sentinel handled in
-            # chumstats-tray.pyw to route into the CLI entry point.
-            return [sys.executable, "--cli", "--me", me, "--db", db, "run"]
-        return [sys.executable, "-m", "chumstats.cli", "--me", me, "--db", db, "run"]
+        return self.cli_argv("--me", me, "--db", db, "run")
 
     def _env(self) -> dict[str, str]:
         """Subprocess env: take parent env, overlay the tray's persisted config
@@ -387,6 +392,7 @@ class TrayApp:
                              checked=lambda item: self._paused),
             pystray.MenuItem("Settings…", self._on_settings),
             pystray.MenuItem("Restart Server", self._on_restart),
+            pystray.MenuItem("Re-sync matches to central", self._on_resync),
             pystray.MenuItem("Show Logs Folder", self._on_show_logs),
             pystray.MenuItem(
                 "Start with Windows",
@@ -406,6 +412,49 @@ class TrayApp:
     def _on_restart(self, icon=None, item=None) -> None:
         log.info("menu: restart server")
         threading.Thread(target=self.server.restart, daemon=True).start()
+
+    def _notify(self, message: str, title: str = "Chumstats") -> None:
+        """Best-effort desktop toast; falls back to the log if the tray backend
+        doesn't support notifications."""
+        try:
+            self.icon.notify(message, title)
+        except Exception:
+            log.info("notify: %s", message)
+
+    def _on_resync(self, icon=None, item=None) -> None:
+        """Manual re-sync: push local matches to the central server. Runs the
+        existing, tested `push-history` CLI (idempotent — the server keeps the
+        ones it already has, so re-running is safe). Deliberately manual, not a
+        background loop, so it only costs anything when you ask for it — e.g. to
+        recover matches that failed to upload while the central host was down."""
+        log.info("menu: re-sync to central")
+        threading.Thread(target=self._run_resync, daemon=True).start()
+
+    def _run_resync(self) -> None:
+        db = str(tray_config.db_path())
+        argv = self.server.cli_argv("--db", db, "push-history")
+        log.info("re-sync: %s", " ".join(argv))
+        self._notify("Re-syncing your matches to the central server…")
+        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
+        try:
+            res = subprocess.run(
+                argv, cwd=str(REPO_ROOT), env=self.server._env(),
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, timeout=600, creationflags=creationflags,
+            )
+            out = (res.stdout or "").strip()
+            log.info("re-sync output:\n%s", out)
+            if res.returncode == 0:
+                pushed = out.count("[sync] uploaded")
+                self._notify(f"Re-sync complete — {pushed} match(es) pushed.")
+            else:
+                self._notify("Re-sync failed — see Show Logs Folder.")
+        except subprocess.TimeoutExpired:
+            log.warning("re-sync timed out")
+            self._notify("Re-sync timed out — see Show Logs Folder.")
+        except Exception:
+            log.exception("re-sync failed")
+            self._notify("Re-sync error — see Show Logs Folder.")
 
     def _on_settings(self, icon=None, item=None) -> None:
         log.info("menu: settings")
