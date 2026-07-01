@@ -267,6 +267,12 @@ class Store:
                 ),
             )
 
+    def has_match(self, match_id: str) -> bool:
+        with self._conn() as c:
+            return c.execute(
+                "SELECT 1 FROM matches WHERE id = ? LIMIT 1", (match_id,)
+            ).fetchone() is not None
+
     def save_raw_event(self, received_at: float, match_id: str | None, event: str, payload: str) -> None:
         with self._conn() as c:
             c.execute(
@@ -330,6 +336,17 @@ class Store:
         result = {"created_match": False, "my_row_updated": False,
                   "others_inserted": 0, "others_skipped": 0}
 
+        def _canon(row: dict) -> dict:
+            """Fold alias accounts into their canonical identity BEFORE any
+            delete/exists checks. Doing it only at insert time (the old way)
+            meant an alias-account re-upload deleted nothing (DELETE targeted
+            the alias pid) and the re-insert was OR IGNOREd — a silent no-op."""
+            a = PLAYER_ALIASES.get(row.get("primary_id"))
+            return {**row, "name": a[0], "primary_id": a[1]} if a else row
+
+        owner_alias = PLAYER_ALIASES.get(owner_primary_id)
+        canonical_owner = owner_alias[1] if owner_alias else owner_primary_id
+
         with self._conn() as c:
             cur = c.execute(
                 """
@@ -375,13 +392,14 @@ class Store:
                     f"my_row.primary_id ({my_row['primary_id']}) does not match "
                     f"authenticated user ({owner_primary_id})"
                 )
+            my_row = _canon(my_row)
 
             # my_row: delete any existing row for this owner in this match (matched
-            # by primary_id since that's the canonical identity) and re-insert
-            # fresh. UPSERT semantics for the uploader's own data.
+            # by canonical primary_id since that's the stored identity) and
+            # re-insert fresh. UPSERT semantics for the uploader's own data.
             c.execute(
                 "DELETE FROM match_player_stats WHERE match_id = ? AND primary_id = ?",
-                (match_id, owner_primary_id),
+                (match_id, canonical_owner),
             )
             self._insert_player_row(c, match_id, my_row, is_mvp_override=my_row.get("is_mvp", False))
             result["my_row_updated"] = True
@@ -408,8 +426,9 @@ class Store:
                     result["raw_events_inserted"] = 0
                     result["raw_events_skipped"]  = len(new_raw)
 
-            # other_rows: first writer wins per primary_id.
+            # other_rows: first writer wins per (canonical) primary_id.
             for r in payload.get("other_rows", []):
+                r = _canon(r)
                 exists = c.execute(
                     "SELECT 1 FROM match_player_stats WHERE match_id = ? AND primary_id = ?",
                     (match_id, r["primary_id"]),
@@ -472,7 +491,7 @@ class Store:
 
         with self._conn() as c:
             existing_ids = {r[0] for r in c.execute("SELECT id FROM matches")}
-            sql = "SELECT event, payload FROM raw_events"
+            sql = "SELECT event, payload, received_at FROM raw_events"
             params: tuple = ()
             if since_ts is not None:
                 sql += " WHERE received_at >= ?"
@@ -481,7 +500,7 @@ class Store:
             cur = c.execute(sql, params)
 
             def _iter():
-                for event_name, payload_str in cur:
+                for event_name, payload_str, received_at in cur:
                     if not event_name:
                         continue
                     try:
@@ -495,7 +514,9 @@ class Store:
                             parsed = model.model_validate(raw)
                         except Exception:
                             parsed = None
-                    yield event_name, raw, parsed
+                    # received_at rides along so recovered matches keep their
+                    # real start/end times instead of the replay wall clock.
+                    yield event_name, raw, parsed, received_at
 
             # force=True: salvage forfeits / early-leaves (MatchDestroyed with no
             # MatchEnded) the same way the live ingest does, so this recovery path
@@ -536,11 +557,12 @@ class Store:
             )}
             existing = {r[0] for r in c.execute("SELECT id FROM matches")}
             rows = c.execute(
-                "SELECT event, payload FROM raw_events ORDER BY received_at ASC, id ASC"
+                "SELECT event, payload, received_at FROM raw_events "
+                "ORDER BY received_at ASC, id ASC"
             ).fetchall()
 
         def _iter():
-            for event_name, payload_str in rows:
+            for event_name, payload_str, received_at in rows:
                 if not event_name:
                     continue
                 try:
@@ -554,7 +576,7 @@ class Store:
                         parsed = model.model_validate(raw)
                     except Exception:
                         parsed = None
-                yield event_name, raw, parsed
+                yield event_name, raw, parsed, received_at
 
         replaced = 0
         # force=True so a re-derive keeps forfeits/early-leaves (no MatchEnded)

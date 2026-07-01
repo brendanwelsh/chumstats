@@ -268,9 +268,23 @@ def run_live(
         _flush_raw()
         if not agg:
             return
+        ended_cleanly = agg.ended
         s = agg.finalize(force=force)
         if not s:
             return
+        # Private lobbies reuse the same MatchGuid for post-game segments
+        # (rematch screen, lobby resets). A force-salvaged segment carrying the
+        # guid of a match we already saved would INSERT OR REPLACE junk over the
+        # real result — only a real MatchEnded may overwrite an existing row.
+        has_match = getattr(store, "has_match", None)
+        if not ended_cleanly and has_match is not None:
+            try:
+                if has_match(s.match_id):
+                    print(f"[ingest] skipped salvage of {s.match_id} ({reason}): "
+                          f"match already recorded (guid reused by lobby)")
+                    return
+            except Exception:
+                pass
         try:
             store.save_match(s)
         except Exception as e:
@@ -314,7 +328,7 @@ def run_live(
                       f"(MatchCreated was missed)")
 
         if agg is not None:
-            agg.handle(event_name, parsed, raw=raw)
+            agg.handle(event_name, parsed, raw=raw, received_at=received_at)
 
         match_id = agg.match_guid if agg else ""
         raw_batch.append((

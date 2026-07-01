@@ -324,7 +324,7 @@ def cmd_push_history(args: argparse.Namespace) -> int:
 
 def _reconstruct_summary(store, match_id: str):
     """Rebuild a MatchSummary from a DB row. Used by push-history."""
-    from .session import MatchSummary, PlayerLine
+    from .session import BallTouch, MatchSummary, PlayerLine
     with store._conn() as con:
         m = con.execute("SELECT * FROM matches WHERE id = ?", (match_id,)).fetchone()
         if not m:
@@ -348,6 +348,31 @@ def _reconstruct_summary(store, match_id: str):
         speed_sum=r["speed_sum"] or 0.0, speed_max=r["speed_max"] or 0.0,
         boost_used=r["boost_used"] or 0.0,
     ) for r in prows]
+    # Rebuild the match-level extras too. The central server stores these
+    # first-writer-wins, so a re-sync that omitted them permanently stamped
+    # empty heatmap/goal data for exactly the matches re-sync exists to recover.
+    ball_touches: list[BallTouch] = []
+    goal_events: list[dict] = []
+    if extras:
+        import json as _json
+        from dataclasses import fields as _fields
+        try:
+            touch_fields = {f.name for f in _fields(BallTouch)}
+            ball_touches = [
+                BallTouch(**{k: v for k, v in t.items() if k in touch_fields})
+                for t in _json.loads(extras["ball_touches"] or "[]")
+            ]
+        except Exception:
+            ball_touches = []
+        try:
+            goal_events = _json.loads(extras["goal_events"] or "[]")
+        except Exception:
+            goal_events = []
+    color_primary = {}
+    if m["team0_color"]:
+        color_primary[0] = m["team0_color"]
+    if m["team1_color"]:
+        color_primary[1] = m["team1_color"]
     return MatchSummary(
         match_id=m["id"], started_at=m["started_at"], ended_at=m["ended_at"],
         arena=m["arena"],
@@ -358,7 +383,14 @@ def _reconstruct_summary(store, match_id: str):
         is_mvp={r["primary_id"]: True for r in prows if r["is_mvp"]},
         crossbar_hits=m["crossbar_hits"] or 0,
         is_online=bool(m["is_online"]),
+        color_primary=color_primary,
+        ball_touches=ball_touches,
+        goal_events=goal_events,
         duration_seconds=(extras["duration_seconds"] if extras else 0.0),
+        regulation_seconds=m["regulation_seconds"] or 0.0,
+        overtime_seconds=m["overtime_seconds"] or 0.0,
+        is_overtime=bool(m["overtime_seconds"]),
+        parser_version=m["parser_version"],
     )
 
 

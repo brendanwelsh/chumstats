@@ -86,6 +86,11 @@ class MatchSummaryUpload(BaseModel):
     crossbar_hits: int = 0
     parser_version: int = 0
     duration_seconds: float = 0.0
+    # Declared here or pydantic silently strips them from the upload and the
+    # central DB stores 0 for every synced match (the client has sent them
+    # from day one — the wire model just dropped them).
+    regulation_seconds: float = 0.0
+    overtime_seconds: float = 0.0
     my_row: PlayerRowUpload
     other_rows: list[PlayerRowUpload] = Field(default_factory=list)
     # Match-level data needed for heatmaps & goal-sequence views. Not "owned"
@@ -1918,6 +1923,7 @@ def _players_directory_html(store, self_primary_id: str | None = None,
     bot_filter = "" if include_bots else "WHERE max_bot = 0"
 
     inner_clauses: list[str] = []
+    inner_params: list = []
     if mode_filter is not None:
         inner_clauses.append(f"""(SELECT MAX(c) FROM (
             SELECT team_num, COUNT(*) AS c FROM match_player_stats
@@ -1927,9 +1933,10 @@ def _players_directory_html(store, self_primary_id: str | None = None,
         # All-players directory: filter to players ON this platform (their own
         # account platform) — the intuitive meaning here, not the opponent-
         # platform EXISTS used on /history (where Steam matched ~everything).
-        inner_clauses.append(
-            f"mps.platform LIKE '%' || {repr(platform_filter)} || '%'"
-        )
+        # Bound as a parameter: repr() is not a SQL escaper and this comes
+        # straight from the URL.
+        inner_clauses.append("mps.platform LIKE '%' || ? || '%'")
+        inner_params.append(platform_filter)
     if window_days and window_days > 0:
         import time as _time
         cutoff = _time.time() - window_days * 86400
@@ -1982,6 +1989,7 @@ def _players_directory_html(store, self_primary_id: str | None = None,
         rows = con.execute(sql, (
             self_primary_id or "", self_primary_id or "",
             self_primary_id or "", self_primary_id or "",
+            *inner_params,
             sort, sort, sort, sort,
         )).fetchall()
 
@@ -4519,11 +4527,12 @@ def _match_insights_html(playback: dict, t0_name: str, t1_name: str) -> str:
     o_pct = o_touch / total_touch * 100
 
     # ---- Field tilt (pressure proxy) ---------------------------------------
-    # Blue attacks Y < 0 (Orange's half); Orange attacks Y > 0. Count contacts
-    # in each attacking half — a position-based proxy for territorial pressure
+    # Team 0 (Blue) defends -Y and attacks +Y (Orange's half); Orange attacks
+    # -Y — same orientation goalmap.py renders. Count contacts in each
+    # attacking half — a position-based proxy for territorial pressure
     # (count, not time, so it survives the batched-timestamp upload).
-    b_attack = sum(1 for bh in ball if (bh.get("y") or 0) < -300)
-    o_attack = sum(1 for bh in ball if (bh.get("y") or 0) > 300)
+    b_attack = sum(1 for bh in ball if (bh.get("y") or 0) > 300)
+    o_attack = sum(1 for bh in ball if (bh.get("y") or 0) < -300)
     pres_total = b_attack + o_attack or 1
     b_pres = b_attack / pres_total * 100
     o_pres = o_attack / pres_total * 100

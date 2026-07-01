@@ -38,9 +38,20 @@ def iter_jsonl(path: str | Path) -> Iterator[Envelope]:
 
 
 def iter_parsed(path: str | Path):
-    """Yield (event_name, raw_dict, parsed_or_None) for each line."""
+    """Yield (event_name, raw_dict, parsed_or_None) for each line.
+
+    A payload that fails its typed model degrades to parsed=None instead of
+    raising — live ingest drops such events individually, and one bad line
+    must not abort the whole replay."""
     for env in iter_jsonl(path):
-        yield env.parse_payload()
+        try:
+            yield env.parse_payload()
+        except Exception:
+            try:
+                raw = json.loads(env.data) if env.data else {}
+            except ValueError:
+                continue
+            yield env.event, raw, None
 
 
 def iter_for_aggregator(path: str | Path):

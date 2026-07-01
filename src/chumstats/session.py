@@ -17,8 +17,8 @@ Design notes:
 
 from __future__ import annotations
 
+import hashlib
 import time
-import uuid
 from dataclasses import dataclass, field
 from typing import Iterable
 
@@ -36,7 +36,9 @@ from .models import (
 # Bump whenever aggregation logic changes in a way that alters derived stats.
 # Stamped onto every match (matches.parser_version) so a future reprocess pass
 # can tell which matches predate a fix and need re-deriving from raw_events.
-AGGREGATOR_VERSION = 2
+# v3: goal-replay ticks/statfeed/crossbar excluded, event-time timestamps in
+#     offline re-aggregation, deterministic offline ids, guid-reuse dedupe.
+AGGREGATOR_VERSION = 3
 
 # The Stats API "Speed" field is in km/h (verified against real tick payloads:
 # it tops out at 82.8 km/h, which is 2300 uu/s -- the in-game max car speed).
@@ -151,6 +153,10 @@ class MatchSummary:
     is_overtime: bool = False
     goal_events: list[dict] = field(default_factory=list)  # deduped goal records
     statfeed: dict[str, dict[str, int]] = field(default_factory=dict)  # pid -> {event: n}
+    # None = freshly aggregated (current AGGREGATOR_VERSION). Set when a summary
+    # is reconstructed from a DB row so re-uploads keep the version that
+    # actually produced the stats instead of re-stamping the current one.
+    parser_version: int | None = None
 
     def team_name(self, team_num: int) -> str:
         return self.team0_name if team_num == 0 else self.team1_name
@@ -187,6 +193,12 @@ class MatchSummary:
             for p in self.players:
                 if p.name == self_name:
                     return p
+        if self_primary_id or self_name:
+            # A configured identity that matches nobody means this match isn't
+            # ours (spectating, a friend playing on this PC, or a wrong-platform
+            # id). Guessing here would attribute the W/L, session totals, and
+            # Discord embed to the wrong person — better to own up to "not you".
+            return None
         for p in self.players:
             if not p.is_bot:
                 return p
@@ -230,6 +242,15 @@ class MatchAggregator:
         self._mvp_ids: set[str] = set()  # primary_ids of MVP recipients
         # primary_id -> {statfeed event name: count} (epic saves, demos, ...).
         self._statfeed: dict[str, dict[str, int]] = {}
+        # True between GoalReplayStart and GoalReplayEnd. The game re-streams
+        # ticks during the goal replay (bReplay=true, ~1000/match measured on
+        # real captures) with the REPLAY's car speeds/boost — accumulating them
+        # inflated boost_used, air% and supersonic% toward highlight play, so
+        # everything derived per-tick is skipped while this is set.
+        self._in_goal_replay: bool = False
+        # received_at of the last event handled (when the caller knows it).
+        # Lets offline re-aggregation stamp real event times instead of "now".
+        self._last_event_at: float | None = None
 
         # Derived per-player accumulators keyed by primary_id (fall back to name).
         self._lines: dict[str, PlayerLine] = {}
@@ -266,10 +287,16 @@ class MatchAggregator:
             return f"name:{name}"
         return primary_id
 
-    def handle(self, event_name: str, parsed, raw: dict | None = None) -> None:
+    def handle(self, event_name: str, parsed, raw: dict | None = None,
+               received_at: float | None = None) -> None:
+        if received_at is not None:
+            self._last_event_at = received_at
         if event_name == "MatchCreated" and isinstance(parsed, MatchLifecycle):
             self.match_guid = parsed.match_guid
-            self.started_at = time.time()
+            # Prefer the event's own capture time: when raw_events are replayed
+            # (startup backfill / reprocess) time.time() is the REPLAY moment,
+            # which used to stamp whole recovered histories with one bogus date.
+            self.started_at = received_at if received_at is not None else time.time()
 
         elif event_name == "UpdateState" and isinstance(parsed, UpdateState):
             self.last_update = parsed
@@ -279,9 +306,20 @@ class MatchAggregator:
 
         elif event_name == "MatchEnded" and isinstance(parsed, MatchEnded):
             self.winner_team_num = parsed.winner_team_num
-            self.ended_at = time.time()
+            self.ended_at = received_at if received_at is not None else time.time()
             if parsed.match_guid:
                 self.match_guid = parsed.match_guid
+
+        elif event_name == "GoalReplayStart":
+            self._in_goal_replay = True
+
+        elif event_name == "GoalReplayEnd":
+            self._in_goal_replay = False
+
+        elif event_name == "CrossbarHit" and self._in_goal_replay:
+            # The replay re-shows the bar contact; nothing real happens while
+            # the replay plays, so don't let it count a second time.
+            return
 
         elif event_name == "CrossbarHit":
             # A single ball-on-bar contact emits a BURST of CrossbarHit events
@@ -358,6 +396,11 @@ class MatchAggregator:
             self._record_ball_hit(raw)
 
         elif event_name == "StatfeedEvent" and isinstance(parsed, StatfeedEvent):
+            if self._in_goal_replay:
+                # Statfeed popups occasionally re-broadcast during the goal
+                # replay (measured: ~0.1% of statfeed rows); play is frozen for
+                # everyone during a replay, so anything here is an echo.
+                return
             # We get name/team, not primary_id - resolve via the last tick.
             pid = None
             if self.last_update and parsed.main_target:
@@ -374,6 +417,11 @@ class MatchAggregator:
                     self._mvp_ids.add(pid)
 
     def _accumulate_tick(self, update: UpdateState) -> None:
+        # Ticks streamed during a goal replay carry the REPLAY's car state
+        # (speed/boost/air of the replayed highlight), not live play. Refresh
+        # the box-score counters — those stay authoritative — but skip all
+        # per-tick derived accumulation for these ticks.
+        is_replay_tick = bool(update.game and update.game.is_replay) or self._in_goal_replay
         for p in update.players:
             key = self._player_key(p.primary_id, p.name)
             line = self._lines.get(key)
@@ -390,6 +438,9 @@ class MatchAggregator:
                 line.demos = p.demos
                 line.touches = p.touches
                 line.score = p.score
+
+            if is_replay_tick:
+                continue
 
             # Movement / boost are SPECTATOR-only - emitted by Psyonix for
             # you + your teammates, omitted for opponents. We detect that
@@ -485,14 +536,13 @@ class MatchAggregator:
                 return None
             self.winner_team_num = 0 if s0 > s1 else 1
             if self.ended_at is None:
-                self.ended_at = time.time()
+                self.ended_at = self._last_event_at or time.time()
 
         update = self.last_update
         teams_by_num = {t.team_num: t for t in update.game.teams}
         team0 = teams_by_num.get(0)
         team1 = teams_by_num.get(1)
         is_online = bool(self.match_guid)
-        match_id = self.match_guid or f"local-{uuid.uuid4().hex[:12]}"
 
         # Merge: the accumulator has derived fields; the final tick has
         # the latest counters. Key by player_key so distinct bots (all with
@@ -508,13 +558,31 @@ class MatchAggregator:
         players = list(seen.values())
         is_mvp = {pid: True for pid in self._mvp_ids}
 
+        if self.match_guid:
+            match_id = self.match_guid
+        else:
+            # Offline matches have no MatchGuid. A random id here meant every
+            # re-aggregation of the same raw events (startup backfill, replay,
+            # reprocess) minted a NEW match — duplicating the game on every
+            # restart. Hash the stable facts instead so the same match always
+            # re-derives the same id. started_at is stable because it comes
+            # from the event's received_at on both the live and replay paths.
+            seed = "|".join([
+                f"{self.started_at:.0f}",
+                update.game.arena or "",
+                str(team0.score if team0 else 0),
+                str(team1.score if team1 else 0),
+                *sorted(self._player_key(p.primary_id, p.name) for p in players),
+            ])
+            match_id = "local-" + hashlib.sha1(seed.encode("utf-8")).hexdigest()[:12]
+
         color_primary: dict[int, str] = {}
         if team0 and team0.color_primary:
             color_primary[0] = team0.color_primary
         if team1 and team1.color_primary:
             color_primary[1] = team1.color_primary
 
-        ended_at = self.ended_at or time.time()
+        ended_at = self.ended_at or self._last_event_at or time.time()
         # Best effort: wall clock if it's meaningful (live mode), otherwise
         # estimate from tick count / 30Hz (replay mode).
         wall_dur = max(0.0, ended_at - self.started_at)
@@ -617,7 +685,7 @@ class SessionTracker:
 
 # --- convenience runner over an iterable of (event_name, parsed) -----------
 
-def run_aggregation(events: Iterable[tuple[str, dict, object]],
+def run_aggregation(events: Iterable[tuple],
                     force: bool = False) -> list[MatchSummary]:
     """Run a full event stream through aggregation, returning every
     finalized match.
@@ -630,19 +698,38 @@ def run_aggregation(events: Iterable[tuple[str, dict, object]],
     drop the forfeits the live path now keeps. Genuine aborts (no tick state /
     no play, or a tied score with no inferable winner) still return None.
 
-    Accepts (event_name, raw_dict, parsed) triples.
+    Accepts (event_name, raw_dict, parsed) triples or
+    (event_name, raw_dict, parsed, received_at) quadruples. Passing the
+    original received_at stamps recovered matches with their real start/end
+    times instead of the wall clock at replay time.
+
+    Private-lobby quirk (seen in real captures): the same MatchGuid is reused
+    for the post-game lobby segments after MatchDestroyed. Those segments can
+    force-salvage into a junk summary carrying the SAME id as the real match,
+    so duplicate ids are resolved here: first summary wins, unless a later one
+    ended with a real MatchEnded and the kept one was only force-inferred.
     """
-    summaries: list[MatchSummary] = []
+    order: list[str] = []
+    by_id: dict[str, tuple[bool, MatchSummary]] = {}
     agg: MatchAggregator | None = None
 
     def _emit(a: MatchAggregator) -> None:
         # force-salvage only when the match never ended cleanly; once
         # winner_team_num is known, force is a no-op (matches the live paths).
-        s = a.finalize(force=force and not a.ended)
-        if s:
-            summaries.append(s)
+        clean = a.ended
+        s = a.finalize(force=force and not clean)
+        if not s:
+            return
+        kept = by_id.get(s.match_id)
+        if kept is None:
+            order.append(s.match_id)
+            by_id[s.match_id] = (clean, s)
+        elif clean and not kept[0]:
+            by_id[s.match_id] = (clean, s)
 
-    for event_name, raw, parsed in events:
+    for item in events:
+        event_name, raw, parsed = item[0], item[1], item[2]
+        received_at = item[3] if len(item) > 3 else None
         if event_name == "MatchCreated":
             if agg is not None:
                 _emit(agg)
@@ -651,7 +738,7 @@ def run_aggregation(events: Iterable[tuple[str, dict, object]],
         if agg is None:
             continue
 
-        agg.handle(event_name, parsed, raw=raw)
+        agg.handle(event_name, parsed, raw=raw, received_at=received_at)
 
         if event_name == "MatchDestroyed":
             _emit(agg)
@@ -660,4 +747,4 @@ def run_aggregation(events: Iterable[tuple[str, dict, object]],
     if agg is not None:
         _emit(agg)
 
-    return summaries
+    return [by_id[mid][1] for mid in order]

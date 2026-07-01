@@ -101,7 +101,7 @@ def _fmt_duration(seconds: float) -> str:
 
 def _lifetime_avgs(con: sqlite3.Connection, primary_id: str) -> dict[str, float]:
     """Per-match averages for a player across ALL matches in the DB."""
-    row = con.execute("""
+    row = con.execute(f"""
         SELECT
             COUNT(*) AS matches,
             AVG(goals)   AS avg_goals,
@@ -117,7 +117,7 @@ def _lifetime_avgs(con: sqlite3.Connection, primary_id: str) -> dict[str, float]
             AVG(boost_used) AS avg_boost_used,
             AVG(speed_sum * 1.0 / NULLIF(ticks_total, 0)) AS avg_speed
         FROM match_player_stats
-        WHERE primary_id = ?
+        WHERE primary_id = ?{valid_match_sql()}
     """, (primary_id,)).fetchone()
     return dict(row) if row else {}
 
@@ -335,7 +335,7 @@ class Dashboard:
         )
 
 
-def valid_match_sql(lead: str = " AND ") -> str:
+def valid_match_sql(lead: str = " AND ", col: str = "match_id") -> str:
     """Predicate that drops physically-impossible (corrupt) matches from
     aggregates: any match where a player's goals exceed their team's score —
     impossible in real RL, and the signature of a freeplay/training session
@@ -343,9 +343,11 @@ def valid_match_sql(lead: str = " AND ") -> str:
     non-destructive: the raw rows stay in the DB; they're just excluded from
     totals/averages so one junk upload can't inflate the leaderboard. `lead`
     is the clause prefix — " AND " to append to an existing WHERE, "" to use
-    as a standalone term, " WHERE " to open a fresh one."""
+    as a standalone term, " WHERE " to open a fresh one. `col` qualifies the
+    match-id column for queries where a bare `match_id` would be ambiguous
+    (e.g. "mps_me.match_id")."""
     return (
-        f"{lead}match_id NOT IN (SELECT cz.match_id FROM match_player_stats cz "
+        f"{lead}{col} NOT IN (SELECT cz.match_id FROM match_player_stats cz "
         "JOIN matches cm ON cm.id = cz.match_id "
         "WHERE cz.goals > (CASE WHEN cz.team_num = 0 THEN cm.team0_score "
         "ELSE cm.team1_score END))"
@@ -383,13 +385,17 @@ def build_dashboard(store, *, primary_id: str | None = None,
     # Platform filter targets the OPPONENT team (matches where the other
     # team had a player on that platform). Filtering by the user's own
     # platform isn't useful since they're always on the same one.
+    # Bound as a real parameter — repr() is not a SQL escaper and this value
+    # arrives from a URL query param.
     platform_sql = ""
+    extra_params: list = []
     if platform_filter:
         platform_sql = (
             " AND EXISTS (SELECT 1 FROM match_player_stats opp_p "
             "WHERE opp_p.match_id = m.id AND opp_p.team_num != mps.team_num "
-            "AND opp_p.platform LIKE '%' || " + repr(platform_filter) + " || '%')"
+            "AND opp_p.platform LIKE '%' || ? || '%')"
         )
+        extra_params.append(platform_filter)
     # Window filter (last N days)
     window_sql = ""
     if window_days and window_days > 0:
@@ -429,7 +435,7 @@ def build_dashboard(store, *, primary_id: str | None = None,
             FROM match_player_stats mps
             JOIN matches m ON m.id = mps.match_id
             WHERE mps.{where}{bot_filter}
-        """, (arg,)).fetchone()
+        """, (arg, *extra_params)).fetchone()
         if not row or not row["matches"]:
             return d
         matches = row["matches"] or 0
@@ -507,6 +513,8 @@ def build_dashboard(store, *, primary_id: str | None = None,
             " AND match_id IN (SELECT m.id FROM matches m WHERE NOT EXISTS "
             "(SELECT 1 FROM match_player_stats x WHERE x.match_id = m.id AND x.is_bot = 1))"
         )
+        # Records must exclude corrupt matches too — a junk freeplay upload is
+        # exactly the thing that would otherwise set "Goals in a match".
         rec = con.execute(f"""
             SELECT
                 MAX(goals)   AS max_g,
@@ -516,7 +524,7 @@ def build_dashboard(store, *, primary_id: str | None = None,
                 MAX(demos)   AS max_d,
                 MAX(score)   AS max_score
             FROM match_player_stats
-            WHERE {where}{records_filter}
+            WHERE {where}{records_filter}{valid_match_sql()}
         """, (arg,)).fetchone()
         if rec:
             d.records.lines.extend([
@@ -541,7 +549,7 @@ def build_dashboard(store, *, primary_id: str | None = None,
             JOIN matches m ON m.id = mps.match_id
             WHERE mps.{where}{bot_filter}
             GROUP BY m.is_online
-        """, (arg,)).fetchall()
+        """, (arg, *extra_params)).fetchall()
         for r in mode_rows:
             label = "Online" if r["is_online"] else "Offline"
             n = r["n"]; w = r["w"]
@@ -556,7 +564,7 @@ def build_dashboard(store, *, primary_id: str | None = None,
             WHERE mps.{where}{bot_filter}
             ORDER BY m.started_at DESC
             LIMIT 10
-        """, (arg,)).fetchall()
+        """, (arg, *extra_params)).fetchall()
         if recent_rows:
             # Spaced check/cross instead of "WWLWW" - easier to read at a glance.
             pattern = " ".join(
@@ -575,7 +583,7 @@ def build_dashboard(store, *, primary_id: str | None = None,
 
         # ---- best teammates (>5 games together — meaningful sample, not one-offs) ----
         if primary_id and primary_id != "Unknown|0|0":
-            tm_rows = con.execute("""
+            tm_rows = con.execute(f"""
                 SELECT mps_t.name AS name,
                        COUNT(*) AS n,
                        SUM(CASE WHEN mps_me.team_num = m.winner_team_num THEN 1 ELSE 0 END) AS w
@@ -584,7 +592,7 @@ def build_dashboard(store, *, primary_id: str | None = None,
                 JOIN match_player_stats mps_t ON mps_t.match_id = m.id
                                               AND mps_t.team_num = mps_me.team_num
                                               AND NOT (mps_t.primary_id = mps_me.primary_id AND mps_t.name = mps_me.name)
-                WHERE mps_me.primary_id = ?
+                WHERE mps_me.primary_id = ?{valid_match_sql(col="mps_me.match_id")}
                 GROUP BY mps_t.name
                 HAVING n > 5
                 ORDER BY (w * 1.0 / n) DESC, n DESC
@@ -597,7 +605,7 @@ def build_dashboard(store, *, primary_id: str | None = None,
                 ))
 
             # ---- toughest opponents (>5 games faced — meaningful rivals only) ----
-            opp_rows = con.execute("""
+            opp_rows = con.execute(f"""
                 SELECT mps_o.name AS name,
                        COUNT(*) AS n,
                        SUM(CASE WHEN mps_me.team_num = m.winner_team_num THEN 1 ELSE 0 END) AS w
@@ -605,7 +613,7 @@ def build_dashboard(store, *, primary_id: str | None = None,
                 JOIN matches m ON m.id = mps_me.match_id
                 JOIN match_player_stats mps_o ON mps_o.match_id = m.id
                                               AND mps_o.team_num != mps_me.team_num
-                WHERE mps_me.primary_id = ?
+                WHERE mps_me.primary_id = ?{valid_match_sql(col="mps_me.match_id")}
                 GROUP BY mps_o.name
                 HAVING n > 5
                 ORDER BY (w * 1.0 / n) ASC, n DESC

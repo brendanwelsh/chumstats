@@ -58,7 +58,8 @@ def build_payload(summary: MatchSummary, owner_primary_id: str) -> dict | None:
     others = [p for p in summary.players if p.primary_id != owner_primary_id]
     return {
         "match_id": summary.match_id,
-        "parser_version": AGGREGATOR_VERSION,
+        "parser_version": (summary.parser_version
+                           if summary.parser_version is not None else AGGREGATOR_VERSION),
         "started_at": summary.started_at, "ended_at": summary.ended_at,
         "arena": summary.arena,
         "team0_score": summary.team0_score, "team1_score": summary.team1_score,

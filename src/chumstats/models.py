@@ -119,8 +119,12 @@ class HasMatchGuid(_Model):
 class MatchLifecycle(HasMatchGuid):
     """Used for MatchCreated, MatchInitialized, MatchDestroyed,
     CountdownBegin, RoundStarted, MatchPaused, MatchUnpaused,
-    ReplayPlaybackStart, ReplayPlaybackEnd, ReplayWillEnd, PodiumStart,
-    ReplayCreated. They all carry only MatchGuid."""
+    GoalReplayStart, GoalReplayEnd, GoalReplayWillEnd, PodiumStart,
+    ReplayCreated. They all carry only MatchGuid.
+
+    (Older builds of this file guessed ReplayPlaybackStart/End/WillEnd; real
+    captures emit GoalReplayStart/GoalReplayEnd/GoalReplayWillEnd. Both sets
+    stay registered so archived raw events keep parsing.)"""
 
 
 class MatchEnded(HasMatchGuid):
@@ -191,6 +195,9 @@ EVENT_MODEL: dict[str, type[BaseModel]] = {
     "ReplayPlaybackStart": MatchLifecycle,
     "ReplayPlaybackEnd": MatchLifecycle,
     "ReplayWillEnd": MatchLifecycle,
+    "GoalReplayStart": MatchLifecycle,
+    "GoalReplayEnd": MatchLifecycle,
+    "GoalReplayWillEnd": MatchLifecycle,
     "PodiumStart": MatchLifecycle,
     "ReplayCreated": MatchLifecycle,
     "MatchEnded": MatchEnded,
