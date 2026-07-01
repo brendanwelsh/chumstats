@@ -556,32 +556,37 @@ class Store:
                 "WHERE event = 'UpdateState' AND match_id IS NOT NULL"
             )}
             existing = {r[0] for r in c.execute("SELECT id FROM matches")}
-            rows = c.execute(
+            # Stream the cursor while this connection is open (same shape as
+            # backfill_from_raw_events): fetchall() here pulled the entire
+            # multi-GB tick firehose into memory at once.
+            cur = c.execute(
                 "SELECT event, payload, received_at FROM raw_events "
                 "ORDER BY received_at ASC, id ASC"
-            ).fetchall()
+            )
 
-        def _iter():
-            for event_name, payload_str, received_at in rows:
-                if not event_name:
-                    continue
-                try:
-                    raw = json.loads(payload_str) if payload_str else {}
-                except Exception:
-                    continue
-                model = EVENT_MODEL.get(event_name)
-                parsed = None
-                if model is not None:
+            def _iter():
+                for event_name, payload_str, received_at in cur:
+                    if not event_name:
+                        continue
                     try:
-                        parsed = model.model_validate(raw)
+                        raw = json.loads(payload_str) if payload_str else {}
                     except Exception:
-                        parsed = None
-                yield event_name, raw, parsed, received_at
+                        continue
+                    model = EVENT_MODEL.get(event_name)
+                    parsed = None
+                    if model is not None:
+                        try:
+                            parsed = model.model_validate(raw)
+                        except Exception:
+                            parsed = None
+                    yield event_name, raw, parsed, received_at
+
+            summaries = run_aggregation(_iter(), force=True)
 
         replaced = 0
         # force=True so a re-derive keeps forfeits/early-leaves (no MatchEnded)
         # instead of dropping them — consistent with the live ingest path.
-        for s in run_aggregation(_iter(), force=True):
+        for s in summaries:
             if s.match_id in with_ticks:
                 self.save_match(s)  # INSERT OR REPLACE -> overwrite + restamp version
                 replaced += 1
