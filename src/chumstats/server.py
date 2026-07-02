@@ -28,7 +28,7 @@ import mimetypes
 import time
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 # Ensure self-hosted web fonts are served with the right Content-Type. Python's
 # default mimetypes DB doesn't always know .woff2 (notably on Windows), which
@@ -51,67 +51,84 @@ from .arenas import arena_nice as _arena_nice
 
 # ---- Multi-user sync wire models (POST /api/v1/match-summary body) ----
 
+# Bounded field types for friend-submitted uploads. Real RL matches sit far
+# inside these caps; the bounds exist so a malicious or buggy client can't feed
+# the shared leaderboard negative/absurd values, overflow SQLite's 64-bit SUM
+# accumulator (which would 500 every viewer of /players and /player/*), or slip
+# NaN/Infinity through into the aggregates. Legit clients are unaffected.
+_Count = Annotated[int, Field(ge=0, le=1_000_000)]        # per-match tallies
+_Big   = Annotated[int, Field(ge=0, le=100_000_000)]      # score / tick counters
+_Rate  = Annotated[float, Field(ge=0, le=1e9, allow_inf_nan=False)]
+_Secs  = Annotated[float, Field(ge=0, le=1e13, allow_inf_nan=False)]  # unix time
+_Text  = Annotated[str, Field(max_length=200)]
+_Tag   = Annotated[str, Field(max_length=32)]
+
+
 class PlayerRowUpload(BaseModel):
-    primary_id: str
-    name: str
-    team_num: int
-    goals: int = 0
-    shots: int = 0
-    assists: int = 0
-    saves: int = 0
-    demos: int = 0
-    touches: int = 0
-    score: int = 0
+    primary_id: _Text
+    name: _Text
+    team_num: Annotated[int, Field(ge=-1, le=8)]
+    goals: _Count = 0
+    shots: _Count = 0
+    assists: _Count = 0
+    saves: _Count = 0
+    demos: _Count = 0
+    touches: _Count = 0
+    score: _Big = 0
     is_bot: bool = False
     is_mvp: bool = False
-    platform: str = "Unknown"
-    ticks_total: int = 0
-    ticks_on_wall: int = 0
-    ticks_on_ground: int = 0
-    ticks_in_air: int = 0
-    ticks_boosting: int = 0
-    ticks_supersonic: int = 0
-    ticks_zero_boost: int = 0
-    ticks_full_boost: int = 0
-    speed_sum: float = 0.0
-    speed_max: float = 0.0
-    boost_used: float = 0.0
+    platform: _Tag = "Unknown"
+    ticks_total: _Big = 0
+    ticks_on_wall: _Big = 0
+    ticks_on_ground: _Big = 0
+    ticks_in_air: _Big = 0
+    ticks_boosting: _Big = 0
+    ticks_supersonic: _Big = 0
+    ticks_zero_boost: _Big = 0
+    ticks_full_boost: _Big = 0
+    speed_sum: _Rate = 0.0
+    speed_max: _Rate = 0.0
+    boost_used: _Rate = 0.0
 
 
 class MatchSummaryUpload(BaseModel):
-    match_id: str
-    started_at: float
-    ended_at: float
-    arena: str
-    team0_score: int
-    team1_score: int
-    team0_name: str = "Blue"
-    team1_name: str = "Orange"
-    team0_color: str = ""
-    team1_color: str = ""
-    winner_team_num: int
+    match_id: _Text
+    started_at: _Secs
+    ended_at: _Secs
+    arena: _Text
+    team0_score: Annotated[int, Field(ge=0, le=1000)]
+    team1_score: Annotated[int, Field(ge=0, le=1000)]
+    team0_name: _Text = "Blue"
+    team1_name: _Text = "Orange"
+    team0_color: _Tag = ""
+    team1_color: _Tag = ""
+    winner_team_num: Annotated[int, Field(ge=-1, le=8)]
     is_online: bool = True
-    crossbar_hits: int = 0
-    parser_version: int = 0
-    duration_seconds: float = 0.0
+    crossbar_hits: _Count = 0
+    parser_version: Annotated[int, Field(ge=0, le=1_000_000)] = 0
+    duration_seconds: _Rate = 0.0
     # Declared here or pydantic silently strips them from the upload and the
     # central DB stores 0 for every synced match (the client has sent them
     # from day one — the wire model just dropped them).
-    regulation_seconds: float = 0.0
-    overtime_seconds: float = 0.0
+    regulation_seconds: _Rate = 0.0
+    overtime_seconds: _Rate = 0.0
     my_row: PlayerRowUpload
-    other_rows: list[PlayerRowUpload] = Field(default_factory=list)
+    # A match is at most 4v4 → 8 rows; 16 is generous headroom, and the cap stops
+    # a single upload from carrying an unbounded fabricated roster.
+    other_rows: list[PlayerRowUpload] = Field(default_factory=list, max_length=16)
     # Match-level data needed for heatmaps & goal-sequence views. Not "owned"
     # by any one player — first writer wins on the server side so friends
     # can't overwrite each other's earlier upload.
-    ball_touches: list[dict] = Field(default_factory=list)
-    goal_events: list[dict] = Field(default_factory=list)
+    # Generous caps: a real match is nowhere near a million of any of these;
+    # the bound just stops a single upload from carrying a memory-blowing list.
+    ball_touches: list[dict] = Field(default_factory=list, max_length=1_000_000)
+    goal_events: list[dict] = Field(default_factory=list, max_length=1_000_000)
     # Lifecycle/scoring raw events (BallHit, GoalScored, CrossbarHit,
     # StatfeedEvent, MatchCreated/Initialized/Ended/Destroyed, RoundStarted,
     # etc.). Excludes UpdateState (the 30 Hz position firehose) to keep the
     # payload to ~30 KB gzipped. Each entry: {"event": str, "payload": str}.
     # First-writer-wins per match — server skips if any raw_events exist.
-    raw_events: list[dict] = Field(default_factory=list)
+    raw_events: list[dict] = Field(default_factory=list, max_length=1_000_000)
 
 
 def _impossible_match_reason(team0_score, team1_score, rows) -> str | None:
@@ -467,7 +484,9 @@ def make_app(broadcaster: Broadcaster, *, store=None,
     ):
         if store is None:
             return HTMLResponse("<p>No DB configured</p>")
-        slots = list(names)
+        # Cap slots: a comparison view is a handful of players. Bounding the list
+        # stops a crafted ?names=…(×1000) from rendering 1000 heatmap columns.
+        slots = list(names)[:8]
         if not slots:
             # Default to the top 3 most-played (non-bot) players so the page is
             # useful with no params — neutral, not owner-first.
@@ -507,7 +526,7 @@ def make_app(broadcaster: Broadcaster, *, store=None,
         # Default "Our club" = the owner + their regular crew (teammates with
         # >5 games on the owner's team), so the club page reflects the actual
         # friend group, not a club of one. Explicit ?names= overrides.
-        members = [n for n in names if n]
+        members = [n for n in names if n][:64]  # cap: bound work on a crafted ?names=…
         if not members and self_name:
             members = [self_name]
             try:
@@ -554,7 +573,7 @@ def make_app(broadcaster: Broadcaster, *, store=None,
     @app.get("/overlay/{mode}")
     async def overlay_mode(mode: str):
         if mode not in ("live", "last", "session", "me"):
-            return HTMLResponse(f"<p>Unknown overlay mode: {mode}</p>", status_code=404)
+            return HTMLResponse(f"<p>Unknown overlay mode: {html.escape(mode)}</p>", status_code=404)
         # Serve the same shell, mode chosen by JS via path.
         path = OVERLAY_DIR / "overlay.html"
         return FileResponse(str(path))
@@ -565,6 +584,7 @@ def make_app(broadcaster: Broadcaster, *, store=None,
         pre-match scouting card when MatchCreated arrives."""
         if store is None or not names:
             return {"players": {}}
+        names = names[:16]  # cap: a pre-match scouting card is at most 8 players
         out: dict[str, dict] = {}
         with store._conn() as con:
             for name in names:
@@ -655,6 +675,7 @@ def make_app(broadcaster: Broadcaster, *, store=None,
         personal API key bound to their detected RL account (created on first
         join; returning friends get their existing key back). Enable by setting
         CHUMSTATS_JOIN_PASSWORD on the central host."""
+        import hmac
         import os as _os
         if store is None:
             raise HTTPException(status_code=503, detail="server has no store configured")
@@ -662,15 +683,25 @@ def make_app(broadcaster: Broadcaster, *, store=None,
         if not join_pw:
             raise HTTPException(status_code=403,
                                 detail="self-registration is disabled (no join password set on the server)")
-        if payload.join_password.strip() != join_pw:
+        # Constant-time compare so the single shared password can't be probed.
+        if not hmac.compare_digest(payload.join_password.strip(), join_pw):
             raise HTTPException(status_code=403, detail="wrong join password")
         if not payload.primary_id or payload.primary_id.startswith("Unknown"):
             raise HTTPException(status_code=400,
                                 detail="couldn't detect your Rocket League account yet -- play a match first, then retry")
-        user = store.get_user_by_primary_id(payload.primary_id)
-        if not user:
-            user = store.create_user(payload.primary_id,
-                                     payload.display_name or payload.primary_id)
+        # Only ISSUE a key when creating a brand-new account. We must NOT hand an
+        # existing user's key back to anyone who merely knows their primary_id
+        # (which is public — it's in the ?pid= links on every player page) plus
+        # the shared join password; that would be account takeover. A returning
+        # friend already has their key saved locally; if they truly lost it, the
+        # admin reissues it with `chumstats admin`.
+        if store.get_user_by_primary_id(payload.primary_id):
+            raise HTTPException(
+                status_code=409,
+                detail="that account is already registered -- if you've lost your key, "
+                       "ask whoever runs the server to reissue it")
+        user = store.create_user(payload.primary_id,
+                                 payload.display_name or payload.primary_id)
         return {
             "ok": True,
             "api_key": user["api_key"],
@@ -1857,8 +1888,8 @@ def _match_history_html(store, primary_id: str | None, name: str | None, *,
     body_rows: list[str] = []
     for r in rows:
         won = r["team_num"] == r["winner_team_num"]
-        ts_iso = datetime.fromtimestamp(r["started_at"]).isoformat()
-        ts_fallback = datetime.fromtimestamp(r["started_at"]).strftime("%b %d, %Y")
+        ts_iso = datetime.fromtimestamp(r["started_at"]).isoformat() if r["started_at"] else ""
+        ts_fallback = datetime.fromtimestamp(r["started_at"]).strftime("%b %d, %Y") if r["started_at"] else "—"
         arena = _arena_nice(r["arena"] or "")
         # Online is the default ~95% of matches and reads as noise; only flag
         # explicit offline / exhibition matches.
@@ -2234,8 +2265,8 @@ def _history_page_html(store, primary_id, name, *,
     body_rows: list[str] = []
     for r in rows:
         won = r["team_num"] == r["winner_team_num"]
-        ts_iso = datetime.fromtimestamp(r["started_at"]).isoformat()
-        ts_fallback = datetime.fromtimestamp(r["started_at"]).strftime("%b %d, %Y")
+        ts_iso = datetime.fromtimestamp(r["started_at"]).isoformat() if r["started_at"] else ""
+        ts_fallback = datetime.fromtimestamp(r["started_at"]).strftime("%b %d, %Y") if r["started_at"] else "—"
         # Hide "Online" mode (it's the default ~95% of matches); only chip
         # when the match was offline.
         offline_chip = ('' if r["is_online"]
@@ -2360,7 +2391,7 @@ def _match_detail_html(store, match_id: str, viewer_pid: str | None, viewer_name
     with store._conn() as con:
         m = con.execute("SELECT * FROM matches WHERE id = ?", (match_id,)).fetchone()
         if not m:
-            return _page_wrap("Match not found", f"<h1>Match not found</h1><p class='caption'>No match with id <code>{match_id}</code>.</p>", status=404)
+            return _page_wrap("Match not found", f"<h1>Match not found</h1><p class='caption'>No match with id <code>{html.escape(match_id)}</code>.</p>", status=404)
         players = con.execute(
             "SELECT * FROM match_player_stats WHERE match_id = ? ORDER BY score DESC", (match_id,)
         ).fetchall()
@@ -2375,8 +2406,8 @@ def _match_detail_html(store, match_id: str, viewer_pid: str | None, viewer_name
     # Render the start timestamp as ISO-8601 so a small <time> formatter can
     # rewrite it to 12hr local on the client. Server-side fallback is also
     # 12hr-ish so it's readable even if JS doesn't run.
-    started_iso = datetime.fromtimestamp(m["started_at"]).isoformat()
-    started_fallback = datetime.fromtimestamp(m["started_at"]).strftime("%b %d, %Y")
+    started_iso = datetime.fromtimestamp(m["started_at"]).isoformat() if m["started_at"] else ""
+    started_fallback = datetime.fromtimestamp(m["started_at"]).strftime("%b %d, %Y") if m["started_at"] else "—"
     duration = extras["duration_seconds"] if extras else 0
     mode = "Online" if m["is_online"] else "Offline"
 
@@ -2487,7 +2518,7 @@ def _match_detail_html(store, match_id: str, viewer_pid: str | None, viewer_name
             # The roster table stays clean - basic counts only. All advanced
             # stats (where you are on the field, boost usage, speed) move into
             # the per-player section below the table.
-            meta_line = f'<div class="meta-line"><span>{platform or "Unknown platform"}</span></div>'
+            meta_line = f'<div class="meta-line"><span>{html.escape(platform or "Unknown platform")}</span></div>'
             touches_cell = f"<td class='num tnum'>{p['touches'] or 0}</td>" if "touches" in p.keys() else "<td></td>"
             rows.append(f"""
               <tr>
@@ -5230,7 +5261,8 @@ def _compare_page_html(store, slots: list[str], *, self_name: str | None = None,
                 + '</colgroup>')
     header_cells = ['<th class="compare-metric-col">Metric</th>']
     for i, slot in enumerate(slots):
-        display_name = slot or f"(empty slot {i+1})"
+        # slot is a raw, user-controlled player name (from ?names= or defaults).
+        display_name = html.escape(slot or f"(empty slot {i+1})")
         header_cells.append(f'<th class="compare-col">{display_name}</th>')
     header_cells.append(
         '<th class="compare-pro-col" '
@@ -5331,7 +5363,9 @@ def _compare_heatmap_row(slots: list, touch_data: list, shot_data: list | None =
     for i, slot in enumerate(slots):
         td = touch_data[i] if i < len(touch_data) else None
         sd = shot_data[i] if i < len(shot_data) else None
-        label = slot or f"(empty slot {i+1})"
+        # slot is a raw, user-controlled player name — escape once here since
+        # label flows into both element text and a title="" attribute below.
+        label = html.escape(slot or f"(empty slot {i+1})")
         if not td or not td.get("touches"):
             cards.append(
                 f'<div class="compare-hm-card"><div class="compare-hm-head">{label}</div>'
@@ -5387,7 +5421,7 @@ def _live_page_html(*, self_name: str | None = None, friend_mode: bool = False) 
     style scoreboard + roster table that updates on every tick. When idle
     (no live socket / no active match), shows a placeholder + link to the
     most recent finished match."""
-    self_attr = f'data-self-name="{self_name}"' if self_name else ""
+    self_attr = f'data-self-name="{html.escape(self_name)}"' if self_name else ""
     # The friend's local server doesn't serve the analytical pages, so skip the
     # idle-state links that would 404 there.
     idle_links = "" if friend_mode else (
@@ -5875,7 +5909,7 @@ def _club_detail_html(store, club_name: str,
           <tr class="row">
             <td class="num tnum rank">{rank}</td>
             <td>{link_open}<b>{html.escape(r['name'])}</b>{link_close}{bot}</td>
-            <td class="dim">{r['platform'] or 'n/a'}</td>
+            <td class="dim">{html.escape(r['platform'] or 'n/a')}</td>
             <td class="num tnum"><b>{r['n']}</b></td>
             <td class="num tnum">{r['score'] or 0}</td>
             <td class="num tnum">{r['goals'] or 0}</td>
@@ -10167,6 +10201,9 @@ def _splash_html(store, self_primary_id: str | None = None) -> str:
 
 def _overlay_picker_html(host: str, friend_mode: bool = False) -> str:
     """Picker page with LIVE iframe previews + copy URLs for each overlay mode."""
+    # host comes from the request Host header; escape it before it goes into the
+    # preview URLs (a proxy usually normalizes Host, but don't reflect it raw).
+    host = html.escape(host or "")
     modes = [
         ("live",    "Live HUD",
          "Full BARL-style scoreboard during the match. Team names, scores, clock, and per-player stats, all live.",
@@ -10264,7 +10301,7 @@ def _dashboard_html(d, store=None, primary_id: str | None = None,
         if not g.lines or g.title in skip_titles:
             continue
         rows = "\n".join(
-            f'<tr><td>{ml.label}</td><td><b>{ml.value}</b></td><td class="cmp">{ml.comparison}</td></tr>'
+            f'<tr><td>{html.escape(str(ml.label))}</td><td><b>{ml.value}</b></td><td class="cmp">{ml.comparison}</td></tr>'
             for ml in g.lines
         )
         sec = f'<section><h2>{g.title}</h2><table>{rows}</table></section>'
