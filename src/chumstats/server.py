@@ -435,6 +435,21 @@ def make_app(broadcaster: Broadcaster, *, store=None,
     async def about_page():
         return HTMLResponse(_about_html())
 
+    @_gated_get("/download")
+    async def download_client(pw: str = ""):
+        """Password-gated download of the friend client bundle. Enable it by
+        setting CHUMSTATS_DOWNLOAD_PASSWORD + CHUMSTATS_CLIENT_BUNDLE (path to
+        the built Chumstats.zip) in the central server's environment; without
+        them the page just explains it isn't set up yet."""
+        import os
+        expected = os.environ.get("CHUMSTATS_DOWNLOAD_PASSWORD") or ""
+        bundle = os.environ.get("CHUMSTATS_CLIENT_BUNDLE") or ""
+        ready = bool(expected and bundle and os.path.exists(bundle))
+        if ready and pw and pw == expected:
+            return FileResponse(bundle, filename=os.path.basename(bundle),
+                                media_type="application/octet-stream")
+        return HTMLResponse(_download_page_html(ready=ready, wrong=bool(pw and pw != expected)))
+
     @_gated_get("/opponents")
     async def opponents_page():
         # Retired — redundant with All Players (same data). Any old link / bookmark
@@ -6704,6 +6719,43 @@ _LOGO_SVG = '''<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-
   <circle cx="20" cy="17.4" r="0.7" fill="#fff" opacity="0.6"/>
 </svg>'''
 
+def _download_page_html(*, ready: bool, wrong: bool) -> str:
+    """Password gate + post-download setup steps for the friend client. Public
+    page (anyone with the link sees the gate; only the password yields the file)."""
+    if not ready:
+        return _page_wrap("Download client", """
+          <h1>Download the Chumstats client</h1>
+          <p class="caption">The client download isn't set up on this server yet &mdash;
+          ask the person who runs it to enable it.</p>
+        """, active="download")
+    warn = ('<p style="color:var(--bad);font-weight:600;margin:6px 0 0">'
+            'Wrong password &mdash; try again.</p>' if wrong else "")
+    body = f"""
+      <h1>Download the Chumstats client</h1>
+      <p class="caption">The client tracks your own Rocket League matches and feeds them
+      into this site. Enter the password whoever runs the server gave you.</p>
+      {warn}
+      <form method="get" action="/download" style="margin:18px 0;display:flex;gap:8px;max-width:380px">
+        <input type="password" name="pw" placeholder="Password" autofocus
+               style="flex:1;height:38px;padding:0 12px;background:var(--bg);color:var(--text);border:1px solid var(--border)">
+        <button type="submit" class="copy-btn" style="padding:0 18px">Download</button>
+      </form>
+      <div class="card" style="margin-top:18px;max-width:680px">
+        <div class="section-title"><span>After it downloads</span></div>
+        <ol style="line-height:1.9;padding-left:20px;margin:6px 0 2px">
+          <li>Unzip <b>Chumstats.zip</b> and run <b>Chumstats.exe</b>.</li>
+          <li>The setup wizard walks you through it: connect to this server
+              (<code>https://chumstats.com</code>) with the personal key you were sent,
+              confirm your Rocket League name, and let it switch on RL's built-in
+              Stats API for you.</li>
+          <li>Play Rocket League with the client running &mdash; your matches show up
+              here automatically. It lives in the system tray; nothing else to do.</li>
+        </ol>
+      </div>
+    """
+    return _page_wrap("Download client", body, active="download")
+
+
 def _nav(active: str = "", friend_mode: bool = False) -> str:
     # Stat pages live in the main nav row. Utility links (OBS overlay, How it
     # works) move to the right-hand aside as separate buttons so they don't read
@@ -6718,7 +6770,8 @@ def _nav(active: str = "", friend_mode: bool = False) -> str:
     # OBS overlay is a local/live-host tool, not a central-site page — it lives as
     # a button on the Live view, not the nav. Opponents is folded into Players
     # (same data), so it's no longer a top-level page.
-    util_items = [("about", "/about", "How it works")]
+    util_items = [("download", "/download", "Get the client"),
+                  ("about", "/about", "How it works")]
     if friend_mode:
         # The friend's local server only serves the live view + OBS overlay.
         stat_items = [it for it in stat_items if it[0] == "live"]
