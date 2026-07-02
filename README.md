@@ -228,9 +228,12 @@ src/chumstats/
   tray.py / tray_*   Windows tray app, friend-bundle config + setup wizard
   autostart.py       Windows per-user Run-key autostart toggle
   overlay/           HTML / CSS / JS for the browser overlay + dashboard front-end
-capture.ps1 / capture.py   standalone socket recorders (no install needed)
+scripts/             standalone socket recorders (capture.ps1 / capture.py — no install
+                     needed), smoke.py fixture replayer, one-off data-repair tools
 deploy/              central-server (install.sh + launchd) and Windows friend-bundle build
+docs/                design notes (multi-user network) + the README screenshots
 tests/               pytest suite against real captures
+captures/            drop .jsonl recordings here for the fixture-based tests — gitignored
 data/                SQLite DB — gitignored
 ```
 
@@ -239,7 +242,7 @@ data/                SQLite DB — gitignored
 To record a session without running the full app (to share fixture data or develop offline):
 
 ```powershell
-.\capture.ps1     # writes raw bytes (.bin) + parsed envelopes (.jsonl) to captures/ ; Ctrl+C to stop
+.\scripts\capture.ps1     # writes raw bytes (.bin) + parsed envelopes (.jsonl) to captures/ ; Ctrl+C to stop
 ```
 
 ### Testing
@@ -249,9 +252,9 @@ To record a session without running the full app (to share fixture data or devel
 ```
 
 The suite covers envelope parsing, aggregator correctness on online + exhibition matches, the
-goal‑replay‑echo dedupe quirk, the SQLite roundtrip, corrupt‑match rejection, multi‑user upload auth,
-and the wizard's idempotent, comment‑preserving `.ini` write. 27 run on a bare checkout; the rest skip
-without RL capture fixtures.
+goal‑replay‑echo dedupe quirk, goal‑replay tick exclusion, the SQLite roundtrip, corrupt‑match
+rejection, multi‑user upload auth, offline‑match dedupe, and the wizard's idempotent,
+comment‑preserving `.ini` write. 43 run on a bare checkout; the rest skip without RL capture fixtures.
 
 ## Stats API reference
 
@@ -270,7 +273,9 @@ launch — change it, restart RL. The socket emits concatenated UTF‑8 JSON env
 Events seen in real captures: `MatchCreated`, `MatchInitialized`, `MatchDestroyed`, `MatchEnded`,
 `MatchPaused`, `MatchUnpaused`, `CountdownBegin`, `RoundStarted`, `UpdateState`,
 `ClockUpdatedSeconds`, `BallHit`, `GoalScored`, `CrossbarHit`, `StatfeedEvent`,
-`ReplayPlaybackStart`, `ReplayPlaybackEnd`, `ReplayWillEnd`.
+`GoalReplayStart`, `GoalReplayEnd`, `GoalReplayWillEnd`, `PodiumStart`, `ReplayCreated`.
+Note the game re‑streams `UpdateState` **during goal replays** (`bReplay=true`) carrying the
+replayed car's speed/boost — the aggregator excludes those ticks from derived stats.
 
 > **If RL ever stutters while ingesting:** the Stats API streams over a single loopback socket, and if
 > the client stops draining it RL's game thread can block on `send()` (Windows logs `AppHangXProcB1`,

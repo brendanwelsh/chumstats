@@ -2,7 +2,7 @@
 and print the resulting MatchSummary objects. No deps on pytest - just run it.
 
 Usage:
-    .venv\\Scripts\\python.exe smoke.py
+    .venv\\Scripts\\python.exe scripts\\smoke.py
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from pathlib import Path
 from chumstats.replay import iter_for_aggregator
 from chumstats.session import SessionTracker, run_aggregation
 
-CAPTURES = Path(__file__).parent / "captures"
+CAPTURES = Path(__file__).resolve().parents[1] / "captures"
 
 
 def main() -> None:

@@ -4,10 +4,10 @@
 # Usage:
 #   1. Make sure Rocket League is FULLY CLOSED.
 #   2. Launch Rocket League and load to the main menu.
-#   3. In a PowerShell window in this folder, run:
-#        .\capture.ps1
+#   3. In a PowerShell window at the repo root, run:
+#        .\scripts\capture.ps1
 #      (If you get a script-execution error, run instead:
-#        powershell -ExecutionPolicy Bypass -File .\capture.ps1 )
+#        powershell -ExecutionPolicy Bypass -File .\scripts\capture.ps1 )
 #   4. Play 1-2 matches.
 #   5. Press Ctrl+C to stop. Send the .bin file from the captures\ folder.
 
@@ -15,7 +15,7 @@ $ErrorActionPreference = 'Stop'
 
 $Host_      = '127.0.0.1'
 $Port       = 49123
-$OutDir     = Join-Path $PSScriptRoot 'captures'
+$OutDir     = Join-Path (Split-Path $PSScriptRoot -Parent) 'captures'
 $Stamp      = Get-Date -Format 'yyyyMMdd_HHmmss'
 $RawPath    = Join-Path $OutDir ("rl_{0}.bin"   -f $Stamp)
 $JsonlPath  = Join-Path $OutDir ("rl_{0}.jsonl" -f $Stamp)

@@ -9,7 +9,7 @@ to stdout so you can see it's working.
 Usage:
     1. Make sure Rocket League is FULLY CLOSED.
     2. Launch Rocket League and load into the main menu.
-    3. In a separate terminal, run:  python capture.py
+    3. In a separate terminal, run:  python scripts/capture.py
        (If it prints "connection refused", RL hasn't opened the socket yet
         - the socket only opens once the game has loaded.)
     4. Play 1-2 matches. Casual / Ranked / Private all work.
@@ -30,7 +30,7 @@ HOST = "127.0.0.1"
 PORT = 49123
 RECV_BYTES = 65536
 
-OUT_DIR = pathlib.Path(__file__).parent / "captures"
+OUT_DIR = pathlib.Path(__file__).resolve().parents[1] / "captures"
 OUT_DIR.mkdir(exist_ok=True)
 
 stamp = time.strftime("%Y%m%d_%H%M%S")
@@ -55,7 +55,7 @@ def connect_with_retry(host: str, port: int, attempts: int = 30, delay: float = 
 def main() -> int:
     print(f"connecting to {HOST}:{PORT} ...", flush=True)
     sock = connect_with_retry(HOST, PORT)
-    print(f"connected.")
+    print("connected.")
     print(f"  raw   -> {raw_path}")
     print(f"  jsonl -> {jsonl_path}")
     print("press Ctrl+C to stop.\n", flush=True)
@@ -124,7 +124,7 @@ def main() -> int:
         print("event type counts:")
         for k, v in sorted(type_counts.items(), key=lambda kv: -kv[1]):
             print(f"  {v:>6}  {k}")
-    print(f"\nfiles written:")
+    print("\nfiles written:")
     print(f"  {raw_path}")
     print(f"  {jsonl_path}")
     return 0
