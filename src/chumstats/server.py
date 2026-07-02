@@ -24,10 +24,18 @@ import asyncio
 import html
 import json
 import logging
+import mimetypes
 import time
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
+
+# Ensure self-hosted web fonts are served with the right Content-Type. Python's
+# default mimetypes DB doesn't always know .woff2 (notably on Windows), which
+# would make StaticFiles fall back to application/octet-stream and trip the
+# <link rel=preload type=font/woff2> match.
+mimetypes.add_type("font/woff2", ".woff2")
+mimetypes.add_type("font/woff", ".woff")
 
 from datetime import datetime
 from urllib.parse import quote
@@ -6600,6 +6608,8 @@ def _page_wrap(title: str, body_html: str, *, status: int = 200, active: str = "
 <meta name="color-scheme" content="dark light">
 <title>Chumstats - {html.escape(title)}</title>
 <link rel="icon" type="image/png" href="/static/brand/chum-logo.png">
+<link rel="preload" href="/static/fonts/bricolage-grotesque-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/static/fonts/jetbrains-mono-latin.woff2" as="font" type="font/woff2" crossorigin>
 <script>(function(){{try{{var t=localStorage.getItem('chumstats-theme')||((window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches)?'light':'dark');document.documentElement.setAttribute('data-theme',t);}}catch(e){{document.documentElement.setAttribute('data-theme','dark');}}}})();</script>
 {_STYLE_TAG}
 </head><body class="{body_cls}">
@@ -6761,7 +6771,36 @@ _THEME_SCRIPT = """
 
 _STYLE_TAG = """
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700;12..96,800&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap');
+/* Self-hosted fonts — served from /static/fonts, zero third-party requests.
+   These @font-face rules never block rendering (the old external Google Fonts
+   @import did, which defeated Chrome's paint-holding and flashed a black
+   interstitial on every navigation). Local woff2 loads in ~1ms over LAN, and
+   the two primary faces are <link rel=preload>ed in the head, so pages paint
+   in-font on the first frame with no swap. latin + latin-ext subsets only. */
+@font-face {
+  font-family: 'Bricolage Grotesque';
+  font-style: normal; font-weight: 500 800; font-stretch: 100%; font-display: swap;
+  src: url('/static/fonts/bricolage-grotesque-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Bricolage Grotesque';
+  font-style: normal; font-weight: 500 800; font-stretch: 100%; font-display: swap;
+  src: url('/static/fonts/bricolage-grotesque-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal; font-weight: 400 700; font-display: swap;
+  src: url('/static/fonts/jetbrains-mono-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal; font-weight: 400 700; font-display: swap;
+  src: url('/static/fonts/jetbrains-mono-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
 
 :root {
   --accent:        #ff7a18;
