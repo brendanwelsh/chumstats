@@ -222,7 +222,7 @@ src/chumstats/
   server.py          FastAPI app: dashboard, all pages, /live + /overlay WS  ← source of truth: the web UI
   sync.py            client upload + server ingest of finalized matches (multi-user)
   bot.py             discord.py poster + embed builder
-  config.py          env / .env loader (+ legacy-name fallbacks)
+  config.py          env / .env loader
   config_wizard.py   detect RL install, read/write DefaultStatsAPI.ini
   cli.py             the `chumstats` entry point
   tray.py / tray_*   Windows tray app, friend-bundle config + setup wizard
