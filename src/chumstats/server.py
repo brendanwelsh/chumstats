@@ -6831,6 +6831,17 @@ html, body {
   font-variation-settings: "wdth" 96;
 }
 body { min-height: 100vh; }
+html { scroll-behavior: smooth; }
+
+/* Keyboard focus must be visible everywhere; mouse clicks stay clean. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Headings never strand a single orphaned word. */
+h1, h2, h3 { text-wrap: balance; }
 
 .mono { font-family: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace; }
 .tnum {
@@ -9918,23 +9929,96 @@ def _featured_players(store, *, limit: int = 8) -> list[dict]:
 
 
 _SPLASH_STYLE = """<style>
-.splash { max-width: 860px; margin: 0 auto; padding: 28px 20px 64px; }
-.splash-hero { text-align: center; padding: 20px 0 30px; }
-.splash-logo { width: 76px; height: 76px; }
-.splash-hero h1 { font-size: 40px; margin: 12px 0 6px; letter-spacing: -0.02em; }
-.splash-tagline { color: var(--muted, #9aa3b2); max-width: 560px; margin: 0 auto 22px; font-size: 15px; line-height: 1.5; }
-.splash-cta { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
-.splash-cta a { padding: 9px 17px; border-radius: 10px; font-weight: 600; text-decoration: none; font-size: 14px; }
-.splash-cta .btn-primary { background: var(--accent, #ff7a18); color: #0a0d14; }
+/* Landing hero: fill the viewport and let the wordmark carry it. The glow +
+   pitch-line backdrop is pure CSS (no assets) and stays behind everything. */
+.splash {
+  position: relative;
+  max-width: 1080px; margin: 0 auto; padding: 28px 20px 72px;
+  min-height: calc(100dvh - 140px);
+  display: flex; flex-direction: column; justify-content: center;
+  /* The hero sits on the page itself — cancel the generic section panel. */
+  background: transparent; border: 0; box-shadow: none;
+}
+.splash::before {
+  content: ""; position: absolute; inset: -140px -30vw 0;
+  background:
+    radial-gradient(560px 340px at 50% 12%, var(--accent-soft), transparent 70%),
+    radial-gradient(900px 500px at 50% 0%, rgba(255, 77, 45, 0.05), transparent 75%);
+  pointer-events: none; z-index: -1;
+}
+.splash-hero { text-align: center; padding: 8px 0 44px; animation: splash-rise .55s cubic-bezier(.22,1,.36,1) both; }
+.splash-logo {
+  width: 108px; height: 108px;
+  filter: drop-shadow(0 14px 34px rgba(4, 8, 18, 0.55));
+}
+.splash-hero h1 {
+  font-size: clamp(52px, 8.5vw, 108px);
+  font-weight: 800;
+  line-height: 0.95;
+  margin: 18px 0 14px;
+  letter-spacing: -0.035em;
+}
+.splash-tagline {
+  color: var(--muted, #9aa3b2); max-width: 52ch; margin: 0 auto 30px;
+  font-size: 17px; line-height: 1.55; text-wrap: balance;
+}
+.splash-cta { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+.splash-cta a {
+  padding: 12px 24px; border-radius: 12px; font-weight: 650;
+  text-decoration: none; font-size: 15px;
+  transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease, background .18s ease;
+}
+.splash-cta a:hover { transform: translateY(-1px); }
+.splash-cta a:active { transform: translateY(0) scale(.98); }
+.splash-cta .btn-primary {
+  background: var(--accent, #ff7a18); color: #0a0d14;
+  box-shadow: 0 8px 24px -10px var(--accent-line, rgba(255,122,24,.32));
+}
+.splash-cta .btn-primary:hover { box-shadow: 0 12px 30px -10px var(--accent-line, rgba(255,122,24,.45)); }
 .splash-cta .btn-ghost { border: 1px solid var(--accent-line, rgba(255,122,24,.32)); color: var(--text, #e8edf6); }
-.splash-friends { margin-top: 30px; }
-.splash-friends h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .09em; color: var(--muted, #9aa3b2); margin: 0 0 12px; }
-.splash-chips { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
-.splash-chip { display: flex; flex-direction: column; gap: 3px; padding: 12px 15px; border-radius: 12px; background: var(--card, #131826); border: 1px solid rgba(255,255,255,.06); text-decoration: none; color: var(--text, #e8edf6); transition: border-color .15s, transform .15s; }
-.splash-chip:hover { border-color: var(--accent, #ff7a18); transform: translateY(-1px); }
+.splash-cta .btn-ghost:hover { background: var(--accent-soft, rgba(255,122,24,.12)); }
+.splash-friends { margin-top: 8px; }
+.splash-friends h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .09em; color: var(--muted, #9aa3b2); margin: 0 0 14px; }
+.splash-chips { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 12px; }
+.splash-chip {
+  display: flex; flex-direction: column; gap: 4px; padding: 16px 18px;
+  border-radius: 14px; background: var(--card, #131826);
+  border: 1px solid rgba(255,255,255,.06);
+  text-decoration: none; color: var(--text, #e8edf6);
+  transition: border-color .18s ease, transform .18s ease, box-shadow .18s ease;
+  animation: splash-rise .5s cubic-bezier(.22,1,.36,1) both;
+}
+.splash-chip:nth-child(1) { animation-delay: .08s; }
+.splash-chip:nth-child(2) { animation-delay: .14s; }
+.splash-chip:nth-child(3) { animation-delay: .20s; }
+.splash-chip:nth-child(4) { animation-delay: .26s; }
+.splash-chip:nth-child(5) { animation-delay: .32s; }
+.splash-chip:nth-child(n+6) { animation-delay: .38s; }
+.splash-chip:hover {
+  border-color: var(--accent, #ff7a18);
+  transform: translateY(-2px);
+  box-shadow: 0 14px 30px -18px rgba(4, 8, 18, 0.9);
+}
+.splash-chip:active { transform: translateY(0); }
 .splash-chip.self { border-color: var(--accent-line, rgba(255,122,24,.45)); }
-.splash-chip-name { font-weight: 700; }
-.splash-chip-meta { font-size: 12px; color: var(--muted, #9aa3b2); }
+.splash-chip-name { font-weight: 700; font-size: 16px; }
+.splash-chip-meta {
+  font-size: 12.5px; color: var(--muted, #9aa3b2);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-feature-settings: "tnum";
+}
+@keyframes splash-rise {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .splash-hero, .splash-chip { animation: none; }
+  .splash-cta a, .splash-chip { transition: none; }
+}
+@media (max-width: 700px) {
+  .splash { min-height: auto; padding-top: 40px; }
+  .splash-logo { width: 84px; height: 84px; }
+}
 </style>"""
 
 
