@@ -6831,9 +6831,10 @@ html, body {
   font-variation-settings: "wdth" 96;
 }
 body { min-height: 100vh; }
-html { scroll-behavior: smooth; }
 
-/* Keyboard focus must be visible everywhere; mouse clicks stay clean. */
+/* Keyboard focus must be visible everywhere; mouse clicks stay clean.
+   (No global scroll-behavior:smooth — Chrome animates scroll restoration on
+   ordinary page navigation with it, which reads as a flash/jump per click.) */
 :focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
@@ -9946,7 +9947,7 @@ _SPLASH_STYLE = """<style>
     radial-gradient(900px 500px at 50% 0%, rgba(255, 77, 45, 0.05), transparent 75%);
   pointer-events: none; z-index: -1;
 }
-.splash-hero { text-align: center; padding: 8px 0 44px; animation: splash-rise .55s cubic-bezier(.22,1,.36,1) both; }
+.splash-hero { text-align: center; padding: 8px 0 44px; }
 .splash-logo {
   width: 108px; height: 108px;
   filter: drop-shadow(0 14px 34px rgba(4, 8, 18, 0.55));
@@ -9986,14 +9987,7 @@ _SPLASH_STYLE = """<style>
   border: 1px solid rgba(255,255,255,.06);
   text-decoration: none; color: var(--text, #e8edf6);
   transition: border-color .18s ease, transform .18s ease, box-shadow .18s ease;
-  animation: splash-rise .5s cubic-bezier(.22,1,.36,1) both;
 }
-.splash-chip:nth-child(1) { animation-delay: .08s; }
-.splash-chip:nth-child(2) { animation-delay: .14s; }
-.splash-chip:nth-child(3) { animation-delay: .20s; }
-.splash-chip:nth-child(4) { animation-delay: .26s; }
-.splash-chip:nth-child(5) { animation-delay: .32s; }
-.splash-chip:nth-child(n+6) { animation-delay: .38s; }
 .splash-chip:hover {
   border-color: var(--accent, #ff7a18);
   transform: translateY(-2px);
@@ -10007,12 +10001,7 @@ _SPLASH_STYLE = """<style>
   font-family: "JetBrains Mono", ui-monospace, monospace;
   font-feature-settings: "tnum";
 }
-@keyframes splash-rise {
-  from { opacity: 0; transform: translateY(14px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
 @media (prefers-reduced-motion: reduce) {
-  .splash-hero, .splash-chip { animation: none; }
   .splash-cta a, .splash-chip { transition: none; }
 }
 @media (max-width: 700px) {
