@@ -357,6 +357,18 @@ def make_app(broadcaster: Broadcaster, *, store=None,
                             mode_filter=mode_filter,
                             platform_filter=platform or None,
                             window_days=window_days)
+        if not d.overview.lines and not pid:
+            # Names are stored case-sensitively but people type any casing
+            # (Chiva_Asesino vs the stored Chiva_asesino). Resolve to the exact
+            # spelling before giving up, so a casing mismatch isn't a false 404.
+            canonical = store.resolve_player_name(name)
+            if canonical and canonical != name:
+                name = canonical
+                d = build_dashboard(store, primary_id=None, name=name,
+                                    include_bots=bool(include_bots),
+                                    mode_filter=mode_filter,
+                                    platform_filter=platform or None,
+                                    window_days=window_days)
         if not d.overview.lines:
             return HTMLResponse(_not_found_html(name), status_code=404)
         return HTMLResponse(_dashboard_html(d, store=store, name=name,

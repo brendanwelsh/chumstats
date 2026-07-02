@@ -670,6 +670,28 @@ class Store:
 
     # --- reads --------------------------------------------------------------
 
+    def resolve_player_name(self, typed_name: str) -> str | None:
+        """Case-insensitive resolve of a typed display name to the exact stored
+        spelling, so /player/Chiva_Asesino finds the stored 'Chiva_asesino'
+        instead of a false "not found". Returns the most-played matching name
+        (a tie-break for the rare case where two spellings differ only in case),
+        or None when no player matches at all."""
+        if not typed_name:
+            return None
+        with self._conn() as c:
+            row = c.execute(
+                """
+                SELECT name, COUNT(*) AS n
+                FROM match_player_stats
+                WHERE name = ? COLLATE NOCASE
+                GROUP BY name
+                ORDER BY n DESC
+                LIMIT 1
+                """,
+                (typed_name,),
+            ).fetchone()
+        return row["name"] if row else None
+
     def lifetime_for(self, primary_id: str | None = None, name: str | None = None) -> dict:
         """Return aggregate lifetime stats for a player, keyed by primary_id
         if given, else falling back to name."""
