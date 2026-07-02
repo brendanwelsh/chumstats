@@ -39,9 +39,11 @@ def test_breakdown_has_full_compare_stat_set(tmp_path):
                     "Per-stat output", "Movement", "Boost (total",
                     "Boost timing", "Ball positioning"]:
         assert section in html, f"missing section: {section}"
-    # representative rows from across the sheet
+    # representative rows from across the sheet. (Flip resets is intentionally
+    # not surfaced — the Stats API only emits FlipReset for the recording
+    # client's own team, so it's unreliable for everyone else.)
     for row in ["Win rate", "Shooting %", "Goal participation", "Demo K/D",
-                "Epic saves", "Flip resets", "Supersonic %", "BPM", "Touches"]:
+                "Epic saves", "Aerial goals", "Supersonic %", "BPM", "Touches"]:
         assert row in html, f"missing row: {row}"
 
 

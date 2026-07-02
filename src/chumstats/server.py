@@ -4880,7 +4880,9 @@ def _player_breakdown_html(store, primary_id: str | None, name: str | None,
             ("Epic saves", f"{d.get('n_epicsave', 0):.0f}"),
             ("Aerial goals", f"{d.get('n_aerialgoal', 0):.0f}"),
             ("Bicycle hits", f"{d.get('n_bicyclehit', 0):.0f}"),
-            ("Flip resets", f"{d.get('n_flipreset', 0):.0f}"),
+            # Flip resets omitted: the Stats API only emits FlipReset for the
+            # recording client's own team, so it's unreliable for non-recorders
+            # (they read 0 even when they hit them).
             ("Hat tricks", f"{d.get('n_hattrick', 0):.0f}"),
             ("Long goals", f"{d.get('n_longgoal', 0):.0f}"),
             ("Backwards goals", f"{d.get('n_backwardsgoal', 0):.0f}"),
@@ -5135,7 +5137,9 @@ def _compare_page_html(store, slots: list[str], *, self_name: str | None = None,
             ("Epic saves",      lambda v: f"{v:.0f}", [d.get("n_epicsave", 0)      for d in derived_rows], True),
             ("Aerial goals",    lambda v: f"{v:.0f}", [d.get("n_aerialgoal", 0)    for d in derived_rows], True),
             ("Bicycle hits",    lambda v: f"{v:.0f}", [d.get("n_bicyclehit", 0)    for d in derived_rows], True),
-            ("Flip resets",     lambda v: f"{v:.0f}", [d.get("n_flipreset", 0)     for d in derived_rows], True),
+            # Flip resets omitted: the Stats API only emits FlipReset for the
+            # recording client's own team, so a head-to-head count is unfair
+            # (non-recorders read 0 even when they hit them).
             ("Hat tricks",      lambda v: f"{v:.0f}", [d.get("n_hattrick", 0)      for d in derived_rows], True),
             ("Long goals",      lambda v: f"{v:.0f}", [d.get("n_longgoal", 0)      for d in derived_rows], True),
             ("Backwards goals", lambda v: f"{v:.0f}", [d.get("n_backwardsgoal", 0) for d in derived_rows], True),
@@ -5330,15 +5334,23 @@ def _compare_heatmap_row(slots: list, touch_data: list, shot_data: list | None =
             f'<div class="compare-hm-body cmp-hm cmp-hm-shot" style="display:none">{shot_hm}</div>'
             f'</div>'
         )
+    # Segmented button toggle (matches the site's .seg control) instead of a
+    # native <select>, which didn't match the UI. Touch map is the default view.
     selector = (
-        '<select id="cmp-hm-select" class="cmp-hm-select">'
-        '<option value="touch">Touch map &mdash; where they touch the ball</option>'
-        '<option value="shot">Shot map &mdash; where they score from</option>'
-        '</select>') if any_shots else ""
-    js = ("<script>(function(){var s=document.getElementById('cmp-hm-select');if(!s)return;"
-          "s.addEventListener('change',function(){var v=s.value;"
+        '<div class="seg cmp-hm-seg" title="Heatmap type">'
+        '<button type="button" class="cmp-hm-btn active" data-hm="touch"'
+        ' title="Where they touch the ball">Touch map</button>'
+        '<button type="button" class="cmp-hm-btn" data-hm="shot"'
+        ' title="Where they score from">Shot map</button>'
+        '</div>') if any_shots else ""
+    js = ("<script>(function(){var btns=document.querySelectorAll('.cmp-hm-btn');"
+          "if(!btns.length)return;"
+          "btns.forEach(function(b){b.addEventListener('click',function(){"
+          "var v=b.dataset.hm;"
+          "btns.forEach(function(x){x.classList.toggle('active',x===b);});"
           "document.querySelectorAll('.cmp-hm-touch').forEach(function(e){e.style.display=v==='touch'?'':'none';});"
-          "document.querySelectorAll('.cmp-hm-shot').forEach(function(e){e.style.display=v==='shot'?'':'none';});});})();</script>"
+          "document.querySelectorAll('.cmp-hm-shot').forEach(function(e){e.style.display=v==='shot'?'':'none';});"
+          "});});})();</script>"
           ) if any_shots else ""
     return f"""
       <div class="card" style="margin-top:16px">
@@ -9349,11 +9361,9 @@ table.history th .rl-icon,
   gap: 16px;
   margin-top: 4px;
 }
-.cmp-hm-select {
-  font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 6px;
-  border: 1px solid var(--border); background: var(--card); color: var(--text);
-  cursor: pointer; margin-left: auto;
-}
+/* Heatmap type toggle: a .seg segmented control, pushed to the right edge of
+   the "Heatmaps" section title (where the old <select> used to sit). */
+.cmp-hm-seg { margin-left: auto; }
 .compare-hm-card {
   border: 1px solid var(--border);
   background: var(--card-2);
