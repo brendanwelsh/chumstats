@@ -54,6 +54,10 @@ class TrayConfig:
     remote_url: str = ""                # e.g. https://stats.your-domain.com
     api_key: str = ""
     rl_setup_done: bool = False         # have we ever run chumstats setup?
+    # RL updates reset DefaultStatsAPI.ini's PacketSendRate to 0 (June 2026:
+    # five days of matches silently lost). When True, the tray watchdog
+    # re-enables it automatically as soon as that's detected.
+    auto_fix_stats_api: bool = True
 
     @property
     def is_configured(self) -> bool:

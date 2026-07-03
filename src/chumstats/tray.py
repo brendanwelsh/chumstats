@@ -278,6 +278,7 @@ class StateMonitor(threading.Thread):
         self._rl_running_since: float | None = None
         self._notified_stats_off = False
         self._notified_no_stats = False
+        self._autofix_attempted = False
 
     def stop(self) -> None:
         self._stop.set()
@@ -321,18 +322,55 @@ class StateMonitor(threading.Thread):
             return
         self._stats_api_off = off
         if off:
-            if not self._notified_stats_off:
-                self._notified_stats_off = True
-                log.warning("RL Stats API is OFF (PacketSendRate=0) - matches are not tracked")
-                self._notify(
-                    "Rocket League's Stats API is OFF (an RL update likely reset it). "
-                    "Matches are NOT being tracked! Right-click the Chumstats icon -> "
-                    "'Fix RL Stats API', then restart Rocket League.")
+            self._handle_stats_api_off()
             return
         self._notified_stats_off = False
+        self._autofix_attempted = False
 
         # Config says enabled, still no connection — worry only if RL is
         # actually running and has been for a while.
+        self._watch_rl_no_stats(now)
+
+    def _handle_stats_api_off(self) -> None:
+        """PacketSendRate hit 0 — an RL update reset it. Repair it in place
+        (unless the user toggled auto-fix off in the menu) so the fix is
+        already applied before the next RL launch. One attempt per detection:
+        if the write fails (weird install, permissions) we fall back to the
+        red-icon warning path instead of retrying every poll."""
+        cfg = tray_config.load()
+        if cfg.auto_fix_stats_api and not self._autofix_attempted:
+            self._autofix_attempted = True
+            rep = None
+            try:
+                from .config_wizard import run_wizard
+                rep = run_wizard(enable=True, rate=30)
+            except Exception:
+                log.exception("stats api auto-fix crashed")
+            if rep and not rep.error and rep.after and rep.after.enabled:
+                log.warning("RL Stats API was OFF (reset by an RL update?) - "
+                            "auto-re-enabled (rate=%s, port=%s)",
+                            rep.after.packet_send_rate, rep.after.port)
+                msg = ("An RL update turned the Stats API off — Chumstats "
+                       "re-enabled it automatically.")
+                if rep.rl_running:
+                    msg += " Restart Rocket League for it to take effect."
+                self._notify(msg)
+                self._stats_api_off = False
+                return
+            log.error("stats api auto-fix failed: %s",
+                      rep.error if rep else "exception (see traceback above)")
+        if not self._notified_stats_off:
+            self._notified_stats_off = True
+            log.warning("RL Stats API is OFF (PacketSendRate=0) - matches are not tracked")
+            self._notify(
+                "Rocket League's Stats API is OFF (an RL update likely reset it). "
+                "Matches are NOT being tracked! Right-click the Chumstats icon -> "
+                "'Fix RL Stats API', then restart Rocket League.")
+
+    def _watch_rl_no_stats(self, now: float) -> None:
+        """Ini says enabled but there's still no connection: toast once if RL
+        has been running RL_NO_STATS_NOTIFY_AFTER seconds in that state."""
+        from .config_wizard import is_rl_running
         try:
             running = is_rl_running()
         except Exception:
@@ -500,6 +538,11 @@ class TrayApp:
                              checked=lambda item: self._paused),
             pystray.MenuItem("Settings…", self._on_settings),
             pystray.MenuItem("Fix RL Stats API", self._on_fix_stats_api),
+            pystray.MenuItem(
+                "Auto-fix RL Stats API",
+                self._on_toggle_autofix,
+                checked=lambda item: tray_config.load().auto_fix_stats_api,
+            ),
             pystray.MenuItem("Restart Server", self._on_restart),
             pystray.MenuItem("Re-sync matches to central", self._on_resync),
             pystray.MenuItem("Show Logs Folder", self._on_show_logs),
@@ -521,6 +564,20 @@ class TrayApp:
     def _on_restart(self, icon=None, item=None) -> None:
         log.info("menu: restart server")
         threading.Thread(target=self.server.restart, daemon=True).start()
+
+    def _on_toggle_autofix(self, icon=None, item=None) -> None:
+        try:
+            cfg = tray_config.load()
+            cfg.auto_fix_stats_api = not cfg.auto_fix_stats_api
+            tray_config.save(cfg)
+            log.info("auto-fix stats api -> %s", cfg.auto_fix_stats_api)
+        except Exception:
+            log.exception("failed to toggle stats api auto-fix")
+        try:
+            if icon is not None:
+                icon.update_menu()
+        except Exception:
+            pass
 
     def _on_fix_stats_api(self, icon=None, item=None) -> None:
         """Re-enable RL's Stats API (PacketSendRate) via the setup wizard —
