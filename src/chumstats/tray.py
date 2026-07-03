@@ -47,6 +47,15 @@ HEALTH_POLL_INTERVAL = 2.0
 LOG_MAX_BYTES = 10 * 1024 * 1024
 LOG_BACKUP_COUNT = 3
 
+# Stats-source watchdog: while RL isn't connected we re-read RL's
+# DefaultStatsAPI.ini every this-many seconds to catch the classic silent
+# killer — an RL/Epic update resetting PacketSendRate to 0 (5 days of matches
+# went untracked in July 2026 before anyone noticed). And if the config looks
+# fine but RL has been running this long with no stats connection, something
+# else is wrong; surface that too instead of sitting on a yellow icon.
+STATS_INI_POLL_INTERVAL = 60.0
+RL_NO_STATS_NOTIFY_AFTER = 180.0
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # Three-state status. The color reflects health; the tray tooltip (icon.title)
@@ -74,6 +83,11 @@ def _setup_logger(name: str, filename: str, with_ts: bool) -> logging.Logger:
     handler.setFormatter(logging.Formatter(fmt))
     logger = logging.getLogger(name)
     logger.setLevel(logging.INFO)
+    # Each of these loggers owns exactly one file. Without this, the server
+    # logger ("chumstats.tray.server") also propagates every subprocess line up
+    # to the "chumstats.tray" logger, duplicating the entire server log into
+    # tray.log (double disk writes, half the useful retention in each file).
+    logger.propagate = False
     if not any(isinstance(h, RotatingFileHandler) for h in logger.handlers):
         logger.addHandler(handler)
     return logger
@@ -161,6 +175,11 @@ class ServerProcess:
         # Friend mode: lock the local server to LIVE + OBS overlay only.
         # All analytical pages live on the central host.
         env["CHUMSTATS_FRIEND_MODE"] = "1"
+        # The child's stdout is a pipe, so CPython would block-buffer it (~8 KB):
+        # lines then reach the tee in minutes-late bursts that all get stamped
+        # with the same timestamp, and anything still buffered is lost for good
+        # when the process is terminated. Unbuffered = real-time, loss-free tee.
+        env["PYTHONUNBUFFERED"] = "1"
         return env
 
     def start(self) -> None:
@@ -185,16 +204,31 @@ class ServerProcess:
         self._tee_thread.start()
 
     def _tee(self) -> None:
+        # with_ts=True: server lines arrive in real time now (PYTHONUNBUFFERED),
+        # so per-line timestamps are accurate — and they're what makes outages
+        # like "no packets since June 27" diagnosable from the log alone.
         srv_log = _setup_logger("chumstats.tray.server", "chumstats-server.log",
-                                with_ts=False)
+                                with_ts=True)
+        proc = self.proc
         try:
-            assert self.proc and self.proc.stdout
-            for line in self.proc.stdout:
+            assert proc and proc.stdout
+            for line in proc.stdout:
                 srv_log.info(line.rstrip())
                 if self._stop.is_set():
                     break
         except Exception:
             log.exception("tee thread died")
+            return
+        # stdout closed => the child exited. Surface HOW it exited: a crash
+        # used to end the log mid-line with no trace that the process was gone.
+        rc = None
+        try:
+            rc = proc.wait(timeout=5.0) if proc else None
+        except Exception:
+            pass
+        if not self._stop.is_set():
+            log.warning("server process exited unexpectedly (returncode=%s)", rc)
+            srv_log.info("[tray] server process exited (returncode=%s)", rc)
 
     def stop(self, timeout: float = 8.0) -> None:
         self._stop.set()
@@ -226,10 +260,11 @@ class ServerProcess:
 class StateMonitor(threading.Thread):
     """Background thread; maintains grey/orange/green state via /healthz + /ws."""
 
-    def __init__(self, server: ServerProcess, on_change) -> None:
+    def __init__(self, server: ServerProcess, on_change, notify=None) -> None:
         super().__init__(name="chumstats-monitor", daemon=True)
         self._server = server
         self._on_change = on_change
+        self._notify = notify or (lambda msg: log.info("notify: %s", msg))
         self._stop = threading.Event()
         self._last_tick = 0.0
         self._server_up = False
@@ -237,6 +272,12 @@ class StateMonitor(threading.Thread):
         self._paused = False
         self._state = "red"
         self._title = _START_TITLE
+        # Stats-source watchdog state (see _check_stats_source).
+        self._stats_api_off = False
+        self._last_ini_check = 0.0
+        self._rl_running_since: float | None = None
+        self._notified_stats_off = False
+        self._notified_no_stats = False
 
     def stop(self) -> None:
         self._stop.set()
@@ -245,8 +286,70 @@ class StateMonitor(threading.Thread):
         threading.Thread(target=self._ws_loop, name="chumstats-ws", daemon=True).start()
         while not self._stop.is_set():
             self._server_up = self._probe_health()
+            self._check_stats_source()
             self._update_state()
             self._stop.wait(HEALTH_POLL_INTERVAL)
+
+    def _check_stats_source(self) -> None:
+        """Watchdog for the RL side of the pipeline. The ingest loop can only
+        report "not connected"; it can't say WHY. This distinguishes the causes:
+
+          - PacketSendRate=0 in RL's DefaultStatsAPI.ini (an RL update resets
+            it): warning icon + one toast, because every match played in this
+            state is lost forever (live-only capture).
+          - Config fine but RL has been running >3 min with no connection:
+            one toast, something else is broken.
+
+        Only runs while not connected, and reads the ini at most once per
+        STATS_INI_POLL_INTERVAL, so steady-state cost is nil."""
+        if self._rl_connected:
+            self._stats_api_off = False
+            self._rl_running_since = None
+            self._notified_no_stats = False
+            return
+        now = time.time()
+        if now - self._last_ini_check < STATS_INI_POLL_INTERVAL:
+            return
+        self._last_ini_check = now
+
+        from .config_wizard import detect_install, is_rl_running, read_ini
+        try:
+            inst = detect_install()
+            off = bool(inst and not read_ini(inst.ini_path).enabled)
+        except Exception:
+            log.exception("stats-source check failed")
+            return
+        self._stats_api_off = off
+        if off:
+            if not self._notified_stats_off:
+                self._notified_stats_off = True
+                log.warning("RL Stats API is OFF (PacketSendRate=0) - matches are not tracked")
+                self._notify(
+                    "Rocket League's Stats API is OFF (an RL update likely reset it). "
+                    "Matches are NOT being tracked! Right-click the Chumstats icon -> "
+                    "'Fix RL Stats API', then restart Rocket League.")
+            return
+        self._notified_stats_off = False
+
+        # Config says enabled, still no connection — worry only if RL is
+        # actually running and has been for a while.
+        try:
+            running = is_rl_running()
+        except Exception:
+            running = False
+        if not running:
+            self._rl_running_since = None
+            return
+        if self._rl_running_since is None:
+            self._rl_running_since = now
+        elif (now - self._rl_running_since >= RL_NO_STATS_NOTIFY_AFTER
+              and not self._notified_no_stats):
+            self._notified_no_stats = True
+            log.warning("RL running %.0fs with Stats API enabled but no connection",
+                        now - self._rl_running_since)
+            self._notify(
+                "Rocket League is running but Chumstats isn't receiving stats. "
+                "If RL just updated, restart it; otherwise check Show Logs Folder.")
 
     def _probe_health(self) -> bool:
         from urllib.request import urlopen
@@ -351,6 +454,10 @@ class StateMonitor(threading.Thread):
         elif not self._server_up:
             color = "red"
             title = "Chumstats - not running (starting up, or crashed - check logs)"
+        elif not self._rl_connected and self._stats_api_off:
+            color = "red"
+            title = ("Chumstats - ⚠ RL Stats API is OFF - matches are NOT "
+                     "tracked (right-click -> Fix RL Stats API)")
         elif not self._rl_connected:
             color = "yellow"
             title = "Chumstats - waiting for Rocket League to open"
@@ -380,7 +487,8 @@ class TrayApp:
             title=_START_TITLE,
             menu=self._build_menu(),
         )
-        self.monitor = StateMonitor(self.server, self._on_state_change)
+        self.monitor = StateMonitor(self.server, self._on_state_change,
+                                    notify=self._notify)
 
     def _build_menu(self) -> pystray.Menu:
         return pystray.Menu(
@@ -391,6 +499,7 @@ class TrayApp:
                              self._on_toggle_pause,
                              checked=lambda item: self._paused),
             pystray.MenuItem("Settings…", self._on_settings),
+            pystray.MenuItem("Fix RL Stats API", self._on_fix_stats_api),
             pystray.MenuItem("Restart Server", self._on_restart),
             pystray.MenuItem("Re-sync matches to central", self._on_resync),
             pystray.MenuItem("Show Logs Folder", self._on_show_logs),
@@ -412,6 +521,33 @@ class TrayApp:
     def _on_restart(self, icon=None, item=None) -> None:
         log.info("menu: restart server")
         threading.Thread(target=self.server.restart, daemon=True).start()
+
+    def _on_fix_stats_api(self, icon=None, item=None) -> None:
+        """Re-enable RL's Stats API (PacketSendRate) via the setup wizard —
+        the one-click cure for the ini getting reset by an RL update."""
+        log.info("menu: fix RL stats api")
+        threading.Thread(target=self._run_fix_stats_api, daemon=True).start()
+
+    def _run_fix_stats_api(self) -> None:
+        try:
+            from .config_wizard import run_wizard
+            rep = run_wizard(enable=True, rate=30)
+            for a in rep.actions:
+                log.info("fix-stats-api: %s", a)
+            if rep.error:
+                self._notify(f"Couldn't enable the Stats API: {rep.error}")
+            elif rep.after and rep.after.enabled:
+                msg = (f"RL Stats API enabled (rate="
+                       f"{rep.after.packet_send_rate}, port={rep.after.port}).")
+                if rep.rl_running:
+                    msg += " Restart Rocket League for it to take effect."
+                self._notify(msg)
+            else:
+                self._notify("Stats API config written but still reads as "
+                             "disabled — see Show Logs Folder.")
+        except Exception:
+            log.exception("fix stats api failed")
+            self._notify("Fix RL Stats API failed — see Show Logs Folder.")
 
     def _notify(self, message: str, title: str = "Chumstats") -> None:
         """Best-effort desktop toast; falls back to the log if the tray backend

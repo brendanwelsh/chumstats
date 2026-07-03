@@ -42,6 +42,29 @@ def cmd_run(args: argparse.Namespace) -> int:
         self_name=args.me or settings.player_name,
     )
 
+    # Startup self-check: RL updates silently reset DefaultStatsAPI.ini's
+    # PacketSendRate to 0, after which every match goes untracked with no
+    # error anywhere (nothing ever listens on the port). Say so up front.
+    try:
+        from .config_wizard import detect_install, read_ini
+        inst = detect_install()
+        if inst is not None:
+            ini = read_ini(inst.ini_path)
+            if not ini.enabled:
+                print("[startup] " + "!" * 70)
+                print("[startup] ! RL Stats API is DISABLED (PacketSendRate=0, likely reset by an")
+                print("[startup] ! RL update). Matches will NOT be tracked until you run")
+                print("[startup] ! `chumstats setup` and restart Rocket League.")
+                print("[startup] " + "!" * 70)
+            elif ini.port != args.port:
+                print(f"[startup] ! Stats API port is {ini.port} but ingest "
+                      f"connects to {args.port} — matches will not be tracked")
+            else:
+                print(f"[startup] RL Stats API OK "
+                      f"(PacketSendRate={ini.packet_send_rate}, Port={ini.port})")
+    except Exception:
+        pass  # no RL install here (central host, non-Windows) — tray also watches
+
     # Recover any matches whose live aggregation got dropped (e.g., we were
     # restarted mid-match). Cheap to run — only inserts NEW matches.
     try:

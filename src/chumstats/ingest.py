@@ -75,6 +75,14 @@ RAW_BATCH_MAX = 256
 # idle/closure timer — that's the worker's job via the queue.get() timeout.
 READER_RECV_TIMEOUT = 1.0
 
+# A refused connect means nothing is listening on the Stats API port — RL is
+# closed, or an RL update reset PacketSendRate to 0. That state can persist for
+# days, so retries back off exponentially (reconnect_delay doubling up to this
+# cap) and the refusal is logged once, then summarized at most every
+# REFUSED_LOG_INTERVAL seconds instead of two lines per attempt forever.
+RECONNECT_DELAY_MAX = 30.0
+REFUSED_LOG_INTERVAL = 300.0
+
 # Defense in depth: ask the OS for a fat receive buffer. Even before our reader
 # thread pulls bytes off, the kernel can soak up a burst without back-pressuring
 # RL's sender. The queue decoupling is the real fix; this just adds slack.
@@ -357,14 +365,36 @@ def run_live(
 
         return agg
 
+    # Reconnect state. `refused_streak` counts consecutive refused connects;
+    # it drives both the backoff delay and the log rate-limit. `last_status`
+    # dedupes on_status so subscribers see transitions, not a False per retry.
+    refused_streak = 0
+    last_refused_log = 0.0
+    last_status: bool | None = None
+
+    def _set_status(connected: bool) -> None:
+        # Only fire on change. Also swallow callback errors: this runs inside
+        # the connection `finally`, where an exception would kill ingest.
+        nonlocal last_status
+        if connected == last_status:
+            return
+        last_status = connected
+        if on_status:
+            try:
+                on_status(connected)
+            except Exception as e:
+                print(f"[ingest] on_status callback failed: {e}")
+
     while True:
         agg: MatchAggregator | None = None
         sock: socket.socket | None = None
         reader: threading.Thread | None = None
         stop = threading.Event()
         q: queue.Queue = queue.Queue()
+        delay = reconnect_delay
         try:
-            print(f"[ingest] connecting to {host}:{port}...")
+            if refused_streak == 0:
+                print(f"[ingest] connecting to {host}:{port}...")
             sock = socket.create_connection((host, port))
             if so_rcvbuf:
                 try:
@@ -378,9 +408,13 @@ def run_live(
             )
             reader.start()
 
-            print("[ingest] connected to Rocket League Stats API")
-            if on_status:
-                on_status(True)
+            if refused_streak:
+                print(f"[ingest] connected to Rocket League Stats API "
+                      f"(after {refused_streak} refused attempts)")
+            else:
+                print("[ingest] connected to Rocket League Stats API")
+            refused_streak = 0
+            _set_status(True)
 
             buf = ""
             last_event = time.time()
@@ -417,7 +451,22 @@ def run_live(
                     agg = _process(event_name, raw, parsed, agg)
 
         except ConnectionRefusedError:
-            print("[ingest] connection refused; is RL running with PacketSendRate > 0?")
+            refused_streak += 1
+            now = time.time()
+            if refused_streak == 1:
+                print("[ingest] connection refused; is RL running with "
+                      "PacketSendRate > 0? (retrying with backoff, logging at "
+                      f"most every {REFUSED_LOG_INTERVAL / 60:.0f} min)")
+                last_refused_log = now
+            elif now - last_refused_log >= REFUSED_LOG_INTERVAL:
+                print(f"[ingest] Stats API still refusing connections "
+                      f"({refused_streak} attempts so far); RL is closed or "
+                      f"PacketSendRate=0 — run `chumstats setup` to re-enable")
+                last_refused_log = now
+            # 2s, 4s, 8s, ... capped. min() on the exponent so a days-long
+            # outage can't overflow 2**streak.
+            delay = min(reconnect_delay * (2 ** min(refused_streak - 1, 16)),
+                        RECONNECT_DELAY_MAX)
         except KeyboardInterrupt:
             # User Ctrl-C (only reachable when run_live is on the main thread):
             # salvage an ended match, then bail. `finally` still runs, so clear
@@ -449,7 +498,6 @@ def run_live(
             if agg is not None:
                 _commit(agg, "socket closed", force=True)
             agg = None
-            if on_status:
-                on_status(False)
+            _set_status(False)
 
-        time.sleep(reconnect_delay)
+        time.sleep(delay)
