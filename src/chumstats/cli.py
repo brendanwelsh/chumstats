@@ -42,14 +42,16 @@ def cmd_run(args: argparse.Namespace) -> int:
         self_name=args.me or settings.player_name,
     )
 
-    # Startup self-check: RL updates silently reset DefaultStatsAPI.ini's
+    # Startup self-check: RL updates silently reset the Stats API's
     # PacketSendRate to 0, after which every match goes untracked with no
-    # error anywhere (nothing ever listens on the port). Say so up front.
+    # error anywhere (nothing ever listens on the port). Read the user-space
+    # runtime config (TAStatsAPI.ini) — the file RL actually reads — not the
+    # install template. Say so up front.
     try:
         from .config_wizard import detect_install, read_ini
         inst = detect_install()
         if inst is not None:
-            ini = read_ini(inst.ini_path)
+            ini = read_ini(inst.write_target)
             if not ini.enabled:
                 print("[startup] " + "!" * 70)
                 print("[startup] ! RL Stats API is DISABLED (PacketSendRate=0, likely reset by an")
@@ -700,7 +702,12 @@ def cmd_setup(args: argparse.Namespace) -> int:
     from pathlib import Path as _P
     from .config_wizard import run_wizard
     manual = _P(args.rl_path) if args.rl_path else None
-    rep = run_wizard(enable=not args.disable, rate=args.rate, manual_path=manual)
+    rep = run_wizard(
+        enable=not args.disable,
+        rate=args.rate,
+        manual_path=manual,
+        legacy_install_write=args.legacy_install_write,
+    )
     print()
     for a in rep.actions:
         print(f"  - {a}")
@@ -709,6 +716,7 @@ def cmd_setup(args: argparse.Namespace) -> int:
         return 1
     if rep.after and rep.after.enabled:
         print(f"\n  OK: Stats API is ON. Port={rep.after.port} PacketSendRate={rep.after.packet_send_rate}")
+        print(f"  Wrote user-space config (no game files touched): {rep.config_path}")
     else:
         print(f"\n  OK: Stats API is OFF.")
     if rep.rl_running:
@@ -881,6 +889,10 @@ def main(argv: list[str] | None = None) -> int:
     p_setup.add_argument("--disable", action="store_true", help="Set PacketSendRate=0 (turn it off)")
     p_setup.add_argument("--rate", type=int, default=30, help="PacketSendRate value (default 30, max 120)")
     p_setup.add_argument("--rl-path", default=None, help="Manual override: path to your rocketleague install root")
+    p_setup.add_argument("--legacy-install-write", action="store_true",
+                         help="Escape hatch: write the install DefaultStatsAPI.ini directly "
+                              "(the old behavior that can trigger 'verify integrity of game files'). "
+                              "Only use if the user-space config doesn't enable the API on your install.")
     p_setup.set_defaults(func=cmd_setup)
 
     p_dash = sub.add_parser("dashboard", help="Career dashboard for the configured player")

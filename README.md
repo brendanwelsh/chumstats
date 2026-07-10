@@ -102,8 +102,9 @@ It captures what's actually on that socket, and deliberately stops there:
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e .[dev,server,bot]
 
-# 2. Enable RL's Stats API — finds your install (Steam/Epic), writes PacketSendRate=30.
-#    Idempotent; restart Rocket League afterward (the .ini is only read at launch).
+# 2. Enable RL's Stats API — finds your install (Steam/Epic), writes PacketSendRate=30
+#    to your USER-SPACE config (never a game file — see the integrity-verify note below).
+#    Idempotent; restart Rocket League afterward (the config is only read at launch).
 .\.venv\Scripts\python.exe -m chumstats.cli setup
 
 # 3. Configure secrets — copy the example and fill in your Discord token + in-game name.
@@ -223,7 +224,7 @@ src/chumstats/
   sync.py            client upload + server ingest of finalized matches (multi-user)
   bot.py             discord.py poster + embed builder
   config.py          env / .env loader
-  config_wizard.py   detect RL install, read/write DefaultStatsAPI.ini
+  config_wizard.py   detect RL install; enable Stats API in user-space TAStatsAPI.ini (never the install)
   cli.py             the `chumstats` entry point
   tray.py / tray_*   Windows tray app, friend-bundle config + setup wizard
   autostart.py       Windows per-user Run-key autostart toggle
@@ -258,8 +259,7 @@ comment‑preserving `.ini` write. 43 run on a bare checkout; the rest skip with
 
 ## Stats API reference
 
-Documented by Psyonix at <https://www.rocketleague.com/en/developer/stats-api>. Enabled via
-`<RL install>\TAGame\Config\DefaultStatsAPI.ini`:
+Documented by Psyonix at <https://www.rocketleague.com/en/developer/stats-api>. The config is:
 
 ```ini
 [TAGame.MatchStatsExporter_TA]
@@ -267,7 +267,7 @@ Port=49123
 PacketSendRate=30
 ```
 
-`PacketSendRate=0` disables the API; `1‑120` sets the `UpdateState` frequency. The `.ini` is read at
+`PacketSendRate=0` disables the API; `1‑120` sets the `UpdateState` frequency. Changes are read at
 launch — change it, restart RL. The socket emits concatenated UTF‑8 JSON envelopes
 (`{"Event":"…","Data":"<json-encoded string>"}` — the `Data` field is a JSON string, so parse twice).
 Events seen in real captures: `MatchCreated`, `MatchInitialized`, `MatchDestroyed`, `MatchEnded`,
@@ -276,6 +276,22 @@ Events seen in real captures: `MatchCreated`, `MatchInitialized`, `MatchDestroye
 `GoalReplayStart`, `GoalReplayEnd`, `GoalReplayWillEnd`, `PodiumStart`, `ReplayCreated`.
 Note the game re‑streams `UpdateState` **during goal replays** (`bReplay=true`) carrying the
 replayed car's speed/boost — the aggregator excludes those ticks from derived stats.
+
+> **⚠️ "Verify integrity of game files" pitfall — where the config gets written.**
+> RL ships `DefaultStatsAPI.ini` **inside the launcher‑managed install dir**
+> (`…\steamapps\common\rocketleague\TAGame\Config\` on Steam; the Epic install dir on Epic). That
+> file is a depot‑tracked game file — **if you edit it, Steam/Epic's integrity check sees a modified
+> game file and forces a re‑verify / re‑download**, which silently resets `PacketSendRate` to 0. That
+> loop (edit → re‑verify → reset → re‑enable → …) is exactly what makes RL nag you to "verify
+> integrity of game files" over and over.
+>
+> `DefaultStatsAPI.ini` is only a **template**. On launch UE3 copies/merges it into a per‑user
+> runtime file that RL actually reads:
+> `%USERPROFILE%\Documents\My Games\Rocket League\TAGame\Config\TAStatsAPI.ini` (this honors a
+> redirected/OneDrive Documents folder). That file is **outside** any install dir, so writing it never
+> trips an integrity check. **`chumstats setup` writes there**, and also restores a previously‑modified
+> `DefaultStatsAPI.ini` back to pristine so the nagging stops. If some install ignores the user‑space
+> file, `chumstats setup --legacy-install-write` forces the old install‑dir behavior.
 
 > **If RL ever stutters while ingesting:** the Stats API streams over a single loopback socket, and if
 > the client stops draining it RL's game thread can block on `send()` (Windows logs `AppHangXProcB1`,

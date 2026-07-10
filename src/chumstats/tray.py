@@ -316,7 +316,9 @@ class StateMonitor(threading.Thread):
         from .config_wizard import detect_install, is_rl_running, read_ini
         try:
             inst = detect_install()
-            off = bool(inst and not read_ini(inst.ini_path).enabled)
+            # Read the user-space runtime config RL actually reads, not the
+            # install template.
+            off = bool(inst and not read_ini(inst.write_target).enabled)
         except Exception:
             log.exception("stats-source check failed")
             return
