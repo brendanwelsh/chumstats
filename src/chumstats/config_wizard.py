@@ -313,6 +313,63 @@ def restore_install_template(install: RLInstall) -> tuple[bool, int]:
     return rewrote, removed
 
 
+# ----- user-space [IniVersion] pinning ---------------------------------------
+#
+# THE ONE THING THAT MAKES WRITING THE USER FILE ACTUALLY STICK.
+#
+# RL decides whether to regenerate the per-user `TAStatsAPI.ini` from the install
+# `DefaultStatsAPI.ini` by comparing the install file's MODIFICATION TIME against
+# the version recorded in the user file's `[IniVersion]` section (`0=<epoch>`). If
+# the install file is newer, RL rebuilds the user file from the template — wiping
+# any PacketSendRate we wrote. (Verified: after our restore bumped the install
+# file's mtime, the user file's recorded IniVersion was the OLD mtime, so the next
+# launch would have regenerated PacketSendRate back to 0.)
+#
+# So whenever we write the user file, we also stamp its `[IniVersion]` to the
+# install template's current mtime — exactly what RL itself records after a
+# regenerate. RL then sees the user file as current and leaves our value alone,
+# until a real game update rewrites the template (advancing its mtime), at which
+# point RL regenerates, the watchdog notices PacketSendRate=0, and we re-apply —
+# never touching the install dir.
+
+def _install_version(install: RLInstall) -> int | None:
+    """The version RL will compare against: the install template's mtime."""
+    try:
+        return int(install.ini_path.stat().st_mtime)
+    except OSError:
+        return None
+
+
+def pin_user_ini_version(path: Path, version: int) -> None:
+    """Set the user-space ini's `[IniVersion] 0=<version>.000000`, matching RL's
+    format, so RL won't regenerate the file out from under our PacketSendRate.
+    Rewrites only the `[IniVersion]` section; leaves the rest untouched."""
+    if not path.is_file():
+        return
+    try:
+        text = path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return
+    out: list[str] = []
+    skipping = False
+    for line in text.splitlines():
+        s = line.strip()
+        if s.lower() == "[iniversion]":
+            skipping = True
+            continue
+        if skipping:
+            # Keep dropping the old version entries until the next section header.
+            if s.startswith("[") and s.endswith("]"):
+                skipping = False
+            else:
+                continue
+        out.append(line)
+    while out and not out[-1].strip():
+        out.pop()
+    out.extend(["", "[IniVersion]", f"0={version}.000000"])
+    path.write_text("\n".join(out) + "\n", encoding="utf-8")
+
+
 # ----- RL process detection -------------------------------------------------
 
 def is_rl_running() -> bool:
@@ -411,6 +468,19 @@ def run_wizard(
                 "so Steam/Epic integrity checks pass.")
         if removed:
             rep.actions.append(f"Cleaned {removed} stale backup file(s) from the install dir.")
+
+    # Pin the user file's [IniVersion] to the install template's (now-final) mtime
+    # so RL treats our write as current and won't regenerate PacketSendRate to 0
+    # on the next launch. Done LAST, after any restore has settled the mtime.
+    if not legacy_install_write:
+        version = _install_version(install)
+        if version is not None:
+            try:
+                pin_user_ini_version(write_path, version)
+                rep.actions.append(f"Pinned user-config [IniVersion] to {version} "
+                                   "so RL keeps this setting across restarts.")
+            except Exception:
+                log.exception("pin_user_ini_version failed")
 
     rep.rl_running = is_rl_running()
     if rep.rl_running:

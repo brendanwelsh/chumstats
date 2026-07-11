@@ -7,6 +7,7 @@ from pathlib import Path
 from chumstats import config_wizard
 from chumstats.config_wizard import (
     RLInstall,
+    pin_user_ini_version,
     read_ini,
     restore_install_template,
     run_wizard,
@@ -123,6 +124,38 @@ def test_run_wizard_writes_userspace_not_install(tmp_path, monkeypatch):
     assert read_ini(inst.ini_path).packet_send_rate == 0
     # Backups go next to the user-space file, never in the install dir.
     assert not list(inst.ini_path.parent.glob("*.bak*"))
+    # The user file's [IniVersion] is pinned to the install template's mtime, so
+    # RL won't regenerate PacketSendRate back to 0 on the next launch.
+    txt = inst.config_path.read_text(encoding="utf-8")
+    assert "[IniVersion]" in txt
+    install_mtime = int(inst.ini_path.stat().st_mtime)
+    assert f"0={install_mtime}.000000" in txt
+
+
+def test_pin_user_ini_version_replaces_existing(tmp_path):
+    p = tmp_path / "TAStatsAPI.ini"
+    p.write_text(
+        "[TAGame.MatchStatsExporter_TA]\nPort=49123\nPacketSendRate=30\n\n"
+        "[IniVersion]\n0=111.000000\n",
+        encoding="utf-8",
+    )
+    pin_user_ini_version(p, 999)
+    txt = p.read_text(encoding="utf-8")
+    assert "0=999.000000" in txt
+    assert "0=111.000000" not in txt
+    assert txt.count("[IniVersion]") == 1
+    # The main section survives untouched.
+    assert read_ini(p).packet_send_rate == 30
+    assert read_ini(p).port == 49123
+
+
+def test_pin_user_ini_version_adds_when_absent(tmp_path):
+    p = tmp_path / "TAStatsAPI.ini"
+    p.write_text("[TAGame.MatchStatsExporter_TA]\nPort=49123\nPacketSendRate=30\n", encoding="utf-8")
+    pin_user_ini_version(p, 42)
+    txt = p.read_text(encoding="utf-8")
+    assert "[IniVersion]" in txt and "0=42.000000" in txt
+    assert read_ini(p).packet_send_rate == 30
 
 
 def test_run_wizard_legacy_install_write_still_targets_install(tmp_path, monkeypatch):
