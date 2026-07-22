@@ -225,6 +225,7 @@ def is_rl_running() -> bool:
         out = subprocess.run(
             ["tasklist", "/FI", "IMAGENAME eq RocketLeague.exe", "/NH"],
             capture_output=True, text=True, timeout=5,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return False
