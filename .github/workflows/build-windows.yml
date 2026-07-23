@@ -1,0 +1,45 @@
+name: Build Windows client
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip pyinstaller
+          python -m pip install -e ".[server,tray]"
+
+      - name: Build bundle
+        run: python -m PyInstaller deploy/windows/Chumstats.spec --noconfirm --clean
+
+      - name: Package zip
+        run: |
+          Copy-Item deploy/windows/README-for-friends.txt dist/Chumstats/README.txt
+          Compress-Archive -Path dist/Chumstats/* -DestinationPath Chumstats-win64.zip
+
+      - name: Attach to release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" Chumstats-win64.zip --clobber
+
+      - name: Upload workflow artifact
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Chumstats-win64
+          path: dist/Chumstats/
