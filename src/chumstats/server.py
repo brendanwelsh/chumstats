@@ -7228,15 +7228,19 @@ _STYLE_TAG = """
 }
 
 :root {
-  --accent:        #ff7a18;
-  --accent-2:      #ff4d2d;
-  --accent-soft:   rgba(255, 122, 24, 0.12);
-  --accent-line:   rgba(255, 122, 24, 0.32);
+  /* Brand accent: chum blue. Team orange below stays orange (it is the game's team colour). */
+  --accent:        #248FD3;
+  --accent-2:      #4AA8E6;
+  --accent-hover:  #4AA8E6;
+  --accent-soft:   rgba(36, 143, 211, 0.14);
+  --accent-line:   rgba(36, 143, 211, 0.38);
+  --on-accent:     #0a0d14;
 
   --team-blue:     #2d7dff;
   --team-blue-soft:rgba(45, 125, 255, 0.14);
   --team-orng:     #ff7a18;
   --team-orng-soft:rgba(255, 122, 24, 0.14);
+  --team-orng-line:rgba(255, 122, 24, 0.32);
 
   --good:          #34d399;
   --bad:           #f87171;
@@ -7270,9 +7274,13 @@ _STYLE_TAG = """
   --text:          #0c1426;
   --text-dim:      #5a6577;
   --text-faint:    #95a0b3;
-  --accent:        #ea580c;
-  --accent-soft:   rgba(234, 88, 12, 0.10);
-  --accent-line:   rgba(234, 88, 12, 0.30);
+  --accent:        #1A74B0;
+  --accent-2:      #248FD3;
+  --accent-hover:  #155E90;
+  --accent-soft:   rgba(26, 116, 176, 0.10);
+  --accent-line:   rgba(26, 116, 176, 0.32);
+  --on-accent:     #ffffff;
+  --team-orng-line:rgba(234, 88, 12, 0.30);
   --good:          #16a34a;
   --bad:           #dc2626;
   --team-blue-soft:rgba(45, 125, 255, 0.12);
@@ -7657,7 +7665,7 @@ section, .card {
 .chip.mvp,  .mvp       { color: var(--accent); border-color: var(--accent-line); background: var(--accent-soft); display: inline-flex; padding: 3px 8px; border-radius: 0; font-size: 10px; font-weight: 800; letter-spacing: 0.06em; }
 .chip.bot,  .tag       { color: var(--text-faint); border: 1px solid var(--border-strong); padding: 2px 6px; border-radius: 0; font-size: 9px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
 .chip.blue { color: var(--team-blue); border-color: rgba(45,125,255,0.35); background: var(--team-blue-soft); }
-.chip.orng { color: var(--team-orng); border-color: var(--accent-line);    background: var(--team-orng-soft); }
+.chip.orng { color: var(--team-orng); border-color: var(--team-orng-line);    background: var(--team-orng-soft); }
 
 /* Badges (W/L blocks beside score) */
 .badge {
@@ -8309,7 +8317,7 @@ time { white-space: nowrap; }
   margin-left: 8px;
   font-size: 9px; font-weight: 800; letter-spacing: 0.14em;
   padding: 2px 6px; border-radius: 0;
-  background: var(--accent); color: #0a0d14;
+  background: var(--accent); color: var(--on-accent);
 }
 
 /* Per-player section - vertical full-width stack, one card per player.
@@ -8751,7 +8759,7 @@ td.rank, th.rank { color: var(--text-faint); font-weight: 600;
 .note::before {
   content: "i"; position: absolute; left: 14px; top: 14px;
   width: 14px; height: 14px; border-radius: 50%;
-  background: var(--accent); color: #0a0d14;
+  background: var(--accent); color: var(--on-accent);
   display: grid; place-items: center;
   font-family: "Archivo", serif; font-weight: 800; font-size: 10px;
   font-style: italic;
@@ -8829,7 +8837,7 @@ td.rank, th.rank { color: var(--text-faint); font-weight: 600;
 }
 .overlay-preview {
   background:
-    radial-gradient(ellipse at center, rgba(255,122,24,0.04) 0%, transparent 60%),
+    radial-gradient(ellipse at center, rgba(36,143,211,0.05) 0%, transparent 60%),
     linear-gradient(135deg, #161a22 0%, #0b0f17 100%);
   border: 0; border-radius: 0;
   overflow: hidden; margin: 0;
@@ -8860,7 +8868,7 @@ td.rank, th.rank { color: var(--text-faint); font-weight: 600;
 }
 .copy-row code { color: var(--text-dim); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .copy-btn {
-  background: var(--accent); color: #0a0d14; border: none;
+  background: var(--accent); color: var(--on-accent); border: none;
   border-radius: 0; padding: 6px 12px; cursor: pointer;
   font-size: 11px; font-weight: 700; letter-spacing: 0.04em;
 }
@@ -9579,7 +9587,7 @@ table.history th .rl-icon,
 /* Per-kind colors on the event row */
 .pb-event-goal .pb-event-tag,
 .pb-event-goal.team-blue .pb-event-tag { color: var(--team-blue); border-color: rgba(45,125,255,0.45); background: var(--team-blue-soft); }
-.pb-event-goal.team-orng .pb-event-tag { color: var(--team-orng); border-color: var(--accent-line); background: var(--team-orng-soft); }
+.pb-event-goal.team-orng .pb-event-tag { color: var(--team-orng); border-color: var(--team-orng-line); background: var(--team-orng-soft); }
 .pb-event-crossbar .pb-event-tag { color: var(--warn); border-color: rgba(251,191,36,0.4); background: rgba(251,191,36,0.10); }
 .pb-event-demo .pb-event-tag { color: var(--bad); border-color: rgba(248,113,113,0.4); background: rgba(248,113,113,0.10); }
 .pb-event-epic-save .pb-event-tag,
@@ -10411,7 +10419,7 @@ _SPLASH_STYLE = """<style>
   content: ""; position: absolute; inset: -140px -30vw 0;
   background:
     radial-gradient(560px 340px at 50% 12%, var(--accent-soft), transparent 70%),
-    radial-gradient(900px 500px at 50% 0%, rgba(255, 77, 45, 0.05), transparent 75%);
+    radial-gradient(900px 500px at 50% 0%, rgba(36, 143, 211, 0.06), transparent 75%);
   pointer-events: none; z-index: -1;
 }
 .splash-hero { text-align: center; padding: 8px 0 44px; }
@@ -10440,12 +10448,12 @@ _SPLASH_STYLE = """<style>
 .splash-cta a:hover { transform: translateY(-1px); }
 .splash-cta a:active { transform: translateY(0) scale(.98); }
 .splash-cta .btn-primary {
-  background: var(--accent, #ff7a18); color: #0a0d14;
-  box-shadow: 0 8px 24px -10px var(--accent-line, rgba(255,122,24,.32));
+  background: var(--accent); color: var(--on-accent);
+  box-shadow: 0 8px 24px -10px var(--accent-line);
 }
-.splash-cta .btn-primary:hover { box-shadow: 0 12px 30px -10px var(--accent-line, rgba(255,122,24,.45)); }
-.splash-cta .btn-ghost { border: 1px solid var(--accent-line, rgba(255,122,24,.32)); color: var(--text, #e8edf6); }
-.splash-cta .btn-ghost:hover { background: var(--accent-soft, rgba(255,122,24,.12)); }
+.splash-cta .btn-primary:hover { background: var(--accent-hover); box-shadow: 0 12px 30px -10px var(--accent-line); }
+.splash-cta .btn-ghost { border: 1px solid var(--accent-line); color: var(--text, #e8edf6); }
+.splash-cta .btn-ghost:hover { background: var(--accent-soft); }
 .splash-friends { margin-top: 8px; }
 .splash-friends h2 { font-family: "Inter", ui-sans-serif, sans-serif; font-stretch: 100%; font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .09em; color: var(--text-dim); margin: 0 0 14px; }
 .splash-chips { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 12px; }
@@ -10457,12 +10465,12 @@ _SPLASH_STYLE = """<style>
   transition: border-color .18s ease, transform .18s ease, box-shadow .18s ease;
 }
 .splash-chip:hover {
-  border-color: var(--accent, #ff7a18);
+  border-color: var(--accent);
   transform: translateY(-2px);
   box-shadow: 0 14px 30px -18px rgba(4, 8, 18, 0.9);
 }
 .splash-chip:active { transform: translateY(0); }
-.splash-chip.self { border-color: var(--accent-line, rgba(255,122,24,.45)); }
+.splash-chip.self { border-color: var(--accent-line); }
 .splash-chip-name { font-weight: 700; font-size: 16px; }
 .splash-chip-meta {
   font-size: 13px; color: var(--text-dim);
