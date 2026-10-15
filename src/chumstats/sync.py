@@ -162,6 +162,12 @@ class MatchSyncer:
                 if status in (401, 403):
                     log.error("sync rejected (status %s): %s — check CHUMSTATS_API_KEY", status, resp.get("body"))
                     return  # don't retry auth failures
+                if 400 <= status < 500:
+                    # Validation (422) / result conflict (409): the same body will
+                    # fail the same way, so retrying only delays the next upload.
+                    log.error("sync rejected %s (status %s): %s",
+                              summary.match_id, status, resp.get("body"))
+                    return
                 last_err = RuntimeError(f"HTTP {status}: {resp.get('body')}")
             except (URLError, OSError) as e:
                 last_err = e

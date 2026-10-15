@@ -143,7 +143,7 @@ class UpdateState(HasMatchGuid):
 
 class GoalScored(HasMatchGuid):
     goal_speed: float = Field(default=0.0, alias="GoalSpeed")
-    goal_time: int = Field(default=0, alias="GoalTime")
+    goal_time: float = Field(default=0.0, alias="GoalTime")  # doc: float (e.g. 127.5)
     impact_location: Vec3 | None = Field(default=None, alias="ImpactLocation")
     scorer: PlayerRef = Field(alias="Scorer")
     assister: PlayerRef | None = Field(default=None, alias="Assister")

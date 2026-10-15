@@ -1,7 +1,10 @@
 """Detect Rocket League installs and toggle the Stats API config.
 
-Why this exists: people don't want to hand-edit `Program Files\\...\\DefaultStatsAPI.ini`
-to enable the API. Same operation, behind a button (CLI or eventually GUI).
+Why this exists: people don't want to hand-edit RL's Stats API ini to enable
+the API. Since patch v2.72 (Aug 2026) the game reads
+`Documents\\My Games\\Rocket League\\TAGame\\Config\\TAStatsAPI.ini`, regenerated
+from the install-dir `DefaultStatsAPI.ini` template, and that patch reset
+PacketSendRate to 0 in both — so we write every copy that exists. Same operation, behind a button (CLI or eventually GUI).
 
 Safety:
   - Reads existing ini; only mutates the `PacketSendRate=` line.
@@ -34,16 +37,48 @@ class RLInstall:
     def exists(self) -> bool:
         return self.ini_path.is_file()
 
+    @property
+    def ini_targets(self) -> list[Path]:
+        """Every Stats API ini the game might read, most authoritative first:
+        the per-user TAStatsAPI.ini (v2.72+), an install-dir TAStatsAPI.ini if
+        one exists, then the DefaultStatsAPI.ini template (self.ini_path)."""
+        out: list[Path] = []
+        user_cfg = _documents_dir() / "My Games" / "Rocket League" / "TAGame" / "Config"
+        if user_cfg.is_dir():
+            out.append(user_cfg / "TAStatsAPI.ini")  # created if missing
+        inst_ta = self.install_path / "TAGame" / "Config" / "TAStatsAPI.ini"
+        if inst_ta.is_file():
+            out.append(inst_ta)
+        out.append(self.ini_path)
+        return out
+
+
+def _documents_dir() -> Path:
+    """The user's real Documents folder (often OneDrive-redirected on Windows)."""
+    try:
+        import winreg  # type: ignore
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                            r"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders") as k:
+            val, _ = winreg.QueryValueEx(k, "Personal")
+            p = Path(os.path.expandvars(val))
+            if p.is_dir():
+                return p
+    except Exception:
+        pass
+    return Path.home() / "Documents"
+
 
 @dataclass
 class IniState:
     port: int = 49123
     packet_send_rate: int = 0
     raw_text: str = ""
+    web_port: int = 49124
 
     @property
     def enabled(self) -> bool:
-        return self.packet_send_rate > 0
+        # Port=0 disables the TCP socket (v2.72+), whatever the send rate says.
+        return self.packet_send_rate > 0 and self.port > 0
 
 
 # ----- install detection -----------------------------------------------------
@@ -136,6 +171,7 @@ def detect_install(manual_path: Path | None = None) -> RLInstall | None:
 def read_ini(path: Path) -> IniState:
     text = path.read_text(encoding="utf-8", errors="ignore") if path.is_file() else ""
     port = 49123
+    web_port = 49124
     rate = 0
     for line in text.splitlines():
         s = line.strip()
@@ -147,10 +183,13 @@ def read_ini(path: Path) -> IniState:
         if k == "port":
             try: port = int(v)
             except ValueError: pass
+        elif k == "webport":
+            try: web_port = int(v)
+            except ValueError: pass
         elif k == "packetsendrate":
             try: rate = int(v)
             except ValueError: pass
-    return IniState(port=port, packet_send_rate=rate, raw_text=text)
+    return IniState(port=port, packet_send_rate=rate, raw_text=text, web_port=web_port)
 
 
 def diff_text(old: str, new: str) -> str:
@@ -189,7 +228,8 @@ def write_packet_rate(path: Path, new_rate: int, *, backup: bool = True) -> tupl
     if "[TAGame.MatchStatsExporter_TA]" not in original:
         new_text = (
             "[TAGame.MatchStatsExporter_TA]\n"
-            f"Port={before.port}\n"
+            f"Port={before.port or 49123}\n"
+            f"WebPort={before.web_port if before.web_port != (before.port or 49123) else 49124}\n"
             f"PacketSendRate={new_rate}\n"
         )
     else:
@@ -266,16 +306,24 @@ def run_wizard(
     rep.actions.append(f"Detected RL ({install.source}) at {install.install_path}")
 
     target_rate = rate if enable else 0
-    before, after, backup = write_packet_rate(install.ini_path, target_rate, backup=True)
-    rep.before = before
-    rep.after = after
-    rep.backup = backup
-    if backup:
-        rep.actions.append(f"Wrote backup to {backup.name}")
-    rep.actions.append(
-        f"PacketSendRate: {before.packet_send_rate} -> {after.packet_send_rate}  "
-        f"(Port={after.port})"
-    )
+    for i, path in enumerate(install.ini_targets):
+        try:
+            before, after, backup = write_packet_rate(path, target_rate, backup=True)
+        except OSError as e:  # e.g. Program Files without admin rights
+            rep.actions.append(f"Could not write {path}: {e}")
+            continue
+        if rep.before is None:  # report the first (most authoritative) file
+            rep.before, rep.after, rep.backup = before, after, backup
+        if backup:
+            rep.actions.append(f"Wrote backup to {backup.name}")
+        rep.actions.append(
+            f"{path.name} ({path.parent}): PacketSendRate {before.packet_send_rate} -> "
+            f"{after.packet_send_rate}  (Port={after.port})"
+        )
+        if enable and after.port <= 0:
+            rep.actions.append(f"WARNING: {path.name} has Port=0 (TCP disabled) - set Port=49123.")
+    if rep.after is None:
+        rep.error = "Could not write any Stats API ini."
     rep.rl_running = is_rl_running()
     if rep.rl_running:
         rep.actions.append("Rocket League is currently running — restart it for the change to take effect.")

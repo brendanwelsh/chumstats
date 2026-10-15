@@ -248,6 +248,9 @@ class MatchAggregator:
         # inflated boost_used, air% and supersonic% toward highlight play, so
         # everything derived per-tick is skipped while this is set.
         self._in_goal_replay: bool = False
+        # v2.76+: MatchEnded with WinnerTeamNum = -1 means "no contest" (match
+        # abandoned/cancelled). It has ended, but there's no result to record.
+        self.no_contest: bool = False
         # received_at of the last event handled (when the caller knows it).
         # Lets offline re-aggregation stamp real event times instead of "now".
         self._last_event_at: float | None = None
@@ -270,7 +273,7 @@ class MatchAggregator:
 
     @property
     def ended(self) -> bool:
-        return self.winner_team_num is not None
+        return self.winner_team_num is not None or self.no_contest
 
     @property
     def has_meaningful_play(self) -> bool:
@@ -305,7 +308,10 @@ class MatchAggregator:
             self._accumulate_tick(parsed)
 
         elif event_name == "MatchEnded" and isinstance(parsed, MatchEnded):
-            self.winner_team_num = parsed.winner_team_num
+            if parsed.winner_team_num is not None and parsed.winner_team_num < 0:
+                self.no_contest = True
+            else:
+                self.winner_team_num = parsed.winner_team_num
             self.ended_at = received_at if received_at is not None else time.time()
             if parsed.match_guid:
                 self.match_guid = parsed.match_guid
@@ -362,6 +368,13 @@ class MatchAggregator:
             # happened to share a GoalTime — a coarse per-rally counter — and so
             # undercounted high-scoring games.)
             if parsed.is_replay_echo:
+                return
+            # v2.76 made GoalScored fire during replays too ("Fixed the GoalScored
+            # event not triggering in replays"), so a replayed goal can now carry
+            # the real scorer. The live goal always fires before GoalReplayStart,
+            # so anything inside a replay is a re-broadcast.
+            if self._in_goal_replay or (self.last_update and self.last_update.game
+                                        and self.last_update.game.is_replay):
                 return
             # Snapshot the live game clock at the moment the goal fired, from the
             # most recent tick. TimeSeconds counts DOWN in regulation (it starts
@@ -520,7 +533,7 @@ class MatchAggregator:
         so a completed match isn't lost just because End/Destroy events were
         missed. Still returns None if there's no usable tick state or no play.
         """
-        if self.last_update is None:
+        if self.last_update is None or self.no_contest:
             return None
         if self.winner_team_num is None:
             if not (force and self.has_meaningful_play):

@@ -302,7 +302,7 @@ def cmd_push_history(args: argparse.Namespace) -> int:
         print("missing one of: CHUMSTATS_REMOTE_URL, CHUMSTATS_API_KEY, --primary-id")
         return 1
 
-    with store._conn() as con:
+    with store._conn(scoped=False) as con:
         # Only matches the owner played in.
         match_ids = [r[0] for r in con.execute("""
             SELECT DISTINCT m.id FROM matches m
@@ -348,7 +348,7 @@ def cmd_push_history(args: argparse.Namespace) -> int:
 def _reconstruct_summary(store, match_id: str):
     """Rebuild a MatchSummary from a DB row. Used by push-history."""
     from .session import BallTouch, MatchSummary, PlayerLine
-    with store._conn() as con:
+    with store._conn(scoped=False) as con:
         m = con.execute("SELECT * FROM matches WHERE id = ?", (match_id,)).fetchone()
         if not m:
             return None
@@ -829,6 +829,32 @@ def cmd_admin_list_users(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_admin_stats_since(args: argparse.Namespace) -> int:
+    """Show or set the server-wide stats start point (same as the /admin page)."""
+    import datetime
+    s = Settings.from_env()
+    store = Store(args.db or s.db_path)
+    when = (args.when or "").strip().lower()
+    now = datetime.datetime.now()
+    if when == "all":
+        store.set_stats_since(None)
+    elif when == "now":
+        store.set_stats_since(now.timestamp())
+    elif when == "today":
+        store.set_stats_since(now.replace(hour=0, minute=0, second=0, microsecond=0).timestamp())
+    elif when:
+        try:
+            dt = datetime.datetime.fromisoformat(args.when)
+        except ValueError:
+            print("expected today | now | all | YYYY-MM-DD[THH:MM]")
+            return 2
+        store.set_stats_since(dt.timestamp())
+    ts = store.get_stats_since()
+    print("stats since: " + ("all time" if ts is None else
+          datetime.datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M")))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="chumstats")
     p.add_argument("--db", default=str(Path.home() / ".chumstats" / "chumstats.db"),
@@ -924,6 +950,11 @@ def main(argv: list[str] | None = None) -> int:
 
     p_al = p_admin_sub.add_parser("list-users", help="List all provisioned friends")
     p_al.set_defaults(func=cmd_admin_list_users)
+
+    p_ss = p_admin_sub.add_parser("stats-since",
+                                  help="Show/set where stats start counting (today|now|all|YYYY-MM-DD)")
+    p_ss.add_argument("when", nargs="?", default=None)
+    p_ss.set_defaults(func=cmd_admin_stats_since)
 
     args = p.parse_args(argv)
     return args.func(args)

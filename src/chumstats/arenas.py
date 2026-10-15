@@ -7,10 +7,10 @@ case-insensitive, so we always normalise the id to lower-case before lookup.
 
 Names reconciled from RLBot's game_map_dict + RLMapChanger + the RL wiki.
 ``neotokyo_arcade_p`` / ``beach_night_grs_p`` / ``stadium_10a_p`` are added as
-verified variants. The remaining opaque capture-only ids (``paname_*``, ``uf_*``,
-``mall_*``) are NOT in any public map list, so we render them as "Unknown arena"
-(NOT a fabricated title-case like "UF Night", which read as a real map but isn't)
-and log them once so the table can be extended if they're ever identified.
+verified variants. ``uf_*`` (Futura Garden), ``mall_day_p`` (Boostfield Mall)
+and ``paname_dusk_p`` (Parc de Paris) were identified via rlstats.net's map list
+and the RL wiki (Sept 2026). Anything still unknown renders as "Unknown arena"
+(NOT a fabricated title-case) and is logged once so the table can be extended.
 
 Notes baked in from research:
 - Psyonix labels BOTH fog and rain weather variants "(Stormy)".
@@ -43,6 +43,12 @@ ARENA_NICE = {
     "park_night_p":         "Beckwith Park (Midnight)",
     "park_rainy_p":         "Beckwith Park (Stormy)",
     "park_snowy_p":         "Beckwith Park (Snowy)",
+    "park_bman_p":          "Beckwith Park (Night)",
+    # --- Newer arenas (identified Sept 2026) ---
+    "uf_day_p":             "Futura Garden",
+    "uf_night_p":           "Futura Garden (Night)",
+    "mall_day_p":           "Boostfield Mall",
+    "paname_dusk_p":        "Parc de Paris",
     # --- Urban Central ---
     "trainstation_p":       "Urban Central",
     "trainstation_night_p": "Urban Central (Night)",

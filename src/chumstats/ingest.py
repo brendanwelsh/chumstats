@@ -168,12 +168,19 @@ def _drain_buffer(buf: str) -> tuple[list[tuple[str, dict[str, Any], Any]], str]
             continue
         event = obj.get("Event")
         data = obj.get("Data")
-        # Outer shape requires string Event + Data (Data is itself JSON text).
-        if not isinstance(event, str) or not isinstance(data, str):
+        # Data is JSON text on the TCP socket; the v2.72+ docs show it as an
+        # object (WebSocket shape). Accept both so a transport change can't
+        # silently drop every event.
+        if not isinstance(event, str):
             continue
-        try:
-            raw = json.loads(data) if data else {}
-        except ValueError:
+        if isinstance(data, dict):
+            raw = data
+        elif isinstance(data, str):
+            try:
+                raw = json.loads(data) if data else {}
+            except ValueError:
+                continue
+        else:
             continue
         model = EVENT_MODEL.get(event)
         parsed = None
@@ -246,6 +253,7 @@ def run_live(
     # Pending raw_events, flushed in one transaction instead of one per packet.
     # Lives across reconnects; the finally clause flushes whatever's left.
     raw_batch: list[tuple[float, str | None, str, str]] = []
+    history_replay = {"on": False}  # inside a Match History replay (see _process)
 
     def _flush_raw() -> None:
         """Persist buffered raw_events in a single transaction. Best-effort: a DB
@@ -313,6 +321,22 @@ def run_live(
         agg. Parsing now happens in _drain_buffer, so this is pure dispatch."""
         received_at = time.time()
 
+        # Saved replays loaded from Match History stream events since v2.72
+        # (ReplayCreated fires only for those). They reuse the ORIGINAL match's
+        # MatchGuid, so aggregating them would overwrite the real match row.
+        # Ignore everything from ReplayCreated until the replay's MatchDestroyed.
+        if event_name == "ReplayCreated":
+            if agg is not None:
+                _commit(agg, "replay loaded", force=not agg.ended)
+            history_replay["on"] = True
+            return None
+        if history_replay["on"]:
+            if event_name == "MatchDestroyed":
+                history_replay["on"] = False
+            if on_event:
+                on_event(event_name, raw)
+            return None
+
         if event_name == "MatchCreated":
             if agg is not None:
                 # The previous match never got a MatchDestroyed before this new
@@ -329,7 +353,8 @@ def run_live(
                                           "GoalScored", "BallHit",
                                           "ClockUpdatedSeconds"):
             payload_guid = raw.get("MatchGuid") if isinstance(raw, dict) else None
-            if payload_guid:
+            in_replay = isinstance(raw, dict) and bool((raw.get("Game") or {}).get("bReplay"))
+            if payload_guid and not in_replay:
                 agg = MatchAggregator()
                 agg.match_guid = payload_guid
                 print(f"[ingest] adopted in-progress match {payload_guid} "

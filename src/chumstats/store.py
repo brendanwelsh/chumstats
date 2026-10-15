@@ -113,6 +113,13 @@ CREATE TABLE IF NOT EXISTS users (
 
 CREATE INDEX IF NOT EXISTS idx_users_api_key ON users(api_key);
 CREATE INDEX IF NOT EXISTS idx_users_primary ON users(primary_id);
+
+-- Server-wide key/value settings (admin-controlled). `stats_since` = unix
+-- seconds; when set, every read sees only matches started at/after it.
+CREATE TABLE IF NOT EXISTS settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 """
 
 # Manual identity merges: the same person playing on more than one account.
@@ -125,11 +132,15 @@ PLAYER_ALIASES: dict[str, tuple[str, str]] = {
 }
 
 
+class UploadConflict(ValueError):
+    """An upload disagrees with the result already stored for that match."""
+
+
 class Store:
     def __init__(self, db_path: str | Path):
         self.db_path = str(db_path)
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
-        with self._conn() as c:
+        with self._conn(scoped=False) as c:
             c.executescript(SCHEMA)
             self._migrate(c)
             self._apply_player_aliases(c)
@@ -191,22 +202,72 @@ class Store:
                           "ON match_player_stats(primary_id)")
 
     @contextmanager
-    def _conn(self):
+    def _conn(self, scoped: bool = True):
+        """Open a connection. `scoped` (the default, used by every read path)
+        applies the admin `stats_since` cutoff: TEMP views named `matches`,
+        `match_player_stats` and `match_extras` shadow the real tables (SQLite
+        resolves unqualified names temp-first), so every existing query sees only
+        matches from the cutoff on without being rewritten. Writes, dedup and
+        maintenance pass scoped=False and see the full archive — nothing is ever
+        deleted by the cutoff."""
         con = sqlite3.connect(self.db_path)
         con.row_factory = sqlite3.Row
         try:
             con.execute("PRAGMA journal_mode=WAL")
             con.execute("PRAGMA synchronous=NORMAL")
             con.execute("PRAGMA foreign_keys=ON")
+            if scoped:
+                since = self._stats_since(con)
+                if since is not None:
+                    self._apply_stats_scope(con, since)
             yield con
             con.commit()
         finally:
             con.close()
 
+    @staticmethod
+    def _stats_since(con) -> float | None:
+        try:
+            row = con.execute("SELECT value FROM settings WHERE key = 'stats_since'").fetchone()
+        except sqlite3.OperationalError:  # pre-migration DB, no settings table yet
+            return None
+        try:
+            return float(row[0]) if row and row[0] not in ("", None) else None
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _apply_stats_scope(con, since: float) -> None:
+        cut = repr(float(since))  # numeric literal; views can't take bound params
+        con.execute(f"CREATE TEMP VIEW matches AS "
+                    f"SELECT * FROM main.matches WHERE started_at >= {cut}")
+        con.execute(f"CREATE TEMP VIEW match_player_stats AS "
+                    f"SELECT * FROM main.match_player_stats WHERE match_id IN "
+                    f"(SELECT id FROM main.matches WHERE started_at >= {cut})")
+        con.execute(f"CREATE TEMP VIEW match_extras AS "
+                    f"SELECT * FROM main.match_extras WHERE match_id IN "
+                    f"(SELECT id FROM main.matches WHERE started_at >= {cut})")
+
+    # --- settings -----------------------------------------------------------
+
+    def get_stats_since(self) -> float | None:
+        with self._conn(scoped=False) as c:
+            return self._stats_since(c)
+
+    def set_stats_since(self, ts: float | None) -> None:
+        """None = all time (clears the cutoff)."""
+        with self._conn(scoped=False) as c:
+            if ts is None:
+                c.execute("DELETE FROM settings WHERE key = 'stats_since'")
+            else:
+                c.execute("INSERT INTO settings (key, value) VALUES ('stats_since', ?) "
+                          "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                          (repr(float(ts)),))
+
     # --- writes -------------------------------------------------------------
 
     def save_match(self, s: MatchSummary) -> None:
-        with self._conn() as c:
+        with self._conn(scoped=False) as c:
             c.execute(
                 """
                 INSERT OR REPLACE INTO matches
@@ -268,20 +329,20 @@ class Store:
             )
 
     def has_match(self, match_id: str) -> bool:
-        with self._conn() as c:
+        with self._conn(scoped=False) as c:
             return c.execute(
                 "SELECT 1 FROM matches WHERE id = ? LIMIT 1", (match_id,)
             ).fetchone() is not None
 
     def save_raw_event(self, received_at: float, match_id: str | None, event: str, payload: str) -> None:
-        with self._conn() as c:
+        with self._conn(scoped=False) as c:
             c.execute(
                 "INSERT INTO raw_events (received_at, match_id, event, payload) VALUES (?, ?, ?, ?)",
                 (received_at, match_id, event, payload),
             )
 
     def save_raw_events_bulk(self, rows: Iterable[tuple[float, str | None, str, str]]) -> None:
-        with self._conn() as c:
+        with self._conn(scoped=False) as c:
             c.executemany(
                 "INSERT INTO raw_events (received_at, match_id, event, payload) VALUES (?, ?, ?, ?)",
                 rows,
@@ -294,7 +355,7 @@ class Store:
         import time, uuid
         user_id = str(uuid.uuid4())
         api_key = uuid.uuid4().hex + uuid.uuid4().hex  # 64 hex chars
-        with self._conn() as c:
+        with self._conn(scoped=False) as c:
             c.execute(
                 "INSERT INTO users (user_id, discord_id, primary_id, display_name, api_key, created_at) "
                 "VALUES (?, ?, ?, ?, ?, ?)",
@@ -304,17 +365,17 @@ class Store:
                 "display_name": display_name, "api_key": api_key}
 
     def get_user_by_api_key(self, api_key: str) -> dict | None:
-        with self._conn() as c:
+        with self._conn(scoped=False) as c:
             r = c.execute("SELECT * FROM users WHERE api_key = ?", (api_key,)).fetchone()
         return dict(r) if r else None
 
     def get_user_by_primary_id(self, primary_id: str) -> dict | None:
-        with self._conn() as c:
+        with self._conn(scoped=False) as c:
             r = c.execute("SELECT * FROM users WHERE primary_id = ?", (primary_id,)).fetchone()
         return dict(r) if r else None
 
     def list_users(self) -> list[dict]:
-        with self._conn() as c:
+        with self._conn(scoped=False) as c:
             rows = c.execute(
                 "SELECT user_id, discord_id, primary_id, display_name, created_at "
                 "FROM users ORDER BY created_at ASC"
@@ -347,7 +408,33 @@ class Store:
         owner_alias = PLAYER_ALIASES.get(owner_primary_id)
         canonical_owner = owner_alias[1] if owner_alias else owner_primary_id
 
-        with self._conn() as c:
+        with self._conn(scoped=False) as c:
+            # The same game has reached us under a second MatchGuid before
+            # (4 pairs in central.db). Same arena + final score + a start within
+            # 5 min + the uploader already on its roster = the match we have.
+            twin = c.execute(
+                "SELECT m.id FROM matches m JOIN match_player_stats p ON p.match_id = m.id "
+                "WHERE m.id != ? AND m.arena = ? AND m.team0_score = ? AND m.team1_score = ? "
+                "AND ABS(m.started_at - ?) < 300 AND p.primary_id = ? LIMIT 1",
+                (match_id, payload["arena"], payload["team0_score"], payload["team1_score"],
+                 payload["started_at"], canonical_owner),
+            ).fetchone()
+            if twin:
+                match_id = twin[0]
+                result["merged_into"] = match_id
+            stored = c.execute(
+                "SELECT team0_score, team1_score, winner_team_num FROM matches WHERE id = ?",
+                (match_id,),
+            ).fetchone()
+            if stored and tuple(stored) != (payload["team0_score"], payload["team1_score"],
+                                            payload["winner_team_num"]):
+                # First writer wins the match row, so a disagreeing result would
+                # leave rows that contradict the stored score (and get the whole
+                # match dropped as "impossible"). Refuse instead of corrupting.
+                raise UploadConflict(
+                    f"match {match_id} is stored as {stored[0]}-{stored[1]} "
+                    f"(winner {stored[2]}); upload says {payload['team0_score']}-"
+                    f"{payload['team1_score']} (winner {payload['winner_team_num']})")
             cur = c.execute(
                 """
                 INSERT OR IGNORE INTO matches
@@ -489,7 +576,7 @@ class Store:
         from .models import EVENT_MODEL
         from .session import run_aggregation
 
-        with self._conn() as c:
+        with self._conn(scoped=False) as c:
             existing_ids = {r[0] for r in c.execute("SELECT id FROM matches")}
             sql = "SELECT event, payload, received_at FROM raw_events"
             params: tuple = ()
@@ -550,7 +637,7 @@ class Store:
         from .models import EVENT_MODEL
         from .session import run_aggregation
 
-        with self._conn() as c:
+        with self._conn(scoped=False) as c:
             with_ticks = {r[0] for r in c.execute(
                 "SELECT DISTINCT match_id FROM raw_events "
                 "WHERE event = 'UpdateState' AND match_id IS NOT NULL"
@@ -625,7 +712,7 @@ class Store:
         cutoff = _time.time() - keep_days * 86400
         tick_cutoff = _time.time() - tick_keep_days * 86400
 
-        with self._conn() as c:
+        with self._conn(scoped=False) as c:
             # 1) Aggregated matches: drop ticks once past the retention window.
             cur = c.execute(
                 f"""
@@ -655,7 +742,7 @@ class Store:
         deleted = deleted_aggregated + deleted_orphan
         if deleted and vacuum:
             try:
-                with self._conn() as c:
+                with self._conn(scoped=False) as c:
                     c.execute("VACUUM")
             except Exception:
                 pass
@@ -678,7 +765,7 @@ class Store:
         or None when no player matches at all."""
         if not typed_name:
             return None
-        with self._conn() as c:
+        with self._conn(scoped=False) as c:
             row = c.execute(
                 """
                 SELECT name, COUNT(*) AS n

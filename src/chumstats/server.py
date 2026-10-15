@@ -64,10 +64,16 @@ _Text  = Annotated[str, Field(max_length=200)]
 _Tag   = Annotated[str, Field(max_length=32)]
 
 
+class RawEventUpload(BaseModel):
+    # Typed so a malformed entry is a 422, not a KeyError/500 the client retries.
+    event: Annotated[str, Field(max_length=64)]
+    payload: Annotated[str, Field(max_length=1_000_000)]
+
+
 class PlayerRowUpload(BaseModel):
     primary_id: _Text
     name: _Text
-    team_num: Annotated[int, Field(ge=-1, le=8)]
+    team_num: Annotated[int, Field(ge=0, le=1)]  # Soccar is two teams; anything else 500s the match page
     goals: _Count = 0
     shots: _Count = 0
     assists: _Count = 0
@@ -102,7 +108,7 @@ class MatchSummaryUpload(BaseModel):
     team1_name: _Text = "Orange"
     team0_color: _Tag = ""
     team1_color: _Tag = ""
-    winner_team_num: Annotated[int, Field(ge=-1, le=8)]
+    winner_team_num: Annotated[int, Field(ge=0, le=1)]  # v2.76 no-contest (-1) is never a result
     is_online: bool = True
     crossbar_hits: _Count = 0
     parser_version: Annotated[int, Field(ge=0, le=1_000_000)] = 0
@@ -121,14 +127,14 @@ class MatchSummaryUpload(BaseModel):
     # can't overwrite each other's earlier upload.
     # Generous caps: a real match is nowhere near a million of any of these;
     # the bound just stops a single upload from carrying a memory-blowing list.
-    ball_touches: list[dict] = Field(default_factory=list, max_length=1_000_000)
-    goal_events: list[dict] = Field(default_factory=list, max_length=1_000_000)
+    ball_touches: list[dict] = Field(default_factory=list, max_length=50_000)
+    goal_events: list[dict] = Field(default_factory=list, max_length=1_000)
     # Lifecycle/scoring raw events (BallHit, GoalScored, CrossbarHit,
     # StatfeedEvent, MatchCreated/Initialized/Ended/Destroyed, RoundStarted,
     # etc.). Excludes UpdateState (the 30 Hz position firehose) to keep the
     # payload to ~30 KB gzipped. Each entry: {"event": str, "payload": str}.
     # First-writer-wins per match — server skips if any raw_events exist.
-    raw_events: list[dict] = Field(default_factory=list, max_length=1_000_000)
+    raw_events: list[RawEventUpload] = Field(default_factory=list, max_length=500_000)
 
 
 def _impossible_match_reason(team0_score, team1_score, rows) -> str | None:
@@ -308,8 +314,9 @@ def make_app(broadcaster: Broadcaster, *, store=None,
     host): the /live feed is structurally dead there, so the Live nav link +
     pip are hidden (the route itself still exists for direct hits).
     """
-    global _LIVE_AVAILABLE
+    global _LIVE_AVAILABLE, _STORE
     _LIVE_AVAILABLE = live_enabled
+    _STORE = store
     app = FastAPI(title="chumstats")
 
     if OVERLAY_DIR.is_dir():
@@ -387,6 +394,27 @@ def make_app(broadcaster: Broadcaster, *, store=None,
                                     platform_filter=platform or None,
                                     window_days=window_days)
         if not d.overview.lines:
+            # Known player, just nothing since the admin's stats start point:
+            # a fresh slate, not a missing player.
+            if store.get_stats_since() is not None and store.resolve_player_name(name):
+                return HTMLResponse(_page_wrap(name, f"""
+                  <h1>{html.escape(name)}</h1>
+                  <p class="caption">No matches yet since the stats reset &mdash; play a game
+                  and it'll show up here. See <a href="/players">all players</a>.</p>"""))
+            # Known player, the active filter (window/mode/platform/bots) just
+            # matches nothing: keep the page + filter rail, don't 404.
+            known = bool(store.resolve_player_name(name))
+            if not known and pid:
+                with store._conn(scoped=False) as con:
+                    known = con.execute("SELECT 1 FROM match_player_stats "
+                                        "WHERE primary_id = ? LIMIT 1", (pid,)).fetchone() is not None
+            if known:
+                clear = f"/player/{quote(name, safe='')}" + (f"?pid={quote(pid, safe='')}" if pid else "")
+                return HTMLResponse(_page_wrap(name, f"""
+                  <h1>{html.escape(name)}</h1>
+                  <div class="empty">No matches for this filter.</div>
+                  <p class="caption">Try a wider window or another mode, or
+                  <a href="{html.escape(clear)}">clear filters</a>.</p>"""))
             return HTMLResponse(_not_found_html(name), status_code=404)
         return HTMLResponse(_dashboard_html(d, store=store, name=name,
                                             primary_id=pid or None, is_self=False,
@@ -446,11 +474,80 @@ def make_app(broadcaster: Broadcaster, *, store=None,
     async def match_page(match_id: str):
         if store is None:
             return HTMLResponse("<p>No DB configured</p>")
-        return HTMLResponse(_match_detail_html(store, match_id, self_primary_id, self_name))
+        # _page_wrap(status=...) can't set the HTTP status (it returns a str),
+        # so give the "Match not found" page its real 404 here.
+        with store._conn() as con:
+            exists = con.execute("SELECT 1 FROM matches WHERE id = ?", (match_id,)).fetchone()
+        return HTMLResponse(_match_detail_html(store, match_id, self_primary_id, self_name),
+                            status_code=200 if exists else 404)
 
     @_gated_get("/about")
     async def about_page():
         return HTMLResponse(_about_html())
+
+    async def _form(request: Request) -> dict[str, str]:
+        from urllib.parse import parse_qs
+        raw = (await request.body())[:4096].decode("utf-8", "replace")
+        return {k: v[0] for k, v in parse_qs(raw).items()}
+
+    def _admin_enabled() -> None:
+        if store is None or not _admin_password():
+            raise HTTPException(status_code=404)
+
+    @_gated_get("/admin")
+    async def admin_page(request: Request, saved: int = 0):
+        _admin_enabled()
+        if not _is_admin(request):
+            return HTMLResponse(_admin_page_html(authed=False))
+        return HTMLResponse(_admin_page_html(authed=True, since=store.get_stats_since(),
+                                             saved=bool(saved)))
+
+    @_gated_post("/admin/login")
+    async def admin_login(request: Request):
+        import hmac
+        from fastapi.responses import RedirectResponse
+        _admin_enabled()
+        pw = (await _form(request)).get("pw", "")
+        if not hmac.compare_digest(pw.strip().encode(), _admin_password().encode()):
+            await asyncio.sleep(1.0)  # blunt brute-force throttle
+            return HTMLResponse(_admin_page_html(authed=False, wrong=True), status_code=403)
+        resp = RedirectResponse(url="/admin", status_code=303)
+        secure = (request.headers.get("x-forwarded-proto") or request.url.scheme) == "https"
+        resp.set_cookie(_ADMIN_COOKIE, _admin_token(_admin_password()), max_age=30 * 86400,
+                        httponly=True, samesite="strict", secure=secure, path="/")
+        return resp
+
+    @_gated_post("/admin/logout")
+    async def admin_logout():
+        from fastapi.responses import RedirectResponse
+        resp = RedirectResponse(url="/admin", status_code=303)
+        resp.delete_cookie(_ADMIN_COOKIE, path="/")
+        return resp
+
+    @_gated_post("/admin/stats-since")
+    async def admin_set_stats_since(request: Request):
+        from fastapi.responses import RedirectResponse
+        _admin_enabled()
+        if not _is_admin(request):
+            raise HTTPException(status_code=403)
+        form = await _form(request)
+        mode = form.get("mode", "")
+        now = datetime.now()
+        if mode == "all":
+            ts = None
+        elif mode == "now":
+            ts = now.timestamp()
+        elif mode == "today":
+            ts = now.replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+        elif mode == "custom":
+            try:
+                ts = datetime.strptime(form.get("since", ""), "%Y-%m-%dT%H:%M").timestamp()
+            except ValueError:
+                raise HTTPException(status_code=400, detail="bad date")
+        else:
+            raise HTTPException(status_code=400, detail="bad mode")
+        store.set_stats_since(ts)
+        return RedirectResponse(url="/admin?saved=1", status_code=303)
 
     @_gated_get("/download")
     async def download_client(pw: str = ""):
@@ -458,14 +555,16 @@ def make_app(broadcaster: Broadcaster, *, store=None,
         setting CHUMSTATS_DOWNLOAD_PASSWORD + CHUMSTATS_CLIENT_BUNDLE (path to
         the built Chumstats.zip) in the central server's environment; without
         them the page just explains it isn't set up yet."""
+        import hmac
         import os
         expected = os.environ.get("CHUMSTATS_DOWNLOAD_PASSWORD") or ""
         bundle = os.environ.get("CHUMSTATS_CLIENT_BUNDLE") or ""
         ready = bool(expected and bundle and os.path.exists(bundle))
-        if ready and pw and pw == expected:
+        pw_ok = bool(pw) and hmac.compare_digest(pw.encode(), expected.encode())
+        if ready and pw_ok:
             return FileResponse(bundle, filename=os.path.basename(bundle),
                                 media_type="application/octet-stream")
-        return HTMLResponse(_download_page_html(ready=ready, wrong=bool(pw and pw != expected)))
+        return HTMLResponse(_download_page_html(ready=ready, wrong=bool(pw and not pw_ok)))
 
     @_gated_get("/opponents")
     async def opponents_page():
@@ -585,16 +684,18 @@ def make_app(broadcaster: Broadcaster, *, store=None,
         if store is None or not names:
             return {"players": {}}
         names = names[:16]  # cap: a pre-match scouting card is at most 8 players
+        from .analytics import valid_match_sql
+        valid = valid_match_sql(col="mps.match_id")  # drop corrupt matches
         out: dict[str, dict] = {}
         with store._conn() as con:
             for name in names:
                 if not name:
                     continue
-                last10 = con.execute("""
+                last10 = con.execute(f"""
                     SELECT mps.team_num, m.winner_team_num
                     FROM match_player_stats mps
                     JOIN matches m ON m.id = mps.match_id
-                    WHERE mps.name = ?
+                    WHERE mps.name = ?{valid}
                     ORDER BY m.started_at DESC
                     LIMIT 10
                 """, (name,)).fetchall()
@@ -602,7 +703,7 @@ def make_app(broadcaster: Broadcaster, *, store=None,
                     "W" if r["team_num"] == r["winner_team_num"] else "L"
                     for r in last10
                 )
-                career = con.execute("""
+                career = con.execute(f"""
                     SELECT COUNT(*) AS n,
                            SUM(CASE WHEN mps.team_num = m.winner_team_num THEN 1 ELSE 0 END) AS wins,
                            AVG(mps.goals)   AS g,
@@ -613,7 +714,7 @@ def make_app(broadcaster: Broadcaster, *, store=None,
                            MIN(mps.platform) AS platform
                     FROM match_player_stats mps
                     JOIN matches m ON m.id = mps.match_id
-                    WHERE mps.name = ?
+                    WHERE mps.name = ?{valid}
                 """, (name,)).fetchone()
                 if not career or not career["n"]:
                     out[name] = {"form": "", "matches": 0}
@@ -736,10 +837,13 @@ def make_app(broadcaster: Broadcaster, *, store=None,
         if _bad:
             raise HTTPException(status_code=422,
                                 detail=f"rejected match {payload.match_id}: {_bad}")
+        from .store import UploadConflict
         try:
             result = store.upsert_uploaded_match(
                 payload.model_dump(), owner_primary_id=user["primary_id"],
             )
+        except UploadConflict as e:
+            raise HTTPException(status_code=409, detail=str(e))
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
         except Exception:
@@ -1204,6 +1308,51 @@ def _team_coverage_note(team_players, duration_seconds: float) -> str:
     )
 
 
+def _counted_crossbar_ids(con, scope_sql: str, scope_args) -> set[int]:
+    """raw_events ids of the CrossbarHit events that count as a real post.
+
+    A single ball-on-bar contact emits a BURST of CrossbarHit raw events (~20),
+    and the goal replay re-shows it. Mirrors MatchAggregator's CrossbarHit rule
+    (session.py) so raw-event views agree with the stored matches.crossbar_hits:
+    skip events between GoalReplayStart/GoalReplayEnd, and debounce per
+    last-touch player within 1.0s of GAME clock (ClockUpdatedSeconds — the
+    uploaded raw events share one received_at, so wall time can't be used).
+    `scope_sql` is the match-id list/subquery for `match_id IN (...)`."""
+    rows = con.execute(f"""
+        SELECT id, match_id, event,
+               json_extract(payload, '$.TimeSeconds') AS ts,
+               json_extract(payload, '$.BallLastTouch.Player.Name') AS nm,
+               json_extract(payload, '$.BallLastTouch.Player.TeamNum') AS team
+        FROM raw_events
+        WHERE event IN ('CrossbarHit','GoalReplayStart','GoalReplayEnd','ClockUpdatedSeconds')
+          AND match_id IN ({scope_sql})
+        ORDER BY match_id, id
+    """, list(scope_args)).fetchall()
+    kept: set[int] = set()
+    cur = object()
+    in_replay, clock, last = False, None, {}
+    for r in rows:
+        if r["match_id"] != cur:
+            cur, in_replay, clock, last = r["match_id"], False, None, {}
+        e = r["event"]
+        if e == "GoalReplayStart":
+            in_replay = True
+        elif e == "GoalReplayEnd":
+            in_replay = False
+        elif e == "ClockUpdatedSeconds":
+            if r["ts"] is not None:
+                clock = float(r["ts"])
+        elif not in_replay:  # CrossbarHit outside a goal replay
+            key = r["nm"] or (f"t{r['team']}" if r["team"] is not None else "?")
+            prev = last.get(key)
+            if clock is not None and prev is not None and abs(clock - prev) < 1.0:
+                continue  # same contact still lingering on the bar
+            if clock is not None:
+                last[key] = clock
+            kept.add(r["id"])
+    return kept
+
+
 def _derive_match_extras(store, match_id: str) -> dict[str, dict]:
     """Walk raw_events for a single match. Returns:
        result[player_name] = {derived stats dict}
@@ -1214,10 +1363,11 @@ def _derive_match_extras(store, match_id: str) -> dict[str, dict]:
     goal_locations: list[dict] = []
     with store._conn() as con:
         rows = con.execute(
-            "SELECT event, payload FROM raw_events WHERE match_id = ? AND "
+            "SELECT id, event, payload FROM raw_events WHERE match_id = ? AND "
             "event IN ('GoalScored','CrossbarHit','StatfeedEvent')",
             (match_id,),
         ).fetchall()
+        counted_posts = _counted_crossbar_ids(con, "?", [match_id])
     for r in rows:
         try:
             d = _json.loads(r["payload"])
@@ -1243,6 +1393,8 @@ def _derive_match_extras(store, match_id: str) -> dict[str, dict]:
                     "assister": (d.get("Assister") or {}).get("Name") or "",
                 })
         elif e == "CrossbarHit":
+            if r["id"] not in counted_posts:
+                continue  # burst repeat / goal-replay echo of one post
             who = ((d.get("BallLastTouch") or {}).get("Player") or {}).get("Name") or ""
             if who:
                 out[who]["crossbar_hits"] += 1
@@ -1291,10 +1443,11 @@ def _lifetime_derived(store, name: str | None, match_ids: set | None = None) -> 
             totals["goal_participation_num"] += (row["goals"] or 0) + (row["assists"] or 0)
             totals["goal_participation_den"] += row["team_goals"] or 0
         rows = con.execute(f"""
-            SELECT event, payload FROM raw_events
+            SELECT id, event, payload FROM raw_events
             WHERE event IN ('GoalScored','CrossbarHit','StatfeedEvent')
               AND match_id IN ({scope_sql})
         """, scope_args).fetchall()
+        counted_posts = _counted_crossbar_ids(con, scope_sql, scope_args)
     for r in rows:
         try:
             d = _json.loads(r["payload"])
@@ -1307,6 +1460,8 @@ def _lifetime_derived(store, name: str | None, match_ids: set | None = None) -> 
                 totals["goal_count"] += 1
                 totals["goal_speed_sum"] += float(d.get("GoalSpeed") or 0)
         elif e == "CrossbarHit":
+            if r["id"] not in counted_posts:
+                continue  # burst repeat / goal-replay echo of one post
             who = ((d.get("BallLastTouch") or {}).get("Player") or {}).get("Name") or ""
             if who == name:
                 totals["crossbar_hits"] += 1
@@ -2011,6 +2166,12 @@ def _players_directory_html(store, self_primary_id: str | None = None,
     # independent of the bot filter — a bad upload shouldn't inflate any total.
     from .analytics import valid_match_sql
     inner_clauses.append(valid_match_sql(lead=""))
+    if not include_bots:
+        # Same match-level predicate as the profile/history pages: drop any
+        # match that had a bot in it, not just the bot players themselves —
+        # otherwise humans' counts include bot games the profile excludes.
+        inner_clauses.append("NOT EXISTS (SELECT 1 FROM match_player_stats x "
+                             "WHERE x.match_id = m.id AND x.is_bot = 1)")
     inner_where = (" WHERE " + " AND ".join(inner_clauses)) if inner_clauses else ""
 
     sql = f"""
@@ -2175,8 +2336,15 @@ def _all_matches_html(store, *, include_bots=True, mode_filter=None,
                        "WHERE op.match_id=m.id AND op.platform LIKE '%' || ? || '%')")
         args.append(platform_filter)
     where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
-    order = ("(m.team0_score + m.team1_score) DESC, m.started_at DESC"
-             if sort == "goals" else "m.started_at DESC")
+    # Match-level sorts. "best" (wins first) needs a player's perspective, so
+    # with no subject it falls back to most recent.
+    order = {
+        "goals": "(m.team0_score + m.team1_score) DESC, m.started_at DESC",
+        "score": "(SELECT COALESCE(SUM(s.score), 0) FROM match_player_stats s "
+                 "WHERE s.match_id = m.id) DESC, m.started_at DESC",
+        "saves": "(SELECT COALESCE(SUM(s.saves), 0) FROM match_player_stats s "
+                 "WHERE s.match_id = m.id) DESC, m.started_at DESC",
+    }.get(sort, "m.started_at DESC")
     with store._conn() as con:
         rows = con.execute(
             f"SELECT m.id, m.started_at, m.arena, m.team0_score, m.team1_score, "
@@ -2329,6 +2497,13 @@ def _history_page_html(store, primary_id, name, *,
         s = sort if sort_ is ... else sort_
         b = include_bots if bots_ is ... else bots_
         parts = []
+        # Keep the subject + window/platform so a per-player history's chips
+        # don't fall back to the all-matches view.
+        if primary_id: parts.append(f"pid={quote(str(primary_id), safe='')}")
+        elif name: parts.append(f"name={quote(str(name), safe='')}")
+        win = {1: "today", 7: "7d", 30: "30d"}.get(window_days or 0)
+        if win: parts.append(f"window={win}")
+        if platform_filter: parts.append(f"platform={quote(str(platform_filter), safe='')}")
         if m is not None: parts.append(f"mode={m}")
         if s and s != "recent": parts.append(f"sort={s}")
         if b: parts.append("include_bots=1")
@@ -3085,13 +3260,14 @@ def _build_playback_data(store, match_id: str, started_at: float,
 
     with store._conn() as con:
         rows = con.execute(
-            "SELECT received_at, event, payload FROM raw_events "
+            "SELECT id, received_at, event, payload FROM raw_events "
             "WHERE match_id = ? AND event IN "
             "  ('BallHit','GoalScored','CrossbarHit','StatfeedEvent','ClockUpdatedSeconds',"
             "   'ReplayPlaybackStart','ReplayPlaybackEnd','ReplayWillEnd') "
             "ORDER BY received_at",
             (match_id,),
         ).fetchall()
+        counted_posts = _counted_crossbar_ids(con, "?", [match_id])
 
     # Build replay intervals first so we can drop any BallHit / ClockUpdate
     # events that fired during a goal-replay. RL re-broadcasts ball motion
@@ -3214,6 +3390,8 @@ def _build_playback_data(store, match_id: str, started_at: float,
             })
 
         elif e == "CrossbarHit":
+            if r["id"] not in counted_posts:
+                continue  # one post emits a burst of ~20 CrossbarHit events
             blt = (d.get("BallLastTouch") or {}).get("Player") or {}
             loc = d.get("BallLocation") or {}
             sx, sy = project(float(loc.get("X") or 0), float(loc.get("Y") or 0))
@@ -6012,7 +6190,7 @@ def _clan_page_html(store, members: list[str], *, self_name: str | None = None,
     as a 'clan match' when 2+ members are on the same team. Renders combined
     W-L, top contributors, lifetime touch heatmap, and recent clan matches."""
     from urllib.parse import quote
-    from .analytics import _lifetime_row
+    from .analytics import _lifetime_row, valid_match_sql
 
     bot_filter = "" if include_bots else "WHERE COALESCE(max_bot, 0) = 0"
     with store._conn() as con:
@@ -6070,7 +6248,7 @@ def _clan_page_html(store, members: list[str], *, self_name: str | None = None,
             JOIN matches m ON m.id = mps.match_id
             WHERE mps.name IN ({placeholders})
               AND ({"NOT EXISTS (SELECT 1 FROM match_player_stats x WHERE x.match_id = m.id AND x.is_bot = 1)" if not include_bots else "1=1"})
-              {mode_clause}{window_clause}
+              {mode_clause}{window_clause}{valid_match_sql(col="mps.match_id")}
             ORDER BY m.started_at DESC
         """, tuple(members)).fetchall()
 
@@ -6669,12 +6847,100 @@ _SIDEBAR_FILTER_JS = """<script>
 </script>"""
 
 
+_STORE = None  # set by make_app; lets page chrome read server settings
+
+
+def _stats_scope_note() -> str:
+    """Visible marker when the admin has set a stats start point, so nobody
+    mistakes a fresh count for missing history."""
+    try:
+        since = _STORE.get_stats_since() if _STORE is not None else None
+    except Exception:
+        since = None
+    if since is None:
+        return ""
+    iso = datetime.fromtimestamp(since).astimezone().isoformat()
+    return ('<p class="caption" style="margin:0 0 10px;opacity:.75">Counting stats since '
+            f'<time datetime="{iso}" data-mode="date">{html.escape(iso[:10])}</time></p>')
+
+
+# --- admin ------------------------------------------------------------------
+# One admin (the server owner). Enabled by CHUMSTATS_ADMIN_PASSWORD in .env; with
+# it unset every /admin route 404s. The session cookie is an HMAC of the password,
+# so changing the password logs every browser out.
+
+_ADMIN_COOKIE = "cs_admin"
+
+
+def _admin_password() -> str:
+    import os
+    return (os.environ.get("CHUMSTATS_ADMIN_PASSWORD") or "").strip()
+
+
+def _admin_token(pw: str) -> str:
+    import hashlib
+    import hmac
+    return hmac.new(pw.encode(), b"chumstats-admin-v1", hashlib.sha256).hexdigest()
+
+
+def _is_admin(request: Request) -> bool:
+    import hmac
+    pw = _admin_password()
+    got = request.cookies.get(_ADMIN_COOKIE) or ""
+    return bool(pw and got) and hmac.compare_digest(got, _admin_token(pw))
+
+
+def _admin_page_html(*, authed: bool, since: float | None = None,
+                     wrong: bool = False, saved: bool = False) -> str:
+    inp = ('height:38px;padding:0 12px;background:var(--bg);color:var(--text);'
+           'border:1px solid var(--border)')
+    if not authed:
+        warn = ('<p style="color:var(--bad);font-weight:600;margin:6px 0 0">'
+                'Wrong password.</p>' if wrong else "")
+        return _page_wrap("Admin", f"""
+          <h1>Admin</h1>{warn}
+          <form method="post" action="/admin/login" style="margin:18px 0;display:flex;gap:8px;max-width:380px">
+            <input type="password" name="pw" placeholder="Admin password" autofocus style="flex:1;{inp}">
+            <button type="submit" class="copy-btn" style="padding:0 18px">Log in</button>
+          </form>""", with_sidebar=False)
+    if since is None:
+        current = "<b>All time</b> &mdash; every stored match counts."
+        local_val = datetime.now().strftime("%Y-%m-%dT00:00")
+    else:
+        dt = datetime.fromtimestamp(since)
+        current = f"<b>{html.escape(dt.strftime('%b %-d, %Y %-I:%M %p'))}</b> (server time) onward."
+        local_val = dt.strftime("%Y-%m-%dT%H:%M")
+    ok = ('<p style="color:var(--good, #4c8);font-weight:600;margin:6px 0 0">Saved.</p>'
+          if saved else "")
+    return _page_wrap("Admin", f"""
+      <h1>Admin</h1>{ok}
+      <div class="card" style="margin-top:14px;max-width:680px">
+        <div class="section-title"><span>Stats start point</span></div>
+        <p style="margin:6px 0 12px">Every page, leaderboard and the Discord bot count
+        matches from: {current}<br><span class="caption">Older matches stay in the
+        database untouched &mdash; switch back to <i>All time</i> any time.</span></p>
+        <form method="post" action="/admin/stats-since" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+          <button type="submit" name="mode" value="today" class="copy-btn" style="padding:0 14px;height:38px">Start today</button>
+          <button type="submit" name="mode" value="now" class="copy-btn" style="padding:0 14px;height:38px">Start now</button>
+          <button type="submit" name="mode" value="all" class="copy-btn" style="padding:0 14px;height:38px">All time</button>
+        </form>
+        <form method="post" action="/admin/stats-since" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px">
+          <input type="datetime-local" name="since" value="{local_val}" required style="{inp}">
+          <button type="submit" name="mode" value="custom" class="copy-btn" style="padding:0 14px">Set custom start</button>
+        </form>
+      </div>
+      <form method="post" action="/admin/logout" style="margin-top:18px">
+        <button type="submit" class="copy-btn" style="padding:6px 14px">Log out</button>
+      </form>""", with_sidebar=False)
+
+
 def _page_wrap(title: str, body_html: str, *, status: int = 200, active: str = "",
                with_sidebar: bool = True, friend_mode: bool = False) -> str:
     """Common HTML chrome. Pages can pass with_sidebar=False to opt out of the
     global filter rail (used by /match/<id> which is a single-match snapshot)."""
     sidebar = _filter_sidebar(active, force_hidden=not with_sidebar)
     body_cls = "with-sidebar" if sidebar else "no-sidebar"
+    body_html = _stats_scope_note() + body_html
     main_html = f'<main class="page-main">{body_html}</main>' if sidebar else body_html
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
