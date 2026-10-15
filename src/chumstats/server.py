@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import html
+import os
 import json
 import logging
 import mimetypes
@@ -318,6 +319,24 @@ def make_app(broadcaster: Broadcaster, *, store=None,
     _LIVE_AVAILABLE = live_enabled
     _STORE = store
     app = FastAPI(title="chumstats")
+
+    from starlette.exceptions import HTTPException as _StarletteHTTPException
+    from fastapi.exception_handlers import http_exception_handler as _default_http_handler
+
+    @app.exception_handler(_StarletteHTTPException)
+    async def _html_not_found(request: Request, exc: _StarletteHTTPException):
+        # Browsers that hit a missing page get the site's own page, not raw JSON.
+        # API and static paths keep the default JSON answer.
+        path = request.url.path
+        wants_html = "text/html" in (request.headers.get("accept") or "")
+        if (exc.status_code == 404 and request.method == "GET" and wants_html
+                and not path.startswith(("/api/", "/static/"))):
+            body = ('<section style="text-align:center;padding:80px 20px">'
+                    '<h1>Page not found</h1>'
+                    '<p class="dim">That page does not exist.</p>'
+                    '<p><a href="/">Go to the home page</a></p></section>')
+            return HTMLResponse(_page_wrap("Not found", body, with_sidebar=False), status_code=404)
+        return await _default_http_handler(request, exc)
 
     if OVERLAY_DIR.is_dir():
         app.mount("/static", StaticFiles(directory=str(OVERLAY_DIR)), name="static")
@@ -6942,12 +6961,28 @@ def _page_wrap(title: str, body_html: str, *, status: int = 200, active: str = "
     body_cls = "with-sidebar" if sidebar else "no-sidebar"
     body_html = _stats_scope_note() + body_html
     main_html = f'<main class="page-main">{body_html}</main>' if sidebar else body_html
+    # Tab/search title: page first, brand last; the home page says what the site is.
+    page_title = ("Chumstats: Rocket League match stats" if title == "Home"
+                  else f"{title} - Chumstats")
+    meta_desc = ("Rocket League match stats for Chum and his friends: goals, boost, "
+                 "positioning and the story of every game.")
+    public_url = (os.environ.get("CHUMSTATS_PUBLIC_URL") or "").rstrip("/")
+    og_image = f"{public_url}/static/brand/chum-logo.png" if public_url else "/static/brand/chum-logo.png"
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark light">
-<title>Chumstats - {html.escape(title)}</title>
+<title>{html.escape(page_title)}</title>
+<meta name="description" content="{html.escape(meta_desc)}">
+<meta property="og:site_name" content="Chumstats">
+<meta property="og:title" content="{html.escape(page_title)}">
+<meta property="og:description" content="{html.escape(meta_desc)}">
+<meta property="og:image" content="{html.escape(og_image)}">
+<meta name="twitter:card" content="summary">
+<meta name="theme-color" content="#0a0d14">
 <link rel="icon" type="image/png" href="/static/brand/chum-logo.png">
-<link rel="preload" href="/static/fonts/bricolage-grotesque-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/static/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/static/fonts/archivo-latin.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/static/fonts/jetbrains-mono-latin.woff2" as="font" type="font/woff2" crossorigin>
 <script>(function(){{try{{var t=localStorage.getItem('chumstats-theme')||((window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches)?'light':'dark');document.documentElement.setAttribute('data-theme',t);}}catch(e){{document.documentElement.setAttribute('data-theme','dark');}}}})();</script>
 {_STYLE_TAG}
@@ -7154,16 +7189,29 @@ _STYLE_TAG = """
    interstitial on every navigation). Local woff2 loads in ~1ms over LAN, and
    the two primary faces are <link rel=preload>ed in the head, so pages paint
    in-font on the first frame with no swap. latin + latin-ext subsets only. */
+/* Inter for text and UI, Archivo (wide, heavy) for display type. */
 @font-face {
-  font-family: 'Bricolage Grotesque';
-  font-style: normal; font-weight: 500 800; font-stretch: 100%; font-display: swap;
-  src: url('/static/fonts/bricolage-grotesque-latin.woff2') format('woff2');
+  font-family: 'Inter';
+  font-style: normal; font-weight: 400 800; font-display: swap;
+  src: url('/static/fonts/inter-latin.woff2') format('woff2');
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 @font-face {
-  font-family: 'Bricolage Grotesque';
-  font-style: normal; font-weight: 500 800; font-stretch: 100%; font-display: swap;
-  src: url('/static/fonts/bricolage-grotesque-latin-ext.woff2') format('woff2');
+  font-family: 'Inter';
+  font-style: normal; font-weight: 400 800; font-display: swap;
+  src: url('/static/fonts/inter-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Archivo';
+  font-style: normal; font-weight: 100 900; font-stretch: 62% 125%; font-display: swap;
+  src: url('/static/fonts/archivo-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Archivo';
+  font-style: normal; font-weight: 100 900; font-stretch: 62% 125%; font-display: swap;
+  src: url('/static/fonts/archivo-latin-ext.woff2') format('woff2');
   unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 @font-face {
@@ -7236,15 +7284,15 @@ html, body {
   margin: 0; padding: 0;
   background: var(--bg);
   color: var(--text);
-  font-family: "Bricolage Grotesque", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-family: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   font-size: 14.5px;
   line-height: 1.55;
-  letter-spacing: -0.005em;
+  letter-spacing: -0.011em;
+  font-feature-settings: "cv11", "ss03";
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   transition: background 200ms ease, color 200ms ease;
   font-optical-sizing: auto;
-  font-variation-settings: "wdth" 96;
 }
 body { min-height: 100vh; }
 
@@ -7275,15 +7323,15 @@ h1, h2, h3 { text-wrap: balance; }
 .dim  { color: var(--text-dim); }
 .faint{ color: var(--text-faint); }
 
-/* Display headlines get Bricolage with a slightly narrower width axis
-   for a sturdier, more sport-tracker feel. */
+/* Display headlines: Archivo, wide and heavy, for a broadcast-scoreboard feel
+   next to the plain Inter text. */
 .display, h1, .page-head h1, .brand-name,
 .match-hero .team-name,
 .roster-head .roster-team,
 .section-title span:first-child {
-  font-family: "Bricolage Grotesque", ui-sans-serif, sans-serif;
-  font-optical-sizing: auto;
-  font-variation-settings: "wdth" 92;
+  font-family: "Archivo", "Inter", ui-sans-serif, sans-serif;
+  font-stretch: 112%;
+  letter-spacing: -0.01em;
 }
 
 /* Numeric chrome (scores, KPI values, team scores) lives in JetBrains Mono.
@@ -7303,6 +7351,11 @@ h1, h2, h3 { text-wrap: balance; }
 
 /* App shell + nav */
 .wrapper, .app-shell { max-width: 1680px; margin: 0 auto; padding: 0 24px 56px; }
+/* Decorative glows (the home hero) reach past the page edge; clip them so
+   phones never scroll sideways. clip, not hidden: keeps sticky headers working. */
+.wrapper { overflow-x: clip; }
+/* Long inline code (paths, URLs) wraps instead of pushing the page wide. */
+p code, li code { overflow-wrap: anywhere; }
 
 /* Page layout with optional left filter sidebar */
 .page-layout { display: block; }
@@ -8700,7 +8753,7 @@ td.rank, th.rank { color: var(--text-faint); font-weight: 600;
   width: 14px; height: 14px; border-radius: 50%;
   background: var(--accent); color: #0a0d14;
   display: grid; place-items: center;
-  font-family: "Bricolage Grotesque", serif; font-weight: 800; font-size: 10px;
+  font-family: "Archivo", serif; font-weight: 800; font-size: 10px;
   font-style: italic;
 }
 .note b { color: var(--text); font-weight: 700; }
@@ -10367,14 +10420,15 @@ _SPLASH_STYLE = """<style>
   filter: drop-shadow(0 14px 34px rgba(4, 8, 18, 0.55));
 }
 .splash-hero h1 {
-  font-size: clamp(52px, 8.5vw, 108px);
+  font-size: clamp(44px, 8vw, 100px);
   font-weight: 800;
+  font-stretch: 118%;
   line-height: 0.95;
-  margin: 18px 0 14px;
-  letter-spacing: -0.035em;
+  margin: 18px 0 16px;
+  letter-spacing: -0.03em;
 }
 .splash-tagline {
-  color: var(--muted, #9aa3b2); max-width: 52ch; margin: 0 auto 30px;
+  color: var(--text-dim); max-width: 52ch; margin: 0 auto 30px;
   font-size: 17px; line-height: 1.55; text-wrap: balance;
 }
 .splash-cta { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
@@ -10393,7 +10447,7 @@ _SPLASH_STYLE = """<style>
 .splash-cta .btn-ghost { border: 1px solid var(--accent-line, rgba(255,122,24,.32)); color: var(--text, #e8edf6); }
 .splash-cta .btn-ghost:hover { background: var(--accent-soft, rgba(255,122,24,.12)); }
 .splash-friends { margin-top: 8px; }
-.splash-friends h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .09em; color: var(--muted, #9aa3b2); margin: 0 0 14px; }
+.splash-friends h2 { font-family: "Inter", ui-sans-serif, sans-serif; font-stretch: 100%; font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .09em; color: var(--text-dim); margin: 0 0 14px; }
 .splash-chips { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 12px; }
 .splash-chip {
   display: flex; flex-direction: column; gap: 4px; padding: 16px 18px;
@@ -10411,9 +10465,8 @@ _SPLASH_STYLE = """<style>
 .splash-chip.self { border-color: var(--accent-line, rgba(255,122,24,.45)); }
 .splash-chip-name { font-weight: 700; font-size: 16px; }
 .splash-chip-meta {
-  font-size: 12.5px; color: var(--muted, #9aa3b2);
-  font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-feature-settings: "tnum";
+  font-size: 13px; color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
 }
 @media (prefers-reduced-motion: reduce) {
   .splash-cta a, .splash-chip { transition: none; }
