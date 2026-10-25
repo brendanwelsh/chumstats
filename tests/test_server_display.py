@@ -124,3 +124,37 @@ def test_players_leaderboard_excludes_bot_matches(client):
 def test_unknown_match_is_404(client):
     assert client.get("/match/NOPE").status_code == 404
     assert client.get(f"/match/{GUID}").status_code == 200
+
+
+def test_hit_and_goal_speed_maxima_and_touch_rows(store):
+    """Hardest hit = max PostHitSpeed over solo BallHits (shared hits are not
+    credited); fastest goal = max GoalSpeed. Touch % lists every full name."""
+    long_name = "AVeryLongGamertagThatMustNeverBeCutOff"
+    with store._conn(scoped=False) as con:
+        con.execute("UPDATE match_player_stats SET name = ?, touches = 3 WHERE match_id = ? AND name = 'Bob'",
+                    (long_name, GUID))
+        con.execute("UPDATE match_player_stats SET touches = 1 WHERE match_id = ? AND name = 'Alice'", (GUID,))
+
+    def hit(players, speed):
+        return _j({"MatchGuid": GUID, "Players": [{"Name": n, "TeamNum": t} for n, t in players],
+                   "Ball": {"PreHitSpeed": 0, "PostHitSpeed": speed, "Location": {"X": 0, "Y": 0, "Z": 93}}})
+    store.save_raw_events_bulk([
+        (1001.0, GUID, "BallHit", hit([("Alice", 0)], 120.5)),
+        (1001.0, GUID, "BallHit", hit([("Alice", 0)], 90.0)),
+        (1001.0, GUID, "BallHit", hit([("Alice", 0), (long_name, 1)], 199.0)),  # shared: ignored
+        (1001.0, GUID, "GoalScored", _j({"MatchGuid": GUID, "GoalSpeed": 101.2,
+                                          "Scorer": {"Name": "Alice", "TeamNum": 0}})),
+        (1001.0, GUID, "GoalScored", _j({"MatchGuid": GUID, "GoalSpeed": 77.0,
+                                          "Scorer": {"Name": "Alice", "TeamNum": 0}})),
+    ])
+    d = server._derive_match_extras(store, GUID)
+    assert d["Alice"]["hit_speed_max"] == 120.5
+    assert d["Alice"]["goal_speed_max"] == 101.2
+    assert d.get(long_name, server._empty_derived())["hit_speed_max"] == 0
+    life = server._lifetime_derived(store, "Alice")
+    assert life["hit_speed_max"] == 120.5 and life["goal_speed_max"] == 101.2
+
+    page = server._match_detail_html(store, GUID, None, None)
+    page = page.body.decode() if hasattr(page, "body") else page
+    assert f'<span class="tp-name">{long_name}</span>' in page
+    assert "Hardest hit" in page and "Demos taken" in page

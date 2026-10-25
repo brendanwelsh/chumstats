@@ -1015,6 +1015,10 @@ def _radar_svg(values: list[tuple[str, float, float]], *,
 #   - goal speed per scorer (GoalScored.GoalSpeed)
 #   - crossbar hits per player (CrossbarHit.BallLastTouch.Player.Name)
 #   - goal locations (GoalScored.ImpactLocation) for the mini-pitch map
+#   - fastest goal per scorer (max GoalScored.GoalSpeed) and hardest hit per
+#     player (max BallHit.Ball.PostHitSpeed, solo contacts only: a hit that
+#     lists two players can't be credited to one). Maxima, so the goal-replay
+#     echoes of the same hit/goal can't inflate them.
 #
 # Computed on-demand to keep the schema stable.
 
@@ -1027,7 +1031,8 @@ _SPECIAL_EVENTS = (
 def _empty_derived() -> dict:
     return {
         "demos_given": 0, "demos_received": 0,
-        "goal_count": 0, "goal_speed_sum": 0.0,
+        "goal_count": 0, "goal_speed_sum": 0.0, "goal_speed_max": 0.0,
+        "hit_speed_max": 0.0,
         "crossbar_hits": 0, "highlights": 0,
         **{f"n_{e.lower()}": 0 for e in _SPECIAL_EVENTS},
     }
@@ -1383,7 +1388,7 @@ def _derive_match_extras(store, match_id: str) -> dict[str, dict]:
     with store._conn() as con:
         rows = con.execute(
             "SELECT id, event, payload FROM raw_events WHERE match_id = ? AND "
-            "event IN ('GoalScored','CrossbarHit','StatfeedEvent')",
+            "event IN ('GoalScored','CrossbarHit','StatfeedEvent','BallHit')",
             (match_id,),
         ).fetchall()
         counted_posts = _counted_crossbar_ids(con, "?", [match_id])
@@ -1397,7 +1402,9 @@ def _derive_match_extras(store, match_id: str) -> dict[str, dict]:
             scorer = (d.get("Scorer") or {}).get("Name") or ""
             if scorer:
                 out[scorer]["goal_count"] += 1
-                out[scorer]["goal_speed_sum"] += float(d.get("GoalSpeed") or 0)
+                gs = float(d.get("GoalSpeed") or 0)
+                out[scorer]["goal_speed_sum"] += gs
+                out[scorer]["goal_speed_max"] = max(out[scorer]["goal_speed_max"], gs)
             loc = d.get("ImpactLocation") or {}
             # Skip envelopes without a scorer (the API sometimes emits a
             # follow-up GoalScored with Scorer=null right after the real one,
@@ -1411,6 +1418,13 @@ def _derive_match_extras(store, match_id: str) -> dict[str, dict]:
                     "scorer_team": (d.get("Scorer") or {}).get("TeamNum"),
                     "assister": (d.get("Assister") or {}).get("Name") or "",
                 })
+        elif e == "BallHit":
+            hitters = d.get("Players") or []
+            if len(hitters) == 1:
+                who = hitters[0].get("Name") or ""
+                if who:
+                    hs = float((d.get("Ball") or {}).get("PostHitSpeed") or 0)
+                    out[who]["hit_speed_max"] = max(out[who]["hit_speed_max"], hs)
         elif e == "CrossbarHit":
             if r["id"] not in counted_posts:
                 continue  # burst repeat / goal-replay echo of one post
@@ -1467,6 +1481,14 @@ def _lifetime_derived(store, name: str | None, match_ids: set | None = None) -> 
               AND match_id IN ({scope_sql})
         """, scope_args).fetchall()
         counted_posts = _counted_crossbar_ids(con, scope_sql, scope_args)
+        # Hardest hit: max post-hit ball speed over this player's solo contacts.
+        hit_max = con.execute(f"""
+            SELECT MAX(json_extract(payload, '$.Ball.PostHitSpeed')) FROM raw_events
+            WHERE event = 'BallHit' AND match_id IN ({scope_sql})
+              AND json_array_length(payload, '$.Players') = 1
+              AND json_extract(payload, '$.Players[0].Name') = ?
+        """, [*scope_args, name]).fetchone()[0]
+        totals["hit_speed_max"] = float(hit_max or 0)
     for r in rows:
         try:
             d = _json.loads(r["payload"])
@@ -1477,7 +1499,9 @@ def _lifetime_derived(store, name: str | None, match_ids: set | None = None) -> 
             scorer = (d.get("Scorer") or {}).get("Name") or ""
             if scorer == name:
                 totals["goal_count"] += 1
-                totals["goal_speed_sum"] += float(d.get("GoalSpeed") or 0)
+                gs = float(d.get("GoalSpeed") or 0)
+                totals["goal_speed_sum"] += gs
+                totals["goal_speed_max"] = max(totals["goal_speed_max"], gs)
         elif e == "CrossbarHit":
             if r["id"] not in counted_posts:
                 continue  # burst repeat / goal-replay echo of one post
@@ -2794,8 +2818,10 @@ def _match_detail_html(store, match_id: str, viewer_pid: str | None, viewer_name
             # position classification (so g+a+w can fall short of ticks_total and
             # read e.g. 68/0/10 = 78%). Normalise to their own sum so the three
             # always read as shares of classified position time and total 100%.
-            pos_ticks = ((p["ticks_on_ground"] or 0) + (p["ticks_in_air"] or 0)
-                         + (p["ticks_on_wall"] or 0)) or 1
+            # (When air wasn't recorded at all -- newer game builds omit false
+            # flags -- use all sampled ticks so ground isn't inflated.)
+            pos_ticks = (((p["ticks_on_ground"] or 0) + (p["ticks_in_air"] or 0)
+                          + (p["ticks_on_wall"] or 0)) if p["ticks_in_air"] else ticks) or 1
             air = (p["ticks_in_air"] or 0) / pos_ticks * 100
             wall = (p["ticks_on_wall"] or 0) / pos_ticks * 100
             ground = (p["ticks_on_ground"] or 0) / pos_ticks * 100
@@ -3065,13 +3091,21 @@ def _match_detail_html(store, match_id: str, viewer_pid: str | None, viewer_name
             "touches": my_touches, "touch_share": my_touches / team_tot * 100,
             "def": dn / tt * 100, "neu": nn / tt * 100, "off": on / tt * 100,
             "demos_taken": ext["demos_received"], "crossbars": ext["crossbar_hits"],
+            "epic_saves": ext["n_epicsave"],
+            "hit_max": ext["hit_speed_max"] or None,
+            "goal_max": ext["goal_speed_max"] or None,
             "gp": (contrib / my_tg * 100) if my_tg else 0,
             "bpm": None, "boost_used": None, "zero": None, "full": None,
             "avg_sp": None, "sup": None, "ground": None, "air": None, "wall": None,
         }
         if has_mov:
-            pos = ((p["ticks_on_ground"] or 0) + (p["ticks_in_air"] or 0)
-                   + (p["ticks_on_wall"] or 0)) or 1
+            # In-air is only counted when the game sends bOnGround/bOnWall as
+            # explicit false; newer game builds omit false fields, so a 0 air
+            # count means "not recorded" (dash), and ground/wall are then shares
+            # of all sampled ticks instead of being normalised to ground+wall
+            # (which read ~94% ground with air silently missing).
+            pos = (((p["ticks_on_ground"] or 0) + (p["ticks_in_air"] or 0)
+                    + (p["ticks_on_wall"] or 0)) if p["ticks_in_air"] else ticks) or 1
             d.update(
                 boost_used=p["boost_used"] or 0,
                 bpm=((p["boost_used"] or 0) / (duration / 60.0)) if duration > 0 else 0,
@@ -3080,7 +3114,7 @@ def _match_detail_html(store, match_id: str, viewer_pid: str | None, viewer_name
                 avg_sp=(p["speed_sum"] or 0) / ticks,
                 sup=(p["ticks_supersonic"] or 0) / ticks * 100,
                 ground=(p["ticks_on_ground"] or 0) / pos * 100,
-                air=(p["ticks_in_air"] or 0) / pos * 100,
+                air=((p["ticks_in_air"] / pos * 100) if p["ticks_in_air"] else None),
                 wall=(p["ticks_on_wall"] or 0) / pos * 100,
             )
         return d
@@ -3109,10 +3143,15 @@ def _match_detail_html(store, match_id: str, viewer_pid: str | None, viewer_name
                 f'<tbody>{"".join(_row(r) for r in _adv_rows)}</tbody></table></div></div>')
 
     box_involve = _bs_table(
-        "Involvement &amp; positioning", "touches, ball-share, field thirds, combat",
+        "Involvement &amp; positioning", "touches, ball-share, field thirds",
         [("Touches", "touches", _num), ("Share", "touch_share", _pct),
          ("Def", "def", _pct), ("Neu", "neu", _pct), ("Off", "off", _pct),
-         ("Demos", "demos_taken", _num), ("Bars", "crossbars", _num), ("Goal%", "gp", _pct)])
+         ("Goal%", "gp", _pct)])
+    box_hits = _bs_table(
+        "Hits &amp; combat", "speeds in km/h",
+        [("Hardest hit", "hit_max", _num), ("Fastest goal", "goal_max", _num),
+         ("Epic saves", "epic_saves", _num), ("Demos taken", "demos_taken", _num),
+         ("Posts", "crossbars", _num)])
     box_boost = _bs_table(
         "Boost &amp; movement", "needs spectator coverage &middot; &mdash; = unavailable",
         [("BPM", "bpm", _num), ("Boost", "boost_used", _num),
@@ -3132,7 +3171,7 @@ def _match_detail_html(store, match_id: str, viewer_pid: str | None, viewer_name
                  f'<span class="dim">kickoffs excluded</span></div>'
                  f'<div class="bs-tmap-grid">{"".join(_tmaps)}</div></div>') if _tmaps else ""
 
-    players_box = box_involve + box_boost + box_tmaps
+    players_box = box_involve + box_hits + box_boost + box_tmaps
 
     # Match-played title: arena + game-clock duration + "Regulation/Overtime"
     # context replaces the hex match GUID, which was meaningless to humans.
@@ -3604,27 +3643,42 @@ def _match_compare_html(players, viewer_pid, viewer_name,
         f'<td class="num tnum">{u}</td><td class="num tnum">{t}</td></tr>'
         for lbl, u, t in rows
     )
+    # Touch %: one row per player (name, bar, % of all match touches), from the
+    # game's own touch counter -- the same number as the box score and the
+    # team "Touch share" row above. Names wrap, never truncate. Bars are
+    # scaled to the match leader so short shares stay readable.
     pp = ""
     if total:
-        def share(pl):
-            return " ".join(
-                f'<span class="cmp-pp">{html.escape(p["name"] or "")} '
-                f'{round((p["touches"] or 0) / total * 100)}%</span>'
-                for p in sorted(pl, key=lambda p: -(p["touches"] or 0))
-            )
-        pp = (f'<div class="cmp-touch"><div class="cmp-pp-title">Touch %</div>'
-              f'<div class="cmp-pp-row {us_cls}">{share(up)}</div>'
-              f'<div class="cmp-pp-row {them_cls}">{share(tp)}</div></div>')
+        ordered = (sorted(up, key=lambda p: -(p["touches"] or 0))
+                   + sorted(tp, key=lambda p: -(p["touches"] or 0)))
+        top = max((p["touches"] or 0) for p in ordered) or 1
+        items = []
+        for p in ordered:
+            n = p["touches"] or 0
+            pct = n / total * 100
+            tcls = "team-blue" if p["team_num"] == 0 else "team-orng"
+            items.append(
+                f'<li class="tp-row {tcls}">'
+                f'<span class="tp-name">{html.escape(p["name"] or "")}</span>'
+                f'<span class="tp-bar"><span class="tp-fill" style="width:{n / top * 100:.1f}%"></span></span>'
+                f'<span class="tp-val tnum">{pct:.0f}%<span class="tp-n"> &middot; {n}</span></span>'
+                f'</li>')
+        pp = (f'<div class="cmp-col"><div class="cmp-sub">Touch %</div>'
+              f'<ul class="tp-list">{"".join(items)}</ul></div>')
     return f"""
       <section id="compare" class="card mn-target">
         <div class="section-title"><span>Team comparison</span></div>
-        <table class="cmp-table">
-          <thead><tr><th></th>
-            <th class="num {us_cls}">{us_label}</th>
-            <th class="num {them_cls}">{them_label}</th></tr></thead>
-          <tbody>{body_rows}</tbody>
-        </table>
-        {pp}
+        <div class="cmp-grid">
+          <div class="cmp-col">
+            <table class="cmp-table">
+              <thead><tr><th></th>
+                <th class="num {us_cls}">{us_label}</th>
+                <th class="num {them_cls}">{them_label}</th></tr></thead>
+              <tbody>{body_rows}</tbody>
+            </table>
+          </div>
+          {pp}
+        </div>
       </section>
     """
 
@@ -4769,25 +4823,15 @@ def _kickoff_card_html(playback: dict, players, viewer_pid: str | None,
 
 
 def _match_insights_html(playback: dict, t0_name: str, t1_name: str) -> str:
-    """Insights card: ball touch heatmap + possession + ball-half pressure.
-
-    All three are derived from BallHit positions. Possession and pressure are
-    estimates rather than ground-truth (RL doesn't expose continuous ball
-    state) but the inter-hit intervals give a reasonable proxy."""
+    """Field-tilt card: share of ball contacts made in the opponent's half,
+    from BallHit positions."""
     ball = playback.get("ball_track") or []
     if not ball:
         return ""
 
-    # ---- Touch share (possession proxy) ------------------------------------
-    # Per-touch timing isn't reliable: uploaded matches arrive batched with a
-    # single received_at, so inter-touch intervals collapse to zero (this was
-    # the "possession 0% / pressure 50-50" bug). Use touch COUNTS instead — a
-    # robust proxy that works for every match. Each team's share of contacts.
-    b_touch = sum(1 for bh in ball if bh.get("team") == 0)
-    o_touch = sum(1 for bh in ball if bh.get("team") == 1)
-    total_touch = b_touch + o_touch or 1
-    b_pct = b_touch / total_touch * 100
-    o_pct = o_touch / total_touch * 100
+    # Touch share and per-player touches live in the Team comparison card
+    # (from the game's touch counter); this card keeps only field tilt, which
+    # needs the BallHit positions.
 
     # ---- Field tilt (pressure proxy) ---------------------------------------
     # Team 0 (Blue) defends -Y and attacks +Y (Orange's half); Orange attacks
@@ -4796,92 +4840,27 @@ def _match_insights_html(playback: dict, t0_name: str, t1_name: str) -> str:
     # (count, not time, so it survives the batched-timestamp upload).
     b_attack = sum(1 for bh in ball if (bh.get("y") or 0) > 300)
     o_attack = sum(1 for bh in ball if (bh.get("y") or 0) < -300)
-    pres_total = b_attack + o_attack or 1
+    if not (b_attack or o_attack):
+        return ""
+    pres_total = b_attack + o_attack
     b_pres = b_attack / pres_total * 100
     o_pres = o_attack / pres_total * 100
 
-    # ---- Touches per player ------------------------------------------------
-    by_player: dict[str, dict] = {}
-    for bh in ball:
-        name = bh["player"]
-        if not name:
-            continue
-        team = bh["team"]
-        d = by_player.setdefault(name, {"team": team, "n": 0})
-        d["n"] += 1
-
-    # Sort: Blue first (by descending touches), then Orange.
-    blue_touch = sorted(((n, v) for n, v in by_player.items() if v["team"] == 0),
-                        key=lambda kv: -kv[1]["n"])
-    orng_touch = sorted(((n, v) for n, v in by_player.items() if v["team"] == 1),
-                        key=lambda kv: -kv[1]["n"])
-    total_blue_touch = sum(v["n"] for _, v in blue_touch) or 1
-    total_orng_touch = sum(v["n"] for _, v in orng_touch) or 1
-
-    def touch_rows(team_list, total, tcls):
-        out = []
-        for name, v in team_list:
-            pct = v["n"] / total * 100
-            out.append(
-                f'<li class="touch-row {tcls}">'
-                f'<span class="touch-name">{html.escape(name)}</span>'
-                f'<span class="touch-bar"><span class="touch-bar-fill" '
-                f'style="width:{pct:.1f}%"></span></span>'
-                f'<span class="touch-num tnum">{v["n"]} <span class="dim">({pct:.0f}%)</span></span>'
-                f'</li>'
-            )
-        return "".join(out)
-
     return f"""
       <div class="card insights-card">
-        <div class="section-title">
-          <span>Match insights</span>
-          <span class="dim" style="text-transform:none;letter-spacing:0">
-            Derived from {len(ball)} ball contacts. Touch share and field tilt
-            are from contact counts and positions.
-          </span>
+        <div class="section-title"><span>Field tilt</span></div>
+        <div class="insights-subtitle">Ball contacts in the opponent's half</div>
+        <div class="dual-bar">
+          <div class="dual-bar-blue" style="width:{b_pres:.1f}%">
+            <span class="dual-bar-label">{b_pres:.0f}%</span>
+          </div>
+          <div class="dual-bar-orng" style="width:{o_pres:.1f}%">
+            <span class="dual-bar-label">{o_pres:.0f}%</span>
+          </div>
         </div>
-
-        <div class="insights-row">
-          <div class="insights-bars">
-            <div class="insights-subtitle">Touch share (share of ball contacts)</div>
-            <div class="dual-bar">
-              <div class="dual-bar-blue" style="width:{b_pct:.1f}%">
-                <span class="dual-bar-label">{b_pct:.0f}%</span>
-              </div>
-              <div class="dual-bar-orng" style="width:{o_pct:.1f}%">
-                <span class="dual-bar-label">{o_pct:.0f}%</span>
-              </div>
-            </div>
-            <div class="dual-bar-foot">
-              <span class="team-blue team-name-truncate" title="{html.escape(t0_name)}">{html.escape(t0_name)}</span>
-              <span class="team-orng team-name-truncate" title="{html.escape(t1_name)}">{html.escape(t1_name)}</span>
-            </div>
-
-            <div class="insights-subtitle" style="margin-top:14px">
-              Field tilt (contacts in opponent's half)
-            </div>
-            <div class="dual-bar">
-              <div class="dual-bar-blue" style="width:{b_pres:.1f}%">
-                <span class="dual-bar-label">{b_pres:.0f}%</span>
-              </div>
-              <div class="dual-bar-orng" style="width:{o_pres:.1f}%">
-                <span class="dual-bar-label">{o_pres:.0f}%</span>
-              </div>
-            </div>
-            <div class="dual-bar-foot">
-              <span class="team-blue team-name-truncate" title="{html.escape(t0_name)}">{html.escape(t0_name)} attacking</span>
-              <span class="team-orng team-name-truncate" title="{html.escape(t1_name)}">{html.escape(t1_name)} attacking</span>
-            </div>
-          </div>
-
-          <div class="insights-touches">
-            <div class="insights-subtitle">Touches by player</div>
-            <ul class="touch-list">
-              {touch_rows(blue_touch, total_blue_touch, "team-blue")}
-              {touch_rows(orng_touch, total_orng_touch, "team-orng")}
-            </ul>
-          </div>
+        <div class="dual-bar-foot">
+          <span class="team-blue">{html.escape(t0_name)}</span>
+          <span class="team-orng">{html.escape(t1_name)}</span>
         </div>
       </div>
     """
@@ -5110,6 +5089,8 @@ def _player_breakdown_html(store, primary_id: str | None, name: str | None,
             ("Score / touch", num(sd(r.get('score'), r.get('touches')), "{:.2f}")),
             ("Goal participation", num(gp, "{:.1f}%")),
             ("Avg goal speed (kph)", num(ags, "{:.0f}")),
+            ("Fastest goal (kph)", num(d.get("goal_speed_max") or None, "{:.0f}")),
+            ("Hardest hit (kph)", num(d.get("hit_speed_max") or None, "{:.0f}")),
         ]),
         ("Combat", "single", [
             ("Demos delivered (total)", f"{dg:.0f}"),
@@ -5361,6 +5342,10 @@ def _compare_page_html(store, slots: list[str], *, self_name: str | None = None,
              goal_part, True),
             ("Avg goal speed (kph)", lambda v: f"{v:.0f}",
              avg_goal_speed, True),
+            ("Fastest goal (kph)", lambda v: f"{v:.0f}",
+             [d.get("goal_speed_max") or None for d in derived_rows], True),
+            ("Hardest hit (kph)", lambda v: f"{v:.0f}",
+             [d.get("hit_speed_max") or None for d in derived_rows], True),
         ]),
         ("Combat", "single", [
             ("Demos delivered (total)", lambda v: f"{v:.0f}",
@@ -8483,19 +8468,37 @@ td.rank, th.rank { color: var(--text-faint); font-weight: 600;
 .pp-head { font-weight: 700; font-size: 15px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
 
 /* Us-vs-them compare block */
-.cmp-table { width: 100%; max-width: 420px; border-collapse: collapse; }
+.cmp-table { width: 100%; border-collapse: collapse; }
 .cmp-table th, .cmp-table td { padding: 6px 10px; }
 .cmp-table thead th { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
 .cmp-table thead th.team-blue { color: var(--team-blue); }
 .cmp-table thead th.team-orng { color: var(--team-orng); }
 .cmp-table .cmp-label { color: var(--text-faint); font-size: 13px; }
 .cmp-table tbody tr + tr td { border-top: 1px solid var(--accent-line); }
-.cmp-touch { margin-top: 12px; }
-.cmp-touch .cmp-pp-title { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-faint); margin-bottom: 6px; }
-.cmp-pp-row { display: flex; flex-wrap: wrap; gap: 6px 12px; margin-bottom: 4px; }
-.cmp-pp-row.team-blue .cmp-pp { color: var(--team-blue); }
-.cmp-pp-row.team-orng .cmp-pp { color: var(--team-orng); }
-.cmp-pp { font-size: 12px; font-variant-numeric: tabular-nums; }
+/* Team comparison: table + Touch % side by side (equal halves) on wide
+   screens, stacked on phones. Touch %: one row per player, name never cut. */
+.cmp-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 32px; align-items: start; }
+@media (max-width: 820px) { .cmp-grid { grid-template-columns: minmax(0, 1fr); gap: 20px; } }
+.cmp-col { min-width: 0; }
+.cmp-sub { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--text-faint); padding: 6px 0 8px; }
+.tp-list { list-style: none; margin: 0; padding: 0; }
+.tp-row { display: grid; grid-template-columns: minmax(0, 12rem) minmax(0, 1fr) 5.5rem; gap: 12px; align-items: center; padding: 8px 0; }
+.tp-row + .tp-row { border-top: 1px solid var(--accent-line); }
+.tp-name { font-size: 14px; font-weight: 600; overflow-wrap: anywhere; line-height: 1.25; }
+.tp-row.team-blue .tp-name { color: var(--team-blue); }
+.tp-row.team-orng .tp-name { color: var(--team-orng); }
+.tp-bar { display: block; height: 8px; background: var(--card-2); border: 1px solid var(--border); }
+.tp-fill { display: block; height: 100%; }
+.tp-row.team-blue .tp-fill { background: var(--team-blue); }
+.tp-row.team-orng .tp-fill { background: var(--team-orng); }
+.tp-val { font-size: 14px; font-weight: 700; text-align: right; white-space: nowrap; }
+.tp-n { font-weight: 400; color: var(--text-faint); }
+@media (max-width: 520px) {
+  .tp-row { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "name val" "bar bar"; row-gap: 6px; }
+  .tp-name { grid-area: name; }
+  .tp-val { grid-area: val; }
+  .tp-bar { grid-area: bar; }
+}
 .radar-card .rc-adv { display: flex; flex-direction: column; gap: 16px; }
 .radar-card .rc-adv-section { display: flex; flex-direction: column; gap: 10px; }
 .radar-card .rc-adv-title {
@@ -9701,11 +9704,8 @@ table.history th .rl-icon,
 }
 .dual-bar-foot > span {
   min-width: 0;
-  flex: 0 1 auto;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 50%;
+  flex: 0 1 50%;
+  overflow-wrap: anywhere;
 }
 .dual-bar-foot > span:last-child { text-align: right; }
 
