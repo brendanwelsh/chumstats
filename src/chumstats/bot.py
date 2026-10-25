@@ -197,8 +197,9 @@ def _adv_stats_block(s, me) -> str | None:
                   f"{'SPD':>5}{'BOOST':>7}", A_WHITE)]
     for p in team:
         nm = f"{p.name}{' (BOT)' if p.is_bot else ''}"[:_SB_NAME_W]
-        nums = (f"{p.pct_in_air * 100:>4.0f}%"
-                f"{p.pct_on_wall * 100:>5.0f}%{p.pct_supersonic * 100:>4.0f}%"
+        air_s = f"{p.pct_in_air * 100:>4.0f}%" if p.ticks_in_air else f"{'-':>5}"
+        nums = (air_s
+                + f"{p.pct_on_wall * 100:>5.0f}%{p.pct_supersonic * 100:>4.0f}%"
                 f"{p.avg_speed:>5.0f}{p.boost_used:>7.0f}")
         lines.append(_sgr(f"{nm:<{_SB_NAME_W}}", fg) + _sgr(nums, A_WHITE))
     return "```ansi\n" + "\n".join(lines) + "\n```"

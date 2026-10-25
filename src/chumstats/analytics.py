@@ -226,7 +226,9 @@ def build_analytics(s: MatchSummary, *,
         a.movement_block.lines.extend([
             MetricLine("Avg speed",   f"{me.avg_speed:.1f}",           f"max {me.speed_max:.1f}"),
             MetricLine("Supersonic",  f"{me.pct_supersonic * 100:.0f}%", ""),
-            MetricLine("Time in air", f"{me.pct_in_air * 100:.0f}%", ""),
+            # 0 in-air ticks = the feed never sent explicit false ground/wall
+            # flags, i.e. air time was not recorded: dash, never "0%".
+            MetricLine("Time in air", (f"{me.pct_in_air * 100:.0f}%" if me.ticks_in_air else "—"), ""),
             MetricLine("Time on wall", f"{me.pct_on_wall * 100:.0f}%", ""),
             MetricLine("Time on ground", f"{me.pct_on_ground * 100:.0f}%", ""),
         ])
@@ -487,14 +489,16 @@ def build_dashboard(store, *, primary_id: str | None = None,
             # so they total 100% (some ticks lack a clean position classification,
             # which otherwise left them at e.g. 72/19/5 = 97%). Supersonic is a
             # speed state (independent of position) so it stays vs total ticks.
-            pos_ticks = ((row["ticks_ground"] or 0) + (row["ticks_air"] or 0)
-                         + (row["ticks_wall"] or 0)) or 1
+            # Air not recorded (0 ticks): shares of all sampled ticks, air = dash.
+            pos_ticks = (((row["ticks_ground"] or 0) + (row["ticks_air"] or 0)
+                          + (row["ticks_wall"] or 0)) if row["ticks_air"] else ticks) or 1
             d.movement.lines.extend([
                 MetricLine("Avg speed", f"{(row['speed_sum'] or 0) / ticks:.1f} km/h",
                            f"max {row['speed_max'] or 0:.1f} km/h"),
                 MetricLine("Supersonic", _pct(row["ticks_super"] or 0, ticks, 1),
                            "share of play at top speed"),
-                MetricLine("In air",     _pct(row["ticks_air"] or 0, pos_ticks, 1), ""),
+                MetricLine("In air",     (_pct(row["ticks_air"], pos_ticks, 1)
+                                          if row["ticks_air"] else "—"), ""),
                 MetricLine("On wall",    _pct(row["ticks_wall"] or 0, pos_ticks, 1), ""),
                 MetricLine("On ground",  _pct(row["ticks_ground"] or 0, pos_ticks, 1), ""),
                 MetricLine("BPM", f"{(row['boost_used'] or 0) / (ticks / 30 / 60):.0f}",
@@ -828,13 +832,15 @@ def build_comparison(store, a_primary_id: str | None = None, a_name: str | None 
             (b.get("ticks_super") or 0) / b_ticks if b_ticks else None, kind="pct")
         # Ground/air/wall partition POSITION time → normalise to their own sum so
         # the three total 100% (unclassified ticks otherwise leave them short).
-        a_pos = ((a.get("ticks_ground") or 0) + (a.get("ticks_air") or 0)
-                 + (a.get("ticks_wall") or 0)) or 1
-        b_pos = ((b.get("ticks_ground") or 0) + (b.get("ticks_air") or 0)
-                 + (b.get("ticks_wall") or 0)) or 1
+        # Air not recorded (0 in-air ticks) -> None (dash) and ground/wall as
+        # shares of all sampled ticks.
+        a_pos = (((a.get("ticks_ground") or 0) + (a.get("ticks_air") or 0)
+                  + (a.get("ticks_wall") or 0)) if a.get("ticks_air") else a_ticks) or 1
+        b_pos = (((b.get("ticks_ground") or 0) + (b.get("ticks_air") or 0)
+                  + (b.get("ticks_wall") or 0)) if b.get("ticks_air") else b_ticks) or 1
         add_adv("In air %",
-            (a.get("ticks_air") or 0) / a_pos if a_ticks else None,
-            (b.get("ticks_air") or 0) / b_pos if b_ticks else None, kind="pct")
+            a["ticks_air"] / a_pos if (a_ticks and a.get("ticks_air")) else None,
+            b["ticks_air"] / b_pos if (b_ticks and b.get("ticks_air")) else None, kind="pct")
         add_adv("On wall %",
             (a.get("ticks_wall") or 0) / a_pos if a_ticks else None,
             (b.get("ticks_wall") or 0) / b_pos if b_ticks else None, kind="pct")

@@ -144,6 +144,60 @@ class Store:
             c.executescript(SCHEMA)
             self._migrate(c)
             self._apply_player_aliases(c)
+            self.derive_missing_mvps(c)
+
+    @staticmethod
+    def derive_missing_mvps(c, match_id: str | None = None) -> int:
+        """Fill in an MVP for matches where the feed sent none.
+
+        Rocket League gives MVP to the highest-scoring player on the winning
+        team; when the Stats API leaves every is_mvp false (seen on forfeits),
+        apply that rule and flag the row mvp_derived=1 so pages can say so. If
+        a real MVP later arrives (another uploader's rows), the derived one is
+        withdrawn. Idempotent; never deletes rows. Returns rows changed."""
+        where, args = ("WHERE m.id = ?", [match_id]) if match_id else ("", [])
+        changed = 0
+        matches = c.execute(
+            f"SELECT m.id, m.winner_team_num FROM matches m {where}", args).fetchall()
+        for mrow in matches:
+            mid, win = mrow[0], mrow[1]
+            prow = c.execute(
+                "SELECT primary_id, team_num, score, goals, name, is_mvp, mvp_derived "
+                "FROM match_player_stats WHERE match_id = ?", (mid,)).fetchall()
+            real = [r for r in prow if r[5] and not r[6]]
+            derived = [r for r in prow if r[6]]
+            if real:
+                if derived:
+                    changed += c.execute(
+                        "UPDATE match_player_stats SET is_mvp = 0, mvp_derived = 0 "
+                        "WHERE match_id = ? AND mvp_derived = 1", (mid,)).rowcount
+                continue
+            team = [r for r in prow if r[1] == win]
+            if win not in (0, 1) or not team:
+                continue
+            top = sorted(team, key=lambda r: (-(r[2] or 0), -(r[3] or 0), r[4] or ""))[0]
+            # If the stat feed announced the MVP by name (StatfeedEvent "MVP")
+            # but the scoreboard flag never came, trust the announcement.
+            for (pl,) in c.execute(
+                    "SELECT payload FROM raw_events WHERE match_id = ? AND event = 'StatfeedEvent' "
+                    "AND payload LIKE '%\"EventName\":\"MVP\"%'", (mid,)):
+                try:
+                    nm = (json.loads(pl).get("MainTarget") or {}).get("Name")
+                except Exception:
+                    nm = None
+                hit = [r for r in team if nm and r[4] == nm]
+                if hit:
+                    top = hit[0]
+                    break
+            if len(derived) == 1 and derived[0][0] == top[0] and derived[0][1] == top[1]:
+                continue
+            c.execute("UPDATE match_player_stats SET is_mvp = 0, mvp_derived = 0 "
+                      "WHERE match_id = ? AND mvp_derived = 1", (mid,))
+            changed += c.execute(
+                "UPDATE match_player_stats SET is_mvp = 1, mvp_derived = 1 "
+                "WHERE match_id = ? AND primary_id = ? AND team_num = ?",
+                (mid, top[0], top[1])).rowcount
+        return changed
 
     def _apply_player_aliases(self, c) -> None:
         """Manual identity merges — same person on different accounts (see
@@ -171,6 +225,13 @@ class Store:
             c.execute(
                 "ALTER TABLE matches ADD COLUMN overtime_seconds REAL NOT NULL DEFAULT 0"
             )
+
+        mps_cols = {r[1] for r in c.execute("PRAGMA table_info(match_player_stats)")}
+        if "mvp_derived" not in mps_cols:
+            # 1 = MVP filled in by us because the feed sent none (see
+            # derive_missing_mvps); 0 = the game's own MVP flag (or not MVP).
+            c.execute("ALTER TABLE match_player_stats ADD COLUMN "
+                      "mvp_derived INTEGER NOT NULL DEFAULT 0")
 
         # Identity PK migration: re-key match_player_stats on
         # (match_id, primary_id, team_num). The old (match_id, name, team_num) PK
@@ -327,6 +388,7 @@ class Store:
                     json.dumps(s.goal_events),
                 ),
             )
+            self.derive_missing_mvps(c, s.match_id)
 
     def has_match(self, match_id: str) -> bool:
         with self._conn(scoped=False) as c:
@@ -525,6 +587,7 @@ class Store:
                     continue
                 self._insert_player_row(c, match_id, r, is_mvp_override=r.get("is_mvp", False))
                 result["others_inserted"] += 1
+            self.derive_missing_mvps(c, match_id)
 
         return result
 

@@ -1051,7 +1051,7 @@ _PRO_BENCHMARKS: dict[str, str] = {
     "Win rate":                   "55-60%",
     "MVP rate":                   "18%",
     "Shooting %":                 "30%",
-    "Score / touch":              "1.5",
+    "Score / touch":              "15",
     "Goal participation":         "65%",
     "Avg goal speed (kph)":       "85",
     "Demos delivered (total)":    "--",
@@ -1071,7 +1071,7 @@ _PRO_BENCHMARKS: dict[str, str] = {
     "Time in air %":              "20%",
     "Time on wall %":              "6%",
     "Time on ground %":            "55%",
-    "Avg speed":                   "1400",
+    "Avg speed (km/h)":            "50",
     "Boost used":                  "1400 / match",
     "Time near-empty %":           "8%",
     "Time at 100 boost %":         "5%",
@@ -1285,6 +1285,29 @@ def _rl_icon_html(event_key: str, *, size: int = 18, alt: str | None = None) -> 
             f'width="{size}" height="{size}" loading="lazy" />')
 
 
+_MVP_DERIVED_TIP = ("Derived: the scoreboard had no MVP flag for this match, so it comes "
+                    "from the game's MVP announcement or, failing that, the top scorer on "
+                    "the winning team (Rocket League's own rule)")
+
+
+def _is_derived_mvp(row) -> bool:
+    try:
+        return bool(row["mvp_derived"])
+    except (KeyError, IndexError):
+        return False
+
+
+def _mvp_chip_html(row, style: str = "") -> str:
+    """MVP chip for a player row; derived MVPs read 'MVP*' with an explanation."""
+    if not row["is_mvp"]:
+        return ""
+    st = f" style='{style}'" if style else ""
+    if _is_derived_mvp(row):
+        return (f" <span class='chip mvp mvp-derived'{st} "
+                f"title=\"{_MVP_DERIVED_TIP}\">MVP*</span>")
+    return f" <span class='chip mvp'{st}>MVP</span>"
+
+
 def _mvp_callout_html(players, viewer_pid: str | None, viewer_name: str | None) -> str:
     """Compact MVP banner for the hero. Calls the player out by name (with a
     'YOU' chip if the viewer is the MVP), color-coded by team."""
@@ -1308,10 +1331,13 @@ def _mvp_callout_html(players, viewer_pid: str | None, viewer_name: str | None) 
             f'</span>'
         )
     icon = _rl_icon_html("MVP", size=16, alt="")
+    derived = any(_is_derived_mvp(p) for p in mvps)
+    note = (f'<span class="hero-mvp-note" title="{_MVP_DERIVED_TIP}">'
+            f'derived: no MVP flag in the feed</span>') if derived else ""
     return (
         f'<div class="hero-mvp">'
         f'{icon}<span class="hero-mvp-tag">MVP</span>'
-        f'{" ".join(parts)}'
+        f'{" ".join(parts)}{note}'
         f'</div>'
     )
 
@@ -1601,9 +1627,10 @@ def _lifetime_touch_data(store, name: str | None, match_ids: set | None = None) 
             "player": name, "team": team, "t": 0,
         })
         seen_matches.add(r["match_id"])
-        # Defensive-third sign: Team 0 defends +Y, so signed_y = y * (+1 if team 0
-        # else -1) gives a defensive-positive value.
-        signed_y = y * (1 if team == 0 else -1)
+        # Defensive-third sign: Team 0 (Blue) defends -Y (its goals land at +Y,
+        # checked against GoalScored impacts 10/24), so signed_y = y * (-1 if team 0
+        # else +1) gives a defensive-positive value.
+        signed_y = y * (-1 if team == 0 else 1)
         if signed_y > 1707:
             thirds["def"] += 1
         elif signed_y < -1707:
@@ -1621,95 +1648,103 @@ def _lifetime_touch_data(store, name: str | None, match_ids: set | None = None) 
     }
 
 
-def _lifetime_shot_data(store, name: str | None, match_ids: set | None = None) -> dict:
-    """Aggregate where the player SCORES FROM: the scorer's last ball-touch
-    before each of their goals (the shot), across every match. Derived live from
-    raw_events (BallHit + GoalScored) — the touch immediately before a goal is
-    the shot, and replay/kickoff touches arrive after it, so stream order alone
-    locates it (no stored backfill needed). Returns a playback-shaped dict so it
-    plugs straight into `_ball_heatmap_svg`.
+_PLAYBACK_CACHE: dict[tuple, dict] = {}
 
-    Pass `match_ids` to scope the map to a specific set of matches (e.g. the
-    compare page's last-N sample window); None = full history."""
-    import json as _json
-    rl_len, rl_wid = 10240, 8192
-    vb_w, vb_h = 880, 380
-    pitch_w, pitch_h = 800, 320
-    pad_x, pad_y = (vb_w - pitch_w) / 2, (vb_h - pitch_h) / 2
 
-    def project(rx: float, ry: float) -> tuple[float, float]:
-        ry = max(min(ry, rl_len / 2 + 280), -(rl_len / 2 + 280))
-        rx = max(min(rx, rl_wid / 2 + 280), -(rl_wid / 2 + 280))
-        px = pad_x + ((ry + rl_len / 2) / rl_len) * pitch_w
-        py = pad_y + ((rx + rl_wid / 2) / rl_wid) * pitch_h
-        return round(px, 1), round(py, 1)
-
-    empty = {
-        "ball_track": [],
-        "svg": {"vb_w": vb_w, "vb_h": vb_h, "pitch_w": pitch_w,
-                "pitch_h": pitch_h, "pad_x": pad_x, "pad_y": pad_y},
-        "shots": 0,
-        "matches_with_goals": 0,
-    }
-    if not store or not name:
-        return empty
-    if match_ids is not None and not match_ids:
-        return empty
-
-    scope_filter = ""
-    base_args: list = [name]
-    if match_ids is not None:
-        ph = ",".join("?" * len(match_ids))
-        scope_filter = f" AND match_id IN ({ph})"
-        base_args = [name, *match_ids]
+def _cached_playback(store, match_id: str) -> dict | None:
+    """_build_playback_data for one match, cached on (db, match, last raw id) so
+    lifetime maps don't re-parse unchanged matches on every page view."""
     with store._conn() as con:
-        team_by_match = {
-            r["match_id"]: r["team_num"]
-            for r in con.execute(
-                f"SELECT match_id, team_num FROM match_player_stats WHERE name = ?{scope_filter}",
-                base_args)
-        }
-        if not team_by_match:
-            return empty
-        rows = con.execute(f"""
-            SELECT match_id, event, payload FROM raw_events
-            WHERE event IN ('BallHit', 'GoalScored')
-              AND match_id IN (SELECT DISTINCT match_id FROM match_player_stats WHERE name = ?{scope_filter})
-            ORDER BY match_id, received_at, id
-        """, base_args).fetchall()
+        m = con.execute("SELECT started_at, team0_name, team1_name FROM matches WHERE id = ?",
+                        (match_id,)).fetchone()
+        if not m:
+            return None
+        last_id = con.execute("SELECT MAX(id) FROM raw_events WHERE match_id = ?",
+                              (match_id,)).fetchone()[0]
+        ex = con.execute("SELECT duration_seconds FROM match_extras WHERE match_id = ?",
+                         (match_id,)).fetchone()
+    key = (getattr(store, "db_path", ""), match_id, last_id)
+    pb = _PLAYBACK_CACHE.get(key)
+    if pb is None:
+        pb = _build_playback_data(store, match_id, m["started_at"], m["team0_name"],
+                                  m["team1_name"], ex["duration_seconds"] if ex else 0)
+        if len(_PLAYBACK_CACHE) > 2000:
+            _PLAYBACK_CACHE.clear()
+        _PLAYBACK_CACHE[key] = pb
+    return pb
 
-    shots: list[dict] = []
-    seen_matches: set[str] = set()
-    cur_match = None
-    last_xy: tuple[float, float] | None = None  # player's most recent touch this match
+
+def _lifetime_spot_data(store, name: str | None, match_ids: set | None, kind: str) -> dict:
+    """Where a player's SHOTS (kind="shots": each shot on goal at the shooter's
+    last touch) or GOALS (kind="goals": where the ball crossed the line) were,
+    across their matches. Built from the same per-match playback data as the
+    match page, so the numbers agree. Positions are rotated so the player
+    always attacks right. Returns a playback-shaped dict."""
+    svg = {"vb_w": 880, "vb_h": 380, "pitch_w": 800, "pitch_h": 320,
+           "pad_x": 40.0, "pad_y": 30.0}
+    out = {"ball_track": [], "svg": svg, "count": 0, "matches": 0,
+           # legacy keys used by callers
+           "shots": 0, "matches_with_goals": 0}
+    if not store or not name or (match_ids is not None and not match_ids):
+        return out
+    with store._conn() as con:
+        q = "SELECT match_id, team_num FROM match_player_stats WHERE name = ?"
+        rows = con.execute(q, (name,)).fetchall()
+    cx = svg["pad_x"] + svg["pitch_w"] / 2
+    cy = svg["pad_y"] + svg["pitch_h"] / 2
+    seen = set()
     for r in rows:
-        if r["match_id"] != cur_match:
-            cur_match = r["match_id"]
-            last_xy = None
-        try:
-            d = _json.loads(r["payload"])
-        except Exception:
+        mid = r["match_id"]
+        if match_ids is not None and mid not in match_ids:
             continue
-        if r["event"] == "BallHit":
-            if any((pp.get("Name") or "") == name for pp in (d.get("Players") or [])):
-                loc = (d.get("Ball") or {}).get("Location") or {}
-                last_xy = (float(loc.get("X") or 0), float(loc.get("Y") or 0))
-        elif (d.get("Scorer") or {}).get("Name") == name and last_xy is not None:
-            x, y = last_xy
-            sx, sy = project(x, y)
-            shots.append({
-                "x": x, "y": y, "sx": sx, "sy": sy,
-                "player": name, "team": team_by_match.get(r["match_id"], 0), "t": 0,
-            })
-            seen_matches.add(r["match_id"])
+        pb = _cached_playback(store, mid)
+        if not pb:
+            continue
+        if kind == "goals":
+            mine = [g for g in pb.get("goals") or []
+                    if g["scorer"] == name and g.get("impact_ok") and g.get("team") in (0, 1)]
+            for pt in _goal_face_points(mine):
+                out["ball_track"].append({"gx": pt["gx"], "z": pt["z"], "team": None,
+                                          "tip": f'{pt.get("speed") or 0:.0f} km/h'})
+                seen.add(mid)
+            continue
+        pts = [dict(sh) for sh in pb.get("shots") or [] if sh["player"] == name]
+        for pt in pts:
+            if pt.get("team") == 1:  # rotate so this player attacks right
+                pt["sx"], pt["sy"] = 2 * cx - pt["sx"], 2 * cy - pt["sy"]
+            pt["team"] = 0
+            out["ball_track"].append(pt)
+            seen.add(mid)
+    out["count"] = out["shots"] = len(out["ball_track"])
+    out["matches"] = out["matches_with_goals"] = len(seen)
+    return out
 
-    return {
-        "ball_track": shots,
-        "svg": {"vb_w": vb_w, "vb_h": vb_h, "pitch_w": pitch_w,
-                "pitch_h": pitch_h, "pad_x": pad_x, "pad_y": pad_y},
-        "shots": len(shots),
-        "matches_with_goals": len(seen_matches),
-    }
+
+def _lifetime_shot_data(store, name: str | None, match_ids: set | None = None) -> dict:
+    return _lifetime_spot_data(store, name, match_ids, "shots")
+
+
+def _lifetime_goal_data(store, name: str | None, match_ids: set | None = None) -> dict:
+    d = _lifetime_spot_data(store, name, match_ids, "goals")
+    d["kind"] = "goals"
+    return d
+
+
+def _spot_map_svg(data: dict, *, compact: bool = False) -> str:
+    """Discrete markers (no density blur) for small counts like goals/shots."""
+    pts = data.get("ball_track") or []
+    if not pts:
+        return ""
+    if data.get("kind") == "goals":
+        return _goal_face_svg(pts, "", numbered=False)
+    svg = data["svg"]
+    r = 5 if compact else 7
+    dots = "".join(
+        f'<circle cx="{p["sx"]:.1f}" cy="{p["sy"]:.1f}" r="{r}" fill="var(--accent)" '
+        f'fill-opacity="0.8" stroke="var(--card)" stroke-width="1.5"/>' for p in pts)
+    cls = "hm-pitch hm-pitch-compact" if compact else "hm-pitch"
+    return (f'<svg viewBox="0 0 {svg["vb_w"]} {svg["vb_h"]}" class="{cls}" '
+            f'xmlns="http://www.w3.org/2000/svg">{_pitch_frame_svg(svg)}{dots}</svg>')
 
 
 def _recent_form_html(store, primary_id: str | None, name: str | None,
@@ -1806,8 +1841,8 @@ def _player_ball_section_html(store, name: str | None) -> str:
           <div class="hm-wrap">{heatmap}</div>
         </div>
         <ul class="rc-stat-line" style="margin-top:14px">
-          <li><b>{touches}</b> <span>total touches</span></li>
-          <li><b>{touches_per_match:.1f}</b> <span>per match</span></li>
+          <li><b>{touches}</b> <span>ball contacts mapped</span></li>
+          <li><b>{touches_per_match:.1f}</b> <span>mapped per match</span></li>
           {bpm_html}
           <li><b>{def_pct:.0f}%</b> <span>defensive third</span></li>
           <li><b>{neu_pct:.0f}%</b> <span>neutral</span></li>
@@ -1816,27 +1851,30 @@ def _player_ball_section_html(store, name: str | None) -> str:
       </div>
     """
 
-    # Shot map: where this player's goals were actually struck from (their last
-    # touch before each goal), not the goal-line crossing. Reliable for all.
+    # Goal map (only real goals, where the ball crossed the line) and Shots map
+    # (each shot on goal at the shooter's last touch) are separate: a shot or a
+    # touch is not a goal.
+    gd = _lifetime_goal_data(store, name)
     sd = _lifetime_shot_data(store, name)
-    shot_card = ""
-    if sd["shots"]:
-        shotmap = _ball_heatmap_svg(sd, key=f"shots-{name_slug}", exclude_center=False, legend_label="goals")
-        shot_card = f"""
+    def _spot_card(title: str, sub: str, data: dict) -> str:
+        if not data["count"]:
+            return ""
+        return f"""
       <div class="card insights-card">
-        <div class="section-title">
-          <span>Where they score from</span>
-          <span class="dim" style="text-transform:none;letter-spacing:0">
-            Shot location of {sd['shots']} goal{'' if sd['shots'] == 1 else 's'} across
-            {sd['matches_with_goals']} match{'' if sd['matches_with_goals'] == 1 else 'es'},
-            rotated so they always attack &#8594; (right). Brighter = scored more from there.
-          </span>
-        </div>
-        <div class="insights-heatmap">
-          <div class="hm-wrap">{shotmap}</div>
-        </div>
+        <div class="section-title"><span>{title}</span></div>
+        <div class="map-sub dim">{sub}</div>
+        <div class="map-pitch">{_spot_map_svg(data)}</div>
       </div>
     """
+    shot_card = '<div class="md-maps" style="margin-top:16px">' + (
+        _spot_card("Goal map",
+                   f"{gd['count']} goal{'' if gd['count'] == 1 else 's'} across "
+                   f"{gd['matches']} match{'' if gd['matches'] == 1 else 'es'}: where the ball "
+                   f"crossed the line, seen from the front of the net.", gd)
+        + _spot_card("Shots",
+                     f"{sd['count']} shot{'' if sd['count'] == 1 else 's'} on goal across "
+                     f"{sd['matches']} match{'' if sd['matches'] == 1 else 'es'}, at the "
+                     f"shooter's last touch. Attacking right.", sd)) + '</div>'
     return touch_card + shot_card
 
 
@@ -2036,7 +2074,7 @@ def _match_mvp_lookup(store, match_ids: list[str]) -> dict[str, dict]:
     placeholders = ",".join("?" * len(match_ids))
     with store._conn() as con:
         for r in con.execute(
-            f"SELECT match_id, name, team_num, is_bot FROM match_player_stats "
+            f"SELECT match_id, name, team_num, is_bot, mvp_derived FROM match_player_stats "
             f"WHERE is_mvp = 1 AND match_id IN ({placeholders})",
             tuple(match_ids),
         ):
@@ -2044,6 +2082,7 @@ def _match_mvp_lookup(store, match_ids: list[str]) -> dict[str, dict]:
             # team-num=0 wins arbitrarily; that's fine for display.
             out.setdefault(r["match_id"], {
                 "name": r["name"], "team_num": r["team_num"], "is_bot": bool(r["is_bot"]),
+                "derived": bool(r["mvp_derived"]),
             })
     return out
 
@@ -2063,8 +2102,9 @@ def _mvp_cell_html(mvp: dict | None, *, viewer_is_mvp: bool = False) -> str:
     you = ''  # neutral all-players view — no "you" framing
     icon = _rl_icon_html("MVP", size=14, alt="")
     return (
-        f'<span class="mvp-cell {team_cls}" title="MVP of this match">'
-        f'{icon}{name_html}{you}</span>'
+        f'<span class="mvp-cell {team_cls}" title="'
+        f'{_MVP_DERIVED_TIP if mvp.get("derived") else "MVP of this match"}">'
+        f'{icon}{name_html}{"*" if mvp.get("derived") else ""}{you}</span>'
     )
 
 
@@ -2394,9 +2434,10 @@ def _all_matches_html(store, *, include_bots=True, mode_filter=None,
             f"m.winner_team_num, {ts_sql} AS team_size FROM matches m{where} "
             f"ORDER BY {order} LIMIT 2000", tuple(args)).fetchall()
         mvp_map = {}
-        for mr in con.execute("SELECT match_id, name, primary_id, team_num, is_bot "
+        for mr in con.execute("SELECT match_id, name, primary_id, team_num, is_bot, "
+                              "mvp_derived AS derived "
                               "FROM match_player_stats WHERE is_mvp=1"):
-            mvp_map.setdefault(mr["match_id"], mr)
+            mvp_map.setdefault(mr["match_id"], dict(mr))
     body_rows = []
     for r in rows:
         ts_iso = datetime.fromtimestamp(r["started_at"]).isoformat() if r["started_at"] else ""
@@ -2723,7 +2764,7 @@ def _match_detail_html(store, match_id: str, viewer_pid: str | None, viewer_name
         for p in team_players:
             is_viewer = (viewer_pid and p["primary_id"] == viewer_pid and p["name"] == viewer_name) or \
                         (viewer_name and p["name"] == viewer_name and not viewer_pid)
-            mvp = " <span class='chip mvp'>MVP</span>" if p["is_mvp"] else ""
+            mvp = _mvp_chip_html(p)
             bot = " <span class='chip bot'>BOT</span>" if p["is_bot"] else ""
             you = ""  # neutral all-players view — no "you" framing
             href = f"/player/{quote(p['name'], safe='')}"
@@ -2737,18 +2778,18 @@ def _match_detail_html(store, match_id: str, viewer_pid: str | None, viewer_name
             # stats (where you are on the field, boost usage, speed) move into
             # the per-player section below the table.
             meta_line = f'<div class="meta-line"><span>{html.escape(platform or "Unknown platform")}</span></div>'
-            touches_cell = f"<td class='num tnum'>{p['touches'] or 0}</td>" if "touches" in p.keys() else "<td></td>"
+            touches_cell = f"<td class='num tnum' data-label='Touches'>{p['touches'] or 0}</td>" if "touches" in p.keys() else "<td></td>"
             rows.append(f"""
               <tr>
                 <td class="player-cell">{name_link}{you}{bot}{meta_line}</td>
-                <td class="num tnum"><b>{p['score']}</b></td>
-                <td class="num tnum">{p['goals']}</td>
-                <td class="num tnum">{p['assists']}</td>
-                <td class="num tnum">{p['saves']}</td>
-                <td class="num tnum">{p['shots']}</td>
-                <td class="num tnum">{p['demos']}</td>
+                <td class="num tnum" data-label="Score"><b>{p['score']}</b></td>
+                <td class="num tnum" data-label="Goals">{p['goals']}</td>
+                <td class="num tnum" data-label="Assists">{p['assists']}</td>
+                <td class="num tnum" data-label="Saves">{p['saves']}</td>
+                <td class="num tnum" data-label="Shots">{p['shots']}</td>
+                <td class="num tnum" data-label="Demos">{p['demos']}</td>
                 {touches_cell}
-                <td>{mvp}</td>
+                <td class="mvp-td">{mvp}</td>
               </tr>
             """)
 
@@ -2778,15 +2819,15 @@ def _match_detail_html(store, match_id: str, viewer_pid: str | None, viewer_name
               <tbody>
                 {"".join(rows)}
                 <tr class="total-row">
-                  <td>Team total</td>
-                  <td class="num tnum">{t_score}</td>
-                  <td class="num tnum">{t_goals}</td>
-                  <td class="num tnum">{t_assists}</td>
-                  <td class="num tnum">{t_saves}</td>
-                  <td class="num tnum">{t_shots}</td>
-                  <td class="num tnum">{t_demos}</td>
-                  <td class="num tnum">{t_touches}</td>
-                  <td></td>
+                  <td class="player-cell">Team total</td>
+                  <td class="num tnum" data-label="Score">{t_score}</td>
+                  <td class="num tnum" data-label="Goals">{t_goals}</td>
+                  <td class="num tnum" data-label="Assists">{t_assists}</td>
+                  <td class="num tnum" data-label="Saves">{t_saves}</td>
+                  <td class="num tnum" data-label="Shots">{t_shots}</td>
+                  <td class="num tnum" data-label="Demos">{t_demos}</td>
+                  <td class="num tnum" data-label="Touches">{t_touches}</td>
+                  <td class="mvp-td"></td>
                 </tr>
               </tbody>
             </table>
@@ -2798,7 +2839,7 @@ def _match_detail_html(store, match_id: str, viewer_pid: str | None, viewer_name
         team_class = "team-blue" if p["team_num"] == 0 else "team-orng"
         color = "var(--team-blue)" if p["team_num"] == 0 else "var(--team-orng)"
         marker = ""  # neutral all-players view — no "you" framing
-        mvp = " <span class='chip mvp' style='margin-left:6px'>MVP</span>" if p["is_mvp"] else ""
+        mvp = _mvp_chip_html(p, "margin-left:6px")
         bot = " <span class='chip bot' style='margin-left:6px'>BOT</span>" if p["is_bot"] else ""
         slug = "".join(ch if ch.isalnum() else "_" for ch in (p["name"] or "")) or "p"
         href = f"/player/{quote(p['name'], safe='')}"
@@ -2822,7 +2863,7 @@ def _match_detail_html(store, match_id: str, viewer_pid: str | None, viewer_name
             # flags -- use all sampled ticks so ground isn't inflated.)
             pos_ticks = (((p["ticks_on_ground"] or 0) + (p["ticks_in_air"] or 0)
                           + (p["ticks_on_wall"] or 0)) if p["ticks_in_air"] else ticks) or 1
-            air = (p["ticks_in_air"] or 0) / pos_ticks * 100
+            air = ((p["ticks_in_air"] / pos_ticks * 100) if p["ticks_in_air"] else None)
             wall = (p["ticks_on_wall"] or 0) / pos_ticks * 100
             ground = (p["ticks_on_ground"] or 0) / pos_ticks * 100
             avg_sp = p["speed_sum"] / ticks
@@ -2833,7 +2874,7 @@ def _match_detail_html(store, match_id: str, viewer_pid: str | None, viewer_name
             # Stacked bar visualisations - same data as before but visual.
             pos_bar = _stacked_bar([
                 ("Ground", ground, "#3b82f6"),
-                ("Air",    air,    "#a78bfa"),
+                ("Air",    air or 0, "#a78bfa"),
                 ("Wall",   wall,   "#fb923c"),
             ])
             speed_bar = _stacked_bar([
@@ -2852,7 +2893,7 @@ def _match_detail_html(store, match_id: str, viewer_pid: str | None, viewer_name
                 {pos_bar}
                 <ul class="rc-stat-line">
                   <li><b>{ground:.0f}%</b> <span>ground</span></li>
-                  <li><b>{air:.0f}%</b> <span>air</span></li>
+                  <li><b>{(f"{air:.0f}%" if air is not None else "&mdash;")}</b> <span>air</span></li>
                   <li><b>{wall:.0f}%</b> <span>wall</span></li>
                 </ul>
               </div>
@@ -2895,7 +2936,7 @@ def _match_detail_html(store, match_id: str, viewer_pid: str | None, viewer_name
         my_team_total = team_touches.get(p["team_num"], 0) or 1
         touch_share = my_touches / my_team_total * 100
         # Defensive/neutral/offensive thirds from this player's BallHit Y.
-        defensive_y_sign = 1 if p["team_num"] == 0 else -1  # +Y defended by Blue
+        defensive_y_sign = -1 if p["team_num"] == 0 else 1  # Blue defends -Y
         def_n = neu_n = off_n = 0
         for bh in playback_data["ball_track"]:
             if bh["player"] != p["name"]:
@@ -3071,7 +3112,7 @@ def _match_detail_html(store, match_id: str, viewer_pid: str | None, viewer_name
         my_touches = p["touches"] or 0
         team_tot = sum((q["touches"] or 0) for q in all_pl
                        if q["team_num"] == p["team_num"]) or 1
-        dsign = 1 if p["team_num"] == 0 else -1
+        dsign = -1 if p["team_num"] == 0 else 1  # Blue defends -Y
         dn = nn = on = 0
         for bh in playback_data["ball_track"]:
             if bh["player"] != p["name"]:
@@ -3088,6 +3129,7 @@ def _match_detail_html(store, match_id: str, viewer_pid: str | None, viewer_name
         contrib = (p["goals"] or 0) + (p["assists"] or 0)
         d = {
             "name": p["name"], "team": p["team_num"], "is_bot": p["is_bot"], "is_mvp": p["is_mvp"],
+            "mvp_derived": _is_derived_mvp(p),
             "touches": my_touches, "touch_share": my_touches / team_tot * 100,
             "def": dn / tt * 100, "neu": nn / tt * 100, "off": on / tt * 100,
             "demos_taken": ext["demos_received"], "crossbars": ext["crossbar_hits"],
@@ -3128,15 +3170,17 @@ def _match_detail_html(store, match_id: str, viewer_pid: str | None, viewer_name
         def _cell(r, k, fmt):
             v = r.get(k)
             return '<td class="num dim">&mdash;</td>' if v is None else f'<td class="num tnum">{fmt(v)}</td>'
+        def _cell_l(r, h, k, fmt):
+            return _cell(r, k, fmt).replace("<td ", f'<td data-label="{h}" ', 1)
         def _row(r):
             tc = "team-blue" if r["team"] == 0 else "team-orng"
             nm = html.escape(r["name"] or "")
             link = (f"<span class='player-link' style='color:var(--text-faint)'>{nm}</span>"
                     if r["is_bot"] else
                     f"<a class='player-link' href='/player/{quote(r['name'], safe='')}'>{nm}</a>")
-            mvp = " <span class='chip mvp'>MVP</span>" if r["is_mvp"] else ""
+            mvp = _mvp_chip_html(r)
             return (f'<tr class="{tc}"><td class="player-cell"><span class="bs-sw"></span>'
-                    f'{link}{mvp}</td>{"".join(_cell(r, k, f) for _, k, f in cols)}</tr>')
+                    f'{link}{mvp}</td>{"".join(_cell_l(r, h, k, f) for h, k, f in cols)}</tr>')
         return (f'<div class="bs-card"><div class="bs-title">{title}'
                 f'<span class="dim">{sub}</span></div>'
                 f'<div class="tscroll"><table class="bs-table"><thead><tr><th>Player</th>{head}</tr></thead>'
@@ -3219,64 +3263,45 @@ def _match_detail_html(store, match_id: str, viewer_pid: str | None, viewer_name
         </div>
       </header>
 
-      {match_nav}
-
-      <section class="md-pane active" data-pane="overview">
+      <section class="md-section" id="overview">
         <div class="md-rosters">
           {_roster_card(0)}
           {_roster_card(1)}
         </div>
       </section>
 
-      <section class="md-pane" data-pane="timeline">
-        {_match_events_html(playback_data)}
-      </section>
-
-      <section class="md-pane" data-pane="goalmap">
-        {_goal_map_html(playback_data)}
-      </section>
-
-      <section class="md-pane" data-pane="compare">
+      <section class="md-section">
         {_match_compare_html(players, viewer_pid, viewer_name, t0_name, t1_name, playback_data)}
         {_match_insights_html(playback_data, t0_name, t1_name)}
       </section>
 
-      <section class="md-pane" data-pane="kickoff">
+      <section class="md-section md-maps">
+        {_goal_map_html(playback_data)}
+        {_shot_map_html(playback_data)}
+      </section>
+
+      <section class="md-section">
+        {_match_events_html(playback_data)}
+      </section>
+
+      <section class="md-section">
         {_kickoff_card_html(playback_data, players, viewer_pid, viewer_name)}
       </section>
 
-      <section class="md-pane" data-pane="players">
+      <section class="md-section" id="players">
         {players_box}
       </section>
-      <script>
-      (function(){{
-        var nav = document.querySelector('.match-nav'); if(!nav) return;
-        function showPane(name){{
-          document.querySelectorAll('.md-pane').forEach(function(p){{
-            p.classList.toggle('active', p.dataset.pane === name);
-          }});
-          document.querySelectorAll('.mn-chip').forEach(function(c){{
-            if(!c.dataset.pp) c.classList.toggle('active', c.dataset.target === name);
-          }});
-          nav.scrollIntoView({{block:'nearest'}});
-        }}
-        function activatePlayer(id){{
-          document.querySelectorAll('.player-panel').forEach(function(p){{ p.classList.toggle('active', p.id === id); }});
-          document.querySelectorAll('.pp-tab').forEach(function(t){{ t.classList.toggle('active', t.dataset.pp === id); }});
-        }}
-        document.querySelectorAll('.mn-chip').forEach(function(el){{
-          el.addEventListener('click', function(){{
-            if (el.dataset.target) showPane(el.dataset.target);
-            if (el.dataset.pp) activatePlayer(el.dataset.pp);
-          }});
-        }});
-        document.querySelectorAll('.pp-tab').forEach(function(el){{
-          el.addEventListener('click', function(){{ if (el.dataset.pp) activatePlayer(el.dataset.pp); }});
-        }});
-      }})();
-      </script>
     """
     return _page_wrap("Match detail", body, active="history", with_sidebar=False)
+
+
+def _impact_at_attacking_end(team, y: float) -> bool:
+    """Blue (team 0) defends -Y and scores at +Y; Orange scores at -Y."""
+    if team == 0:
+        return y > 0
+    if team == 1:
+        return y < 0
+    return False
 
 
 def _build_playback_data(store, match_id: str, started_at: float,
@@ -3321,11 +3346,50 @@ def _build_playback_data(store, match_id: str, started_at: float,
             "SELECT id, received_at, event, payload FROM raw_events "
             "WHERE match_id = ? AND event IN "
             "  ('BallHit','GoalScored','CrossbarHit','StatfeedEvent','ClockUpdatedSeconds',"
-            "   'ReplayPlaybackStart','ReplayPlaybackEnd','ReplayWillEnd') "
-            "ORDER BY received_at",
+            "   'ReplayPlaybackStart','ReplayPlaybackEnd','ReplayWillEnd',"
+            "   'GoalReplayStart','GoalReplayEnd') "
+            "ORDER BY received_at, id",
             (match_id,),
         ).fetchall()
         counted_posts = _counted_crossbar_ids(con, "?", [match_id])
+
+    # Uploaded matches arrive as one batch, so every raw event carries the same
+    # received_at and wall-clock offsets are all 0. Every "before this goal"
+    # lookup then finds nothing (the goal map drew each goal at the goal line,
+    # off the pitch). Rebuild a game-time axis from the game clock instead:
+    # t = seconds of play elapsed at that point + a tiny per-event step so the
+    # stored order (row id) is kept within one clock second.
+    row_t: dict[int, float] = {}
+    if len(rows) >= 5 and len({r["received_at"] for r in rows}) <= 3:
+        reg_max = 0.0
+        for r in rows:
+            if r["event"] == "ClockUpdatedSeconds":
+                try:
+                    cd = _json.loads(r["payload"])
+                except Exception:
+                    continue
+                if not cd.get("bOvertime") and cd.get("TimeSeconds") is not None:
+                    reg_max = max(reg_max, float(cd["TimeSeconds"]))
+        reg_len = (round(reg_max / 60) * 60) if reg_max else 300.0
+        elapsed, step = 0.0, 0
+        for r in rows:
+            if r["event"] == "ClockUpdatedSeconds":
+                try:
+                    cd = _json.loads(r["payload"])
+                except Exception:
+                    cd = {}
+                ts_ = cd.get("TimeSeconds")
+                if ts_ is not None:
+                    new_el = (reg_len + float(ts_)) if cd.get("bOvertime") else (reg_len - float(ts_))
+                    if new_el > elapsed:
+                        elapsed, step = new_el, 0
+            step += 1
+            row_t[r["id"]] = elapsed + min(step, 99) * 0.01
+
+    def _t_of(r) -> float:
+        if row_t:
+            return row_t[r["id"]]
+        return max(0.0, r["received_at"] - started_at)
 
     # Build replay intervals first so we can drop any BallHit / ClockUpdate
     # events that fired during a goal-replay. RL re-broadcasts ball motion
@@ -3334,16 +3398,17 @@ def _build_playback_data(store, match_id: str, started_at: float,
     replay_intervals: list[tuple[float, float]] = []
     _pending_replay_start: float | None = None
     for r in rows:
-        t = max(0.0, r["received_at"] - started_at)
-        if r["event"] == "ReplayPlaybackStart":
+        t = _t_of(r)
+        if r["event"] in ("ReplayPlaybackStart", "GoalReplayStart"):
             _pending_replay_start = t
-        elif r["event"] == "ReplayPlaybackEnd" and _pending_replay_start is not None:
+        elif (r["event"] in ("ReplayPlaybackEnd", "GoalReplayEnd")
+              and _pending_replay_start is not None):
             replay_intervals.append((_pending_replay_start, t))
             _pending_replay_start = None
     # If the recording ended mid-replay, close the last interval at the
     # final event time so we still suppress its noise.
     if _pending_replay_start is not None and rows:
-        last_t = max(0.0, rows[-1]["received_at"] - started_at)
+        last_t = _t_of(rows[-1])
         replay_intervals.append((_pending_replay_start, last_t))
 
     def in_replay(t: float) -> bool:
@@ -3379,7 +3444,7 @@ def _build_playback_data(store, match_id: str, started_at: float,
     kickoff_pending = True
 
     for r in rows:
-        t = max(0.0, r["received_at"] - started_at)
+        t = _t_of(r)
         try:
             d = _json.loads(r["payload"])
         except Exception:
@@ -3421,31 +3486,48 @@ def _build_playback_data(store, match_id: str, started_at: float,
         elif e == "GoalScored":
             scorer = d.get("Scorer") or {}
             name = scorer.get("Name") or ""
+            imp = d.get("ImpactLocation") or {}
+            ix, iy = float(imp.get("X") or 0), float(imp.get("Y") or 0)
+            iz = float(imp.get("Z") or 0)
             if not name:
-                continue  # duplicate envelope after the real goal
+                # The scorer-less GoalScored that fires during the goal replay
+                # carries the TRUE impact point of the goal just scored; the
+                # live envelope's ImpactLocation lags one goal behind (verified
+                # on 10/24 data: it repeats the previous replay's point, often
+                # at the wrong end). Use the replay's point when it is at the
+                # scoring team's end.
+                if goals_raw and not goals_raw[-1].get("_replay_impact"):
+                    g = goals_raw[-1]
+                    if _impact_at_attacking_end(g["team"], iy):
+                        g["ix"], g["iy"], g["iz"] = ix, iy, iz
+                        g["isx"], g["isy"] = project(ix, iy)
+                        g["_replay_impact"] = True
+                        g["_event"]["sx"], g["_event"]["sy"] = g["isx"], g["isy"]
+                continue
             # Play restarts with a kickoff after every goal.
             kickoff_pending = True
             team = scorer.get("TeamNum")
             assister = (d.get("Assister") or {}).get("Name") or ""
-            imp = d.get("ImpactLocation") or {}
-            ix, iy = float(imp.get("X") or 0), float(imp.get("Y") or 0)
             isx, isy = project(ix, iy)
             speed = round(float(d.get("GoalSpeed") or 0), 0)
+            ev = {
+                "t": round(t, 2), "kind": "goal", "team": team,
+                "label": "Goal", "player": name,
+                "assister": assister, "speed": speed,
+                "sx": isx, "sy": isy,
+                "event": "Goal",
+            }
             goals_raw.append({
                 "t": round(t, 2),
                 "scorer": name,
                 "team": team,
                 "speed": speed,
                 "assister": assister,
+                "ix": ix, "iy": iy, "iz": iz,
                 "isx": isx, "isy": isy,
+                "_event": ev,
             })
-            events.append({
-                "t": round(t, 2), "kind": "goal", "team": team,
-                "label": "Goal", "player": name,
-                "assister": assister, "speed": speed,
-                "sx": isx, "sy": isy,
-                "event": "Goal",
-            })
+            events.append(ev)
 
         elif e == "CrossbarHit":
             if r["id"] not in counted_posts:
@@ -3488,6 +3570,12 @@ def _build_playback_data(store, match_id: str, started_at: float,
             if d.get("bOvertime"):
                 ts = -ts  # negative so we know it's OT
             clock_map.append([round(t, 2), ts])
+
+    # Impact points that still sit at the wrong end (no replay was watched and
+    # the live envelope's point was stale) are not trusted for the goal map.
+    for g in goals_raw:
+        g.pop("_event", None)
+        g["impact_ok"] = bool(g.pop("_replay_impact", False)) or _impact_at_attacking_end(g["team"], g["iy"])
 
     # Build pre-goal chains: last 3 BallHits before each goal.
     for g in goals_raw:
@@ -3575,6 +3663,25 @@ def _build_playback_data(store, match_id: str, started_at: float,
         if ev_key and ev_key in _RL_ICON_FOR_EVENT:
             ev["icon"] = f"/static/icons/{_q(_RL_ICON_FOR_EVENT[ev_key])}"
 
+    # Shot map: a "Shot on goal" statfeed event has no position, so place each
+    # one at the shooter's own last ball touch before it (same player, within
+    # SHOT_LOOKBACK seconds). Shots without such a touch are left off the map.
+    SHOT_LOOKBACK = 3.0
+    shots: list[dict] = []
+    for ev in events:
+        if ev.get("kind") != "shot":
+            continue
+        for idx in reversed(bh_by_t):
+            bh = ball_track[idx]
+            if bh["t"] > ev["t"]:
+                continue
+            if ev["t"] - bh["t"] > SHOT_LOOKBACK:
+                break
+            if bh["player"] == ev.get("player"):
+                shots.append({"sx": bh["sx"], "sy": bh["sy"], "x": bh["x"], "y": bh["y"],
+                              "player": bh["player"], "team": bh["team"], "t": bh["t"]})
+                break
+
     # If the duration we were given is junk (rare), fall back to the last
     # event time we recorded.
     if not duration_seconds or duration_seconds < 10:
@@ -3595,6 +3702,8 @@ def _build_playback_data(store, match_id: str, started_at: float,
         "ball_track": ball_track,
         "events": events,
         "goals": goals_raw,
+        "shots": shots,
+        "shot_events": sum(1 for ev in events if ev.get("kind") == "shot"),
         "clock_map": clock_map,
     }
 
@@ -3683,63 +3792,135 @@ def _match_compare_html(players, viewer_pid, viewer_name,
     """
 
 
-def _goal_map_html(playback: dict) -> str:
-    """Standalone goal-location map: where each goal was struck from (the
-    scorer's last touch), with the build-up traced back through the chain.
-    Reuses the shared pitch primitives (.pb-field/.pb-midline). This used to
-    live inside the now-removed ball-replay widget's 'Goals' mode."""
-    goals = playback.get("goals") or []
-    if not goals:
-        return ""
-    svg = playback["svg"]
+def _pitch_frame_svg(svg: dict) -> str:
+    """Pitch outline, halfway line, centre circle and both nets."""
     vb_w, vb_h = svg["vb_w"], svg["vb_h"]
     pad_x, pad_y = svg["pad_x"], svg["pad_y"]
     pitch_w, pitch_h = svg["pitch_w"], svg["pitch_h"]
-    layers = []
-    for gi, g in enumerate(goals):
-        chain = g.get("chain") or []
-        if not chain:
-            continue
-        color = "var(--team-blue)" if g.get("team") == 0 else "var(--team-orng)"
-        shot = chain[-2] if len(chain) >= 2 else chain[-1]  # scorer's last touch
-        tip = f'Goal {gi + 1}: {g.get("scorer") or "?"}'
-        if g.get("assister"):
-            tip += f'  (assist: {g["assister"]})'
-        if g.get("speed"):
-            tip += f'  ·  {g["speed"]} km/h'
-        pts = " ".join(f'{p["sx"]:.1f},{p["sy"]:.1f}' for p in chain)
-        layers.append(
-            f'<g class="gm-goal"><title>{html.escape(tip)}</title>'
-            f'<polyline points="{pts}" fill="none" stroke="{color}" '
-            f'stroke-width="2" stroke-dasharray="3 3" stroke-linecap="round" '
-            f'stroke-linejoin="round" stroke-opacity="0.55" />'
-            f'<circle cx="{shot["sx"]:.1f}" cy="{shot["sy"]:.1f}" r="7.5" '
-            f'fill="{color}" stroke="var(--card)" stroke-width="2" />'
-            f'<text x="{shot["sx"]:.1f}" y="{shot["sy"]:.1f}" dy="3.4" '
-            f'text-anchor="middle" fill="var(--card)" font-size="9" font-weight="800" '
-            f'style="font-family: JetBrains Mono, monospace">{gi + 1}</text>'
-            f'</g>'
-        )
-    if not layers:
-        return ""
-    pitch = (
-        f'<svg viewBox="0 0 {vb_w} {vb_h}" class="hm-pitch" xmlns="http://www.w3.org/2000/svg">'
+    return (
         f'<rect class="pb-field" x="{pad_x:.1f}" y="{pad_y:.1f}" width="{pitch_w}" height="{pitch_h}" />'
         f'<line class="pb-midline" x1="{vb_w/2:.1f}" y1="{pad_y:.1f}" '
         f'x2="{vb_w/2:.1f}" y2="{pad_y + pitch_h:.1f}" />'
         f'<circle class="pb-midcircle" cx="{vb_w/2:.1f}" cy="{vb_h/2:.1f}" r="48" fill="none" />'
-        f'{"".join(layers)}'
-        f'</svg>'
+        f'<rect class="pb-net pb-net-blue" x="{pad_x - 10:.1f}" '
+        f'y="{pad_y + pitch_h/2 - 60:.1f}" width="10" height="120" />'
+        f'<rect class="pb-net pb-net-orng" x="{pad_x + pitch_w:.1f}" '
+        f'y="{pad_y + pitch_h/2 - 60:.1f}" width="10" height="120" />'
     )
+
+
+_GOAL_HALF_W = 893.0   # half the goal mouth width (uu)
+_GOAL_H = 642.0        # goal height (uu)
+
+
+def _goal_face_svg(points: list, title: str = "", numbered: bool = True) -> str:
+    """Front view of one goal mouth, as the shooter sees it: each point has
+    gx (sideways, uu, + = shooter's right) and z (height, uu), team and n."""
+    W, H = 320, 150
+    gx0, gx1, gz0, gz1 = 30, 290, 132, 26   # net box in svg units
+    def px(gx):
+        gx = max(min(gx, _GOAL_HALF_W * 1.15), -_GOAL_HALF_W * 1.15)
+        return (gx0 + gx1) / 2 + gx / _GOAL_HALF_W * (gx1 - gx0) / 2
+    def pz(z):
+        z = max(min(z, _GOAL_H * 1.1), 0)
+        return gz0 - z / _GOAL_H * (gz0 - gz1)
+    marks = []
+    for p_ in points:
+        color = "var(--team-blue)" if p_.get("team") == 0 else (
+            "var(--team-orng)" if p_.get("team") == 1 else "var(--accent)")
+        cx, cy = px(p_["gx"]), pz(p_["z"])
+        label = (f'<text x="{cx:.1f}" y="{cy:.1f}" dy="3.4" text-anchor="middle" '
+                 f'fill="var(--card)" font-size="9" font-weight="800" '
+                 f'style="font-family: JetBrains Mono, monospace">{p_["n"]}</text>'
+                 if numbered and p_.get("n") else "")
+        marks.append(f'<g><title>{html.escape(p_.get("tip") or "")}</title>'
+                     f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="8" fill="{color}" '
+                     f'stroke="var(--card)" stroke-width="2"/>{label}</g>')
+    cap = (f'<text x="{W/2}" y="14" text-anchor="middle" font-size="11" font-weight="700" '
+           f'fill="var(--text-dim)">{html.escape(title)}</text>') if title else ""
+    return (f'<svg viewBox="0 0 {W} {H}" class="goal-face" xmlns="http://www.w3.org/2000/svg">'
+            f'{cap}'
+            f'<rect x="{gx0}" y="{gz1}" width="{gx1 - gx0}" height="{gz0 - gz1}" '
+            f'fill="var(--card-2)" stroke="var(--text-faint)" stroke-width="3"/>'
+            f'<line x1="10" y1="{gz0}" x2="{W - 10}" y2="{gz0}" stroke="var(--border-strong)" stroke-width="2"/>'
+            f'{"".join(marks)}</svg>')
+
+
+def _goal_face_points(goals: list, *, attacker_view: bool = True) -> list:
+    """Map goal impact points to goal-face coordinates as the scorer sees the
+    net: Blue attacks +Y (shooter's right = -X), Orange attacks -Y (right = +X)."""
+    # RL world axes are left-handed (Z up): facing +Y, +X is on your LEFT.
+    out = []
+    for g in goals:
+        sign = -1 if g.get("team") == 0 else 1
+        out.append({**g, "gx": g["ix"] * sign, "z": g.get("iz") or 0})
+    return out
+
+
+def _goal_map_html(playback: dict) -> str:
+    """Goal map: ONLY real goals, each drawn where the ball crossed the goal
+    line, seen from the front of the net it went into, numbered in order and
+    team-coloured. Shots and touches are never drawn here."""
+    goals = playback.get("goals") or []
+    if not goals:
+        return ""
+    items, by_net = [], {0: [], 1: []}
+    for gi, g in enumerate(goals):
+        tcls = "team-blue" if g.get("team") == 0 else "team-orng"
+        meta = []
+        if g.get("speed"):
+            meta.append(f'{g["speed"]:.0f} km/h')
+        if g.get("assister"):
+            meta.append(f'assist {html.escape(g["assister"])}')
+        items.append(
+            f'<li class="gm-item {tcls}"><span class="gm-num tnum">{gi + 1}</span>'
+            f'<b>{html.escape(g.get("scorer") or "?")}</b>'
+            f'<span class="dim">{" &middot; ".join(meta)}</span></li>')
+        if g.get("impact_ok") and g.get("team") in (0, 1):
+            pt = _goal_face_points([g])[0]
+            pt["n"] = gi + 1
+            pt["tip"] = f'Goal {gi + 1}: {g.get("scorer") or "?"}'
+            # Blue scores into Orange's net and vice versa.
+            by_net[1 - g["team"]].append(pt)
+    faces = (f'<div class="gf-pair">'
+             f'<div>{_goal_face_svg(by_net[0], "Blue net")}</div>'
+             f'<div>{_goal_face_svg(by_net[1], "Orange net")}</div></div>')
     return f"""
       <section id="goalmap" class="card">
-        <div class="section-title">
-          <span>Goal map</span>
-          <span class="dim" style="text-transform:none;letter-spacing:0">
-            Where each goal was struck from, traced back through the build-up.
-          </span>
-        </div>
-        <div style="max-width:560px;margin:8px auto 0">{pitch}</div>
+        <div class="section-title"><span>Goal map</span></div>
+        <div class="map-sub dim">Goals only: where the ball crossed the line, seen from the front of the net.</div>
+        {faces}
+        <ol class="gm-list">{"".join(items)}</ol>
+      </section>
+    """
+
+
+def _shot_map_html(playback: dict) -> str:
+    """Shots map: each 'Shot on goal' placed at the shooter's last touch."""
+    shots = playback.get("shots") or []
+    if not shots:
+        return ""
+    svg = playback["svg"]
+    vb_w, vb_h = svg["vb_w"], svg["vb_h"]
+    dots = "".join(
+        f'<circle cx="{sh["sx"]:.1f}" cy="{sh["sy"]:.1f}" r="6" '
+        f'fill="{"var(--team-blue)" if sh.get("team") == 0 else "var(--team-orng)"}" '
+        f'fill-opacity="0.85" stroke="var(--card)" stroke-width="1.5">'
+        f'<title>{html.escape(sh.get("player") or "")}</title></circle>'
+        for sh in shots)
+    b = sum(1 for sh in shots if sh.get("team") == 0)
+    o = sum(1 for sh in shots if sh.get("team") == 1)
+    pitch = (f'<svg viewBox="0 0 {vb_w} {vb_h}" class="hm-pitch" xmlns="http://www.w3.org/2000/svg">'
+             f'{_pitch_frame_svg(svg)}{dots}</svg>')
+    return f"""
+      <section id="shotmap" class="card">
+        <div class="section-title"><span>Shots</span></div>
+        <div class="map-sub dim">Each shot on goal, at the shooter's last touch.</div>
+        <div class="map-pitch">{pitch}</div>
+        <ul class="gm-list">
+          <li class="gm-item team-blue"><b class="tnum">{b}</b><span class="dim">Blue shots</span></li>
+          <li class="gm-item team-orng"><b class="tnum">{o}</b><span class="dim">Orange shots</span></li>
+        </ul>
       </section>
     """
 
@@ -4628,7 +4809,7 @@ def _touch_spots_svg(playback: dict, player_filter: str | None = None,
              if bh.get("team") == 1 else bh)
             for bh in ball
         ]
-    r = 3.2 if compact else 4.5
+    r = 9 if compact else 7
     dots = "".join(
         f'<circle class="tspot" cx="{bh["sx"]:.1f}" cy="{bh["sy"]:.1f}" r="{r}"/>'
         for bh in ball
@@ -4651,73 +4832,94 @@ def _touch_spots_svg(playback: dict, player_filter: str | None = None,
     )
 
 
+_HEAT_RAMPS = {
+    # (R, G, B, A) tables sampled at 8 evenly spaced density levels, sparse->dense.
+    0: ("0.05 0.06 0.10 0.18 0.34 0.58 0.82 1", "0.10 0.28 0.46 0.62 0.76 0.88 0.95 1",
+        "0.30 0.55 0.78 0.92 0.99 1 1 1"),
+    1: ("0.25 0.50 0.74 0.92 1 1 1 1", "0.08 0.20 0.36 0.52 0.68 0.82 0.92 1",
+        "0.05 0.06 0.09 0.16 0.28 0.48 0.74 1"),
+    None: ("0.13 0.10 0.12 0.34 0.74 0.97 1 1", "0.09 0.36 0.66 0.86 0.89 0.70 0.40 0.18",
+           "0.28 0.69 0.73 0.43 0.17 0.06 0.05 0.12"),
+}
+_HEAT_ALPHA = "0 0.55 0.72 0.84 0.90 0.95 0.98 1"
+
+
+def _heat_png_data_uri(ball: list, svg: dict, team, compact: bool) -> str:
+    """Density image for a heatmap, computed server-side.
+
+    Touches are binned onto a grid over the pitch, smoothed with a Gaussian and
+    normalised to the busiest cell, so the hottest spot always reaches the top
+    of the colour ramp whatever the touch count. (The old in-browser SVG filter
+    used a fixed opacity per touch: with a few dozen touches nothing got past
+    the faint end of the ramp, and the filter region clipped the blobs.)
+    Returned as a small PNG data URI that the browser scales up smoothly."""
+    import base64, math, struct, zlib
+    nx, ny = 100, 40
+    pad_x, pad_y = svg["pad_x"], svg["pad_y"]
+    pw, ph = svg["pitch_w"], svg["pitch_h"]
+    grid = [[0.0] * nx for _ in range(ny)]
+    for bh in ball:
+        gx = int((bh["sx"] - pad_x) / pw * nx)
+        gy = int((bh["sy"] - pad_y) / ph * ny)
+        grid[min(max(gy, 0), ny - 1)][min(max(gx, 0), nx - 1)] += 1.0
+    n = len(ball)
+    sigma = (2.2 if compact else 2.6) if n < 80 else (1.8 if n < 400 else 1.4)
+    rad = int(math.ceil(sigma * 3))
+    ker = [math.exp(-(k * k) / (2 * sigma * sigma)) for k in range(-rad, rad + 1)]
+    tmp = [[sum(row[x + k - rad] * ker[k] for k in range(len(ker)) if 0 <= x + k - rad < nx)
+            for x in range(nx)] for row in grid]
+    dens = [[sum(tmp[y + k - rad][x] * ker[k] for k in range(len(ker)) if 0 <= y + k - rad < ny)
+             for x in range(nx)] for y in range(ny)]
+    peak = max(max(r) for r in dens) or 1.0
+    rr, gg, bb = (list(map(float, t.split())) for t in _HEAT_RAMPS.get(team, _HEAT_RAMPS[None]))
+    aa = list(map(float, _HEAT_ALPHA.split()))
+
+    def lut(tab, v):
+        f = v * (len(tab) - 1)
+        i = min(int(f), len(tab) - 2)
+        return tab[i] + (tab[i + 1] - tab[i]) * (f - i)
+
+    raw = bytearray()
+    for y in range(ny):
+        raw.append(0)
+        for x in range(nx):
+            v = (dens[y][x] / peak) ** 0.75  # lift mid densities a little
+            if v < 0.03:
+                raw += b"\x00\x00\x00\x00"
+                continue
+            raw += bytes((int(lut(rr, v) * 255), int(lut(gg, v) * 255),
+                          int(lut(bb, v) * 255), int(lut(aa, v) * 255)))
+
+    def chunk(t, d):
+        c = struct.pack(">I", len(d)) + t + d
+        return c + struct.pack(">I", zlib.crc32(t + d) & 0xFFFFFFFF)
+    png = (b"\x89PNG\r\n\x1a\n"
+           + chunk(b"IHDR", struct.pack(">IIBBBBB", nx, ny, 8, 6, 0, 0, 0))
+           + chunk(b"IDAT", zlib.compress(bytes(raw), 9))
+           + chunk(b"IEND", b""))
+    return "data:image/png;base64," + base64.b64encode(png).decode()
+
+
 def _heat_pitch_svg(ball: list, svg: dict, compact: bool, key: str,
                     team: int | None = None, legend_label: str = "touches") -> str:
-    """Render ONE density pitch for a list of touches (one team's, or all of
-    them when only one team is present). `team` picks the colour ramp: 0=blue,
-    1=orange, None=legacy thermal (ball-only maps)."""
+    """Render ONE density pitch for a list of touches. `team` picks the colour
+    ramp: 0=blue, 1=orange, None=thermal."""
     if not ball:
         return ""
     vb_w, vb_h = svg["vb_w"], svg["vb_h"]
     pad_x, pad_y = svg["pad_x"], svg["pad_y"]
     pitch_w, pitch_h = svg["pitch_w"], svg["pitch_h"]
-    # Per-point opacity adapts to touch count so a ~40-touch mini and a dense
-    # lifetime map both land in a readable density band. Sparse data can't be
-    # both smooth AND warm, so minis stay tight (warm marks) while dense maps use
-    # a wider blur + lower opacity (hot zones emerge instead of saturating).
-    n = len(ball)
-    pt_opacity = max(0.06, min(0.60, 2.4 / (n ** 0.5)))
-    pt_r  = 5 if compact else 6
-    blur  = 4 if compact else 13
     sfx = f"-{key}" if key else ""
-    heat_id = f"heat{sfx}"
-    pts = "".join(
-        f'<circle cx="{bh["sx"]:.1f}" cy="{bh["sy"]:.1f}" r="{pt_r}" '
-        f'fill="#000" fill-opacity="{pt_opacity:.3f}"/>'
-        for bh in ball
-    )
-    # Blur the splats into a density field, copy density into every channel, then
-    # recolour sparse->dense through a SINGLE-HUE ramp keyed to the team, so a
-    # "Blue" pitch reads blue and an "Orange" pitch reads orange (peaks go
-    # white-hot for legibility). team=None keeps the legacy thermal rainbow.
-    alpha = "0 0.42 0.66 0.82 0.90 0.95 0.98 1"
-    if team == 0:        # blue: deep blue -> cyan -> white-hot
-        fr = "0.05 0.06 0.10 0.18 0.34 0.58 0.82 1"
-        fg = "0.10 0.28 0.46 0.62 0.76 0.88 0.95 1"
-        fb = "0.30 0.55 0.78 0.92 0.99 1 1 1"
-    elif team == 1:      # orange: deep orange -> amber -> white-hot
-        fr = "0.25 0.50 0.74 0.92 1 1 1 1"
-        fg = "0.08 0.20 0.36 0.52 0.68 0.82 0.92 1"
-        fb = "0.05 0.06 0.09 0.16 0.28 0.48 0.74 1"
-    else:                # legacy thermal: indigo -> blue -> teal -> green -> yellow -> red
-        fr = "0.13 0.10 0.12 0.34 0.74 0.97 1 1"
-        fg = "0.09 0.36 0.66 0.86 0.89 0.70 0.40 0.18"
-        fb = "0.28 0.69 0.73 0.43 0.17 0.06 0.05 0.12"
-    defs = (
-        f'<defs>'
-        f'<filter id="{heat_id}" x="-15%" y="-15%" width="130%" height="130%" '
-        f'color-interpolation-filters="sRGB">'
-        f'<feGaussianBlur in="SourceGraphic" stdDeviation="{blur}" result="b"/>'
-        f'<feColorMatrix in="b" type="matrix" '
-        f'values="0 0 0 2.6 0  0 0 0 2.6 0  0 0 0 2.6 0  0 0 0 2.6 0" result="d"/>'
-        f'<feComponentTransfer in="d">'
-        f'<feFuncR type="table" tableValues="{fr}"/>'
-        f'<feFuncG type="table" tableValues="{fg}"/>'
-        f'<feFuncB type="table" tableValues="{fb}"/>'
-        f'<feFuncA type="table" tableValues="{alpha}"/>'
-        f'</feComponentTransfer>'
-        f'</filter>'
-        f'</defs>'
-    )
+    img = _heat_png_data_uri(ball, svg, team, compact)
     legend = "" if compact else _heat_legend_svg(vb_w, vb_h, sfx, team, label=legend_label)
     pitch_cls = "hm-pitch hm-pitch-compact" if compact else "hm-pitch"
     return (
         f'<svg viewBox="0 0 {vb_w} {vb_h}" class="{pitch_cls}" '
         f'xmlns="http://www.w3.org/2000/svg">'
-        f'{defs}'
         f'<rect class="pb-field" x="{pad_x:.1f}" y="{pad_y:.1f}" '
         f'width="{pitch_w}" height="{pitch_h}" />'
-        f'<g filter="url(#{heat_id})">{pts}</g>'
+        f'<image href="{img}" x="{pad_x:.1f}" y="{pad_y:.1f}" width="{pitch_w}" '
+        f'height="{pitch_h}" preserveAspectRatio="none" style="image-rendering:auto" />'
         f'<line class="pb-midline" x1="{vb_w/2:.1f}" y1="{pad_y:.1f}" '
         f'x2="{vb_w/2:.1f}" y2="{pad_y + pitch_h:.1f}" />'
         f'<circle class="pb-midcircle" cx="{vb_w/2:.1f}" cy="{vb_h/2:.1f}" r="48" fill="none" />'
@@ -5065,7 +5267,7 @@ def _player_breakdown_html(store, primary_id: str | None, name: str | None,
         return thirds.get(key, 0) / t * 100 if t else None
 
     def num(v, fmt):
-        return fmt.format(v) if isinstance(v, (int, float)) else "n/a"
+        return fmt.format(v) if isinstance(v, (int, float)) else "\u2014"
 
     gp = (d.get("goal_participation_num", 0) / d["goal_participation_den"] * 100) \
         if d.get("goal_participation_den") else None
@@ -5075,7 +5277,7 @@ def _player_breakdown_html(store, primary_id: str | None, name: str | None,
     boost_tot = r.get("boost_used") if ticks >= 1000 else None
     boost_avg = sd(r.get("boost_used"), m) if ticks >= 1000 else None
     dg, dr = d.get("demos_given", 0), d.get("demos_received", 0)
-    kd = "∞" if (dr == 0 and dg > 0) else (f"{dg / dr:.2f}" if dr else "n/a")
+    kd = "∞" if (dr == 0 and dg > 0) else (f"{dg / dr:.2f}" if dr else "\u2014")
 
     sections = [
         ("Volume", "single", [
@@ -5125,10 +5327,10 @@ def _player_breakdown_html(store, primary_id: str | None, name: str | None,
         ]),
         ("Movement (where they are on the field)", "single", [
             ("Supersonic %", num(tickpct(r.get('ticks_super')), "{:.1f}%")),
-            ("Time in air %", num(tickpct(r.get('ticks_air')), "{:.1f}%")),
+            ("Time in air %", num(tickpct(r.get('ticks_air')) if r.get('ticks_air') else None, "{:.1f}%")),
             ("Time on wall %", num(tickpct(r.get('ticks_wall')), "{:.1f}%")),
             ("Time on ground %", num(tickpct(r.get('ticks_ground')), "{:.1f}%")),
-            ("Avg speed", num(avg_speed, "{:.1f}")),
+            ("Avg speed (km/h)", num(avg_speed, "{:.1f}")),
         ]),
         ("Boost (total · per match)", "totavg", [
             ("Boost used", num(boost_tot, "{:,.0f}"), num(boost_avg, "{:,.0f}")),
@@ -5139,7 +5341,6 @@ def _player_breakdown_html(store, primary_id: str | None, name: str | None,
             ("Time at 100 boost %", num(tickpct(r.get('ticks_full')), "{:.1f}%")),
         ]),
         ("Ball positioning (across matches)", "single", [
-            ("Ball touches", num(td.get('touches') if td else None, "{:,.0f}")),
             ("Defensive third %", num(third('def'), "{:.1f}%")),
             ("Neutral third %", num(third('neu'), "{:.1f}%")),
             ("Offensive third %", num(third('off'), "{:.1f}%")),
@@ -5160,7 +5361,7 @@ def _player_breakdown_html(store, primary_id: str | None, name: str | None,
             else:
                 label, tot, avg = mrow
                 avg_html = (f'<div class="compare-avg">{avg} / match</div>'
-                            if avg != "n/a" else "")
+                            if avg != "\u2014" else "")
                 out.append(
                     f'<tr><td class="compare-metric">{_stat_icon_html(label)}{label}</td>'
                     f'<td class="compare-val compare-totavg">'
@@ -5227,6 +5428,10 @@ def _compare_page_html(store, slots: list[str], *, self_name: str | None = None,
     # actually moves the maps.
     shot_data = [
         _lifetime_shot_data(store, slot_name, scopes[i]) if slot_name else None
+        for i, slot_name in enumerate(slots)
+    ]
+    goal_data = [
+        _lifetime_goal_data(store, slot_name, scopes[i]) if slot_name else None
         for i, slot_name in enumerate(slots)
     ]
     # Heatmaps share the sampled `touch_data` (already scoped to scopes[i]) so the
@@ -5402,12 +5607,14 @@ def _compare_page_html(store, slots: list[str], *, self_name: str | None = None,
             ("Supersonic %",     lambda v: f"{v*100:.1f}%",
              [pct_if(r.get("ticks"), r.get("ticks_super"))  for r in rows], True),
             ("Time in air %",    lambda v: f"{v*100:.1f}%",
-             [pct_if(r.get("ticks"), r.get("ticks_air"))    for r in rows], True),
+             # 0 in-air ticks = not recorded by the feed -> dash, never 0%.
+             [pct_if(r.get("ticks"), r.get("ticks_air")) if r.get("ticks_air") else None
+              for r in rows], True),
             ("Time on wall %",   lambda v: f"{v*100:.1f}%",
              [pct_if(r.get("ticks"), r.get("ticks_wall"))   for r in rows], True),
             ("Time on ground %", lambda v: f"{v*100:.1f}%",
              [pct_if(r.get("ticks"), r.get("ticks_ground")) for r in rows], False),
-            ("Avg speed",        lambda v: f"{v:.1f}",
+            ("Avg speed (km/h)", lambda v: f"{v:.1f}",
              [safe_div(r.get("speed_sum"), r.get("ticks")) if (r.get("ticks") or 0) >= 1000 else None for r in rows], True),
         ]),
         ("Boost (total · per match)", "totavg", [
@@ -5426,8 +5633,6 @@ def _compare_page_html(store, slots: list[str], *, self_name: str | None = None,
              [pct_if(r.get("ticks"), r.get("ticks_full")) for r in rows], True),
         ]),
         ("Ball positioning (across matches)", "single", [
-            ("Ball touches",      lambda v: f"{v:,.0f}",
-             [td.get("touches") if td else None for td in touch_data], True),
             ("Defensive third %", lambda v: f"{v:.1f}%", def_pct_vals, False),
             ("Neutral third %",   lambda v: f"{v:.1f}%", neu_pct_vals, True),
             ("Offensive third %", lambda v: f"{v:.1f}%", off_pct_vals, True),
@@ -5473,7 +5678,7 @@ def _compare_page_html(store, slots: list[str], *, self_name: str | None = None,
         )
         if kind == "single":
             for label, formatter, values, higher_better in section_metrics:
-                formatted = [(formatter(v) if isinstance(v, (int, float)) else "n/a") for v in values]
+                formatted = [(formatter(v) if isinstance(v, (int, float)) else "\u2014") for v in values]
                 classes = winner_classes(values, higher_better)
                 cells = [f'<td class="compare-metric">{_stat_icon_html(label)}{label}</td>']
                 for v, c in zip(formatted, classes):
@@ -5489,7 +5694,7 @@ def _compare_page_html(store, slots: list[str], *, self_name: str | None = None,
                 classes = winner_classes(avg_vals, higher_better)
                 cells = [f'<td class="compare-metric">{_stat_icon_html(label)}{label}</td>']
                 for tot, avg, c in zip(totals_vals, avg_vals, classes):
-                    tot_s = f_tot(tot) if isinstance(tot, (int, float)) else "n/a"
+                    tot_s = f_tot(tot) if isinstance(tot, (int, float)) else "\u2014"
                     avg_s = (f_avg(avg) + " / match") if isinstance(avg, (int, float)) else ""
                     cls = ("compare-val compare-totavg " + c).strip()
                     cells.append(
@@ -5518,7 +5723,7 @@ def _compare_page_html(store, slots: list[str], *, self_name: str | None = None,
         <button type="submit" class="copy-btn" style="padding:8px 18px;font-size:12px">Compare</button>
       </form>
 
-      {_compare_heatmap_row(slots, touch_data_hm, shot_data, scope_label=(f"last {last_n}" if last_n else "lifetime"))}
+      {_compare_heatmap_row(slots, touch_data_hm, shot_data, goal_data, scope_label=(f"last {last_n}" if last_n else "lifetime"))}
 
       <div class="card" style="padding:0;overflow:hidden;margin-top:16px">
         <table class="compare-table">
@@ -5532,21 +5737,20 @@ def _compare_page_html(store, slots: list[str], *, self_name: str | None = None,
 
 
 def _compare_heatmap_row(slots: list, touch_data: list, shot_data: list | None = None,
+                         goal_data: list | None = None,
                          scope_label: str = "lifetime") -> str:
-    """Per-slot heatmaps with a TYPE dropdown (touch map / shot map). Both maps
-    render per card; the dropdown toggles which is visible (JS). Skipped entirely
-    if no slot has any touch data. `scope_label` ("lifetime" / "last 20" / …) is
-    shown in the heading so it tracks the active Sample window."""
+    """Per-slot maps with a type toggle: Touch map (density), Goal map (real
+    goals only, where the ball crossed the line) and Shots (each shot on goal
+    at the shooter's last touch). Skipped if no slot has any touch data."""
     if not any(td and td.get("touches") for td in touch_data):
         return ""
     shot_data = shot_data or [None] * len(slots)
-    any_shots = any(sd and sd.get("shots") for sd in shot_data)
+    goal_data = goal_data or [None] * len(slots)
     cards = []
     for i, slot in enumerate(slots):
         td = touch_data[i] if i < len(touch_data) else None
         sd = shot_data[i] if i < len(shot_data) else None
-        # slot is a raw, user-controlled player name — escape once here since
-        # label flows into both element text and a title="" attribute below.
+        gd = goal_data[i] if i < len(goal_data) else None
         label = html.escape(slot or f"(empty slot {i+1})")
         if not td or not td.get("touches"):
             cards.append(
@@ -5556,41 +5760,40 @@ def _compare_heatmap_row(slots: list, touch_data: list, shot_data: list | None =
             continue
         name_slug = "".join(ch if ch.isalnum() else "_" for ch in slot)
         touch_hm = _ball_heatmap_svg(td, compact=True, key=f"cmp-t-{name_slug}")
-        shot_hm = (_ball_heatmap_svg(sd, compact=True, key=f"cmp-s-{name_slug}", exclude_center=False)
-                   if sd and sd.get("shots") else '<div class="compare-hm-empty">No goals yet.</div>')
+        goal_hm = (_spot_map_svg(gd, compact=True) if gd and gd.get("count")
+                   else '<div class="compare-hm-empty">No goals yet.</div>')
+        shot_hm = (_spot_map_svg(sd, compact=True) if sd and sd.get("count")
+                   else '<div class="compare-hm-empty">No shots yet.</div>')
         cards.append(
             f'<div class="compare-hm-card">'
             f'<div class="compare-hm-head" title="{label}">{label}</div>'
             f'<div class="compare-hm-body cmp-hm cmp-hm-touch">{touch_hm}</div>'
+            f'<div class="compare-hm-body cmp-hm cmp-hm-goal" style="display:none">{goal_hm}</div>'
             f'<div class="compare-hm-body cmp-hm cmp-hm-shot" style="display:none">{shot_hm}</div>'
             f'</div>'
         )
-    # Segmented button toggle (matches the site's .seg control) instead of a
-    # native <select>, which didn't match the UI. Touch map is the default view.
     selector = (
-        '<div class="seg cmp-hm-seg" title="Heatmap type">'
-        '<button type="button" class="cmp-hm-btn active" data-hm="touch"'
-        ' title="Where they touch the ball">Touch map</button>'
-        '<button type="button" class="cmp-hm-btn" data-hm="shot"'
-        ' title="Where they score from">Shot map</button>'
-        '</div>') if any_shots else ""
+        '<div class="seg cmp-hm-seg" title="Map type">'
+        '<button type="button" class="cmp-hm-btn active" data-hm="touch">Touches</button>'
+        '<button type="button" class="cmp-hm-btn" data-hm="goal">Goals</button>'
+        '<button type="button" class="cmp-hm-btn" data-hm="shot">Shots</button>'
+        '</div>')
     js = ("<script>(function(){var btns=document.querySelectorAll('.cmp-hm-btn');"
           "if(!btns.length)return;"
           "btns.forEach(function(b){b.addEventListener('click',function(){"
           "var v=b.dataset.hm;"
           "btns.forEach(function(x){x.classList.toggle('active',x===b);});"
-          "document.querySelectorAll('.cmp-hm-touch').forEach(function(e){e.style.display=v==='touch'?'':'none';});"
-          "document.querySelectorAll('.cmp-hm-shot').forEach(function(e){e.style.display=v==='shot'?'':'none';});"
-          "});});})();</script>"
-          ) if any_shots else ""
+          "['touch','goal','shot'].forEach(function(k){"
+          "document.querySelectorAll('.cmp-hm-'+k).forEach(function(e){e.style.display=v===k?'':'none';});});"
+          "});});})();</script>")
     return f"""
       <div class="card" style="margin-top:16px">
         <div class="section-title">
-          <span>Heatmaps ({scope_label})</span>
+          <span>Maps ({scope_label})</span>
           {selector}
         </div>
         <div class="section-sub dim" style="margin:-4px 0 10px;text-transform:none;letter-spacing:0">
-          Rotated so each player attacks &#8594; (right). Brighter = more.
+          Each player attacks right. Goals: where the ball crossed the line. Shots: the shooter's last touch.
         </div>
         <div class="compare-hm-row">{"".join(cards)}</div>
         {js}
@@ -6431,34 +6634,33 @@ def _clan_page_html(store, members: list[str], *, self_name: str | None = None,
           </tr>
         """)
 
-    # Combined SHOT heatmap: union of every member's goal-shot locations (where
-    # the club scores from). The merged TOUCH heatmap was a useless dense blob;
-    # shots are sparse + meaningful.
-    merged_shots = []
+    # Club Goal map (real goals only, where the ball crossed the line) and a
+    # separate Shots map. Shots and touches are never labelled as goals.
+    merged_goals, merged_shots = [], []
     for nm in members:
-        sd = _lifetime_shot_data(store, nm)
-        merged_shots.extend(sd.get("ball_track") or [])
-    combined = {
-        "ball_track": merged_shots,
-        "svg": {"vb_w": 880, "vb_h": 380, "pitch_w": 800, "pitch_h": 320,
-                "pad_x": 40.0, "pad_y": 30.0},
-    }
-    heatmap_svg = _ball_heatmap_svg(combined, key="clan", exclude_center=False, legend_label="goals") if merged_shots else ""
-    heatmap_html = (
-        f"""
-          <div class="card" style="margin-top:14px">
-            <div class="section-title">
-              <span>Where the club scores from</span>
-              <span class="dim" style="text-transform:none;letter-spacing:0">
-                Shot location of {len(merged_shots)} goal{'s' if len(merged_shots) != 1 else ''}
-                across every match these {len(members)} players appeared in,
-                rotated so the club attacks &#8594; (right).
-              </span>
-            </div>
-            <div class="hm-wrap">{heatmap_svg}</div>
+        merged_goals.extend(_lifetime_goal_data(store, nm).get("ball_track") or [])
+        merged_shots.extend(_lifetime_shot_data(store, nm).get("ball_track") or [])
+    _svg = {"vb_w": 880, "vb_h": 380, "pitch_w": 800, "pitch_h": 320,
+            "pad_x": 40.0, "pad_y": 30.0}
+
+    def _club_map(title: str, sub: str, pts: list, kind: str = "") -> str:
+        if not pts:
+            return ""
+        return f"""
+          <div class="card">
+            <div class="section-title"><span>{title}</span></div>
+            <div class="map-sub dim">{sub}</div>
+            <div class="map-pitch">{_spot_map_svg({"ball_track": pts, "svg": _svg, "kind": kind})}</div>
           </div>
-        """ if heatmap_svg else ""
-    )
+        """
+    heatmap_html = '<div class="md-maps" style="margin-top:14px">' + (
+        _club_map("Goal map",
+                  f"{len(merged_goals)} goal{'s' if len(merged_goals) != 1 else ''} by "
+                  f"{len(members)} member{'s' if len(members) != 1 else ''}: where the ball crossed the line, seen from the front of the net.",
+                  merged_goals, "goals")
+        + _club_map("Shots",
+                    f"{len(merged_shots)} shot{'s' if len(merged_shots) != 1 else ''} on goal, "
+                    f"at the shooter's last touch. Attacking right.", merged_shots)) + '</div>'
 
     # Recent clan matches list (last 20).
     mvps_lookup = _match_mvp_lookup(store, [cm["id"] for cm in clan_matches[:20]])
@@ -7647,6 +7849,9 @@ section, .card {
 }
 .chip.win,  .chip.good { color: var(--good); border-color: rgba(52, 211, 153, 0.35); background: rgba(52, 211, 153, 0.10); }
 .chip.loss, .chip.bad  { color: var(--bad);  border-color: rgba(248, 113, 113, 0.32); background: rgba(248, 113, 113, 0.08); }
+.match-hero .middle .hero-mvp { flex-wrap: wrap; justify-content: center; }
+.match-hero .middle .hero-mvp-name { max-width: none !important; white-space: normal !important; overflow: visible !important; overflow-wrap: anywhere; }
+.hero-mvp-note { display: block; flex-basis: 100%; text-align: center; margin-top: 2px; font-size: 11px; color: var(--text-faint); text-transform: none; letter-spacing: 0; font-weight: 500; }
 .chip.mvp,  .mvp       { color: var(--accent); border-color: var(--accent-line); background: var(--accent-soft); display: inline-flex; padding: 3px 8px; border-radius: 0; font-size: 10px; font-weight: 800; letter-spacing: 0.06em; }
 .chip.bot,  .tag       { color: var(--text-faint); border: 1px solid var(--border-strong); padding: 2px 6px; border-radius: 0; font-size: 9px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
 .chip.blue { color: var(--team-blue); border-color: rgba(45,125,255,0.35); background: var(--team-blue-soft); }
@@ -8387,6 +8592,42 @@ time { white-space: nowrap; }
 /* Swappable section panes — only the active pane shows (a real SPA, not scroll). */
 .md-pane { display: none; }
 .md-pane.active { display: block; }
+.md-section { margin-top: 16px; }
+.md-section > .card + .card { margin-top: 16px; }
+.md-maps { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: stretch; }
+.md-maps > .card { margin: 0 !important; }
+.md-maps .goal-face { margin-top: 24px; }
+.md-maps > .card + .card { margin-top: 0; }
+@media (max-width: 900px) { .md-maps { grid-template-columns: minmax(0, 1fr); } }
+.map-sub { font-size: 12px; margin: -2px 0 10px; text-transform: none; letter-spacing: 0; }
+.map-pitch { width: 100%; }
+.gf-pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+.goal-face { width: 100%; height: auto; display: block; }
+.map-pitch svg { width: 100%; height: auto; display: block; }
+.gm-list { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.gm-item { display: grid; grid-template-columns: 22px minmax(0, 1fr); column-gap: 6px; font-size: 13px; }
+.gm-item > b, .gm-item > .dim { grid-column: 2; overflow-wrap: anywhere; }
+.gm-item > .gm-num + b { grid-column: 2; }
+#shotmap .gm-item { grid-template-columns: 22px minmax(0, 1fr); }
+#shotmap .gm-item > b { grid-column: 1; }
+@media (max-width: 600px) {
+  .roster-card table thead, .bs-table thead { display: none; }
+  .roster-card table, .roster-card tbody, .bs-table, .bs-table tbody { display: block; width: 100%; }
+  .roster-card table tr, .bs-table tr { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px 8px; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+  .roster-card table td, .bs-table td { display: block; padding: 0 !important; border: 0 !important; text-align: left !important; }
+  .roster-card table td.player-cell, .bs-table td.player-cell { grid-column: 1 / -1; }
+  .roster-card table td.mvp-td:empty { display: none; }
+  .roster-card table td.mvp-td { grid-column: 1 / -1; }
+  .roster-card table td[data-label]::before, .bs-table td[data-label]::before {
+    content: attr(data-label); display: block; font-size: 10px; letter-spacing: 0.04em;
+    text-transform: uppercase; color: var(--text-faint); font-family: inherit; }
+  .bs-card .tscroll { overflow: visible; }
+}
+.gm-item b { color: inherit; }
+.gm-item.team-blue b { color: var(--team-blue); }
+.gm-item.team-orng b { color: var(--team-orng); }
+.gm-num { display: inline-flex; justify-content: center; min-width: 18px; font-weight: 800; color: var(--text-faint); }
 .md-rosters { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: start; }
 @media (max-width: 760px) { .md-rosters { grid-template-columns: 1fr; } }
 .mn-target, #timeline, #goalmap, .radar-card[id] { scroll-margin-top: 64px; }
@@ -8414,7 +8655,11 @@ time { white-space: nowrap; }
 .bs-table tr.team-orng .bs-sw { background: var(--team-orng); }
 .bs-table tr.team-blue td.player-cell { box-shadow: inset 3px 0 0 var(--team-blue); }
 .bs-table tr.team-orng td.player-cell { box-shadow: inset 3px 0 0 var(--team-orng); }
-.bs-tmap-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; }
+.bs-tmap-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 600px) { .bs-tmap-grid { grid-template-columns: minmax(0, 1fr); } }
+.bs-tmap svg { width: 100%; height: auto; display: block; }
+.pb-events.pb-events-full { max-height: none; overflow: visible; }
+.pb-events .pb-event, .gm-list li, .tp-list li, .rc-stat-line li { max-width: none; }
 .bs-tmap { border: 1px solid var(--accent-line); border-radius: 8px; padding: 6px; }
 .bs-tmap-name { font-size: 11px; font-weight: 600; margin-bottom: 4px; }
 .bs-tmap.team-blue .bs-tmap-name { color: var(--team-blue); }
@@ -8949,6 +9194,14 @@ p, li { max-width: 72ch; }
 .compare-table col.compare-col-metric { width: 220px; }
 .compare-table col.compare-col-slot   { width: auto; }
 .compare-table col.compare-col-pro    { width: 110px; }
+@media (max-width: 600px) {
+  .compare-table col.compare-col-metric { width: 34%; }
+  .compare-table col.compare-col-pro { width: 0; }
+  .compare-table th.compare-pro-col, .compare-table td.compare-pro-val { display: none; }
+  .compare-table thead th, .compare-table tbody td { padding: 8px 6px !important; font-size: 12px; }
+  .compare-table thead th.compare-col { overflow-wrap: anywhere; word-break: break-word; white-space: normal; }
+  .compare-table td.compare-val { word-break: normal; overflow-wrap: anywhere; }
+}
 
 /* Pro benchmark column: text-only, italic, lower contrast — reads as a
    reference, not a participating stat. */
@@ -9222,11 +9475,10 @@ body.compact th, body.compact td { padding: 7px 10px; }
   min-width: 0;
 }
 .roster-card .roster-team > span:not(.roster-stripe):not(.chip) {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 320px;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
+.roster-card .roster-team { flex-wrap: wrap; }
 
 /* Radar-card team accents: left border in team color */
 .radar-card.team-blue { border-left: 4px solid var(--team-blue); }
