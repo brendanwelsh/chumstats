@@ -668,6 +668,11 @@ class ComparisonResult:
     rows: list[CompareRow] = field(default_factory=list)
 
 
+# Share of the match's best-tracked player's ticks a row needs before its
+# movement/boost numbers count (see _lifetime_row).
+COVERAGE_MIN = 0.8
+
+
 def _lifetime_row(con, primary_id: str | None, name: str | None,
                   *, mode_filter: int | None = None,
                   window_days: int | None = None,
@@ -714,18 +719,26 @@ def _lifetime_row(con, primary_id: str | None, name: str | None,
             SUM(demos)    AS demos,
             SUM(score)    AS score,
             SUM(touches)  AS touches,
-            SUM(ticks_total)       AS ticks,
-            SUM(ticks_on_wall)     AS ticks_wall,
-            SUM(ticks_in_air)      AS ticks_air,
-            SUM(ticks_on_ground)   AS ticks_ground,
-            SUM(ticks_supersonic)  AS ticks_super,
-            SUM(ticks_boosting)    AS ticks_boosting,
-            SUM(ticks_zero_boost)  AS ticks_zero,
-            SUM(ticks_full_boost)  AS ticks_full,
-            SUM(speed_sum)         AS speed_sum,
-            MAX(speed_max)         AS speed_max,
-            SUM(boost_used)        AS boost_used
-        FROM match_player_stats mps
+            -- Movement/boost only from matches where the feed tracked this
+            -- player for (nearly) the whole game. The game sends car state for
+            -- the recording player and teammates; opponents arrive only in
+            -- scraps, which would skew their percentages.
+            SUM(cov)                                         AS tracked_matches,
+            SUM(CASE WHEN cov THEN ticks_total ELSE 0 END)      AS ticks,
+            SUM(CASE WHEN cov THEN ticks_on_wall ELSE 0 END)    AS ticks_wall,
+            SUM(CASE WHEN cov THEN ticks_in_air ELSE 0 END)     AS ticks_air,
+            SUM(CASE WHEN cov THEN ticks_on_ground ELSE 0 END)  AS ticks_ground,
+            SUM(CASE WHEN cov THEN ticks_supersonic ELSE 0 END) AS ticks_super,
+            SUM(CASE WHEN cov THEN ticks_boosting ELSE 0 END)   AS ticks_boosting,
+            SUM(CASE WHEN cov THEN ticks_zero_boost ELSE 0 END) AS ticks_zero,
+            SUM(CASE WHEN cov THEN ticks_full_boost ELSE 0 END) AS ticks_full,
+            SUM(CASE WHEN cov THEN speed_sum ELSE 0 END)        AS speed_sum,
+            MAX(CASE WHEN cov THEN speed_max ELSE 0 END)        AS speed_max,
+            SUM(CASE WHEN cov THEN boost_used ELSE 0 END)       AS boost_used
+        FROM (SELECT x.*, (x.ticks_total > 0 AND x.ticks_total >= 
+                  {COVERAGE_MIN} * (SELECT MAX(y.ticks_total) FROM match_player_stats y
+                                    WHERE y.match_id = x.match_id)) AS cov
+              FROM match_player_stats x) mps
         JOIN matches m ON m.id = mps.match_id
         WHERE mps.{where}{extras}
     """, params).fetchone()

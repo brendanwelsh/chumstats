@@ -78,13 +78,47 @@ It captures what's actually on that socket, and deliberately stops there:
 | Crossbar hits with ball location + impact force | yes |
 | Ball‑hit events with XYZ → the **touch heatmap** | yes |
 | Boost % per player at 30&nbsp;Hz | yes |
-| Time on wall / ground / in air %, boost used, supersonic %, avg + max speed | yes — derived from tick state |
+| Time on wall / ground / in air %, boost used, supersonic %, avg + max speed | you and teammates — derived from tick state |
 | Bot detection · online‑vs‑offline · cross‑platform IDs (Steam / Epic / PS / Xbox / Switch) | yes |
 | MMR / rank / season standings | **no** — Psyonix doesn't emit them on this socket |
 | Per‑tick player XYZ, camera settings, boost‑pickup maps | **no** — not exposed by the live API |
 
 > Those last two need replay‑file parsing or external services. chumstats isn't chasing parity with
 > replay sites — if you want them, stop the project, play, and read the in‑game scoreboard.
+
+## Where each stat comes from (reliability pass, 11/13/2026)
+
+Everything comes from Rocket League's local Stats API on the recording PC. Three feeds inside it:
+
+- **Scoreboard** (`UpdateState.Players`): goals, assists, saves, shots, demos delivered, touches,
+  score, MVP, team. Sent for **every player** in the match.
+- **Stat feed** (`StatfeedEvent`): demos received (Demolish victim), epic saves (a subset of saves),
+  saviors (3 saves in a match), aerial/long/backwards goals, bicycle hits, hat tricks, low fives,
+  shots on goal. Sent for every player, keyed by **name** (no id).
+- **Events** (`BallHit`, `GoalScored`, `CrossbarHit`): touch positions, hardest hit, goal speed,
+  where goals crossed the line, posts. Every player, keyed by name.
+- **Car state** (`bOnGround`, `bOnWall`, `bHasCar`, `Speed`, `Boost`): time on ground / wall / in
+  air, supersonic, avg speed, boost used, BPM, time boosting, time at 100. Sent for the recording
+  player and teammates for the whole match; opponents arrive only in scraps, so a row counts only
+  when it covers at least 80% of the best-tracked player's ticks in that match
+  (`analytics.COVERAGE_MIN`). Otherwise the page says **not tracked** with the reason on hover.
+- The game **omits a boolean when it is false**. Air = a tick with `bHasCar` and neither
+  `bOnGround` nor `bOnWall`; a wall contact also arrives as `bOnGround`. Rows stored before the fix
+  are back-filled as total - ground - wall (`Store.backfill_air_ticks`).
+- Derived on the server: win rate, MVP rate, shooting % (goals / shots on goal), score per touch,
+  goal participation ((G+A) / team goals), demo K/D (scoreboard demos / demos received), thirds
+  (touch position, Blue defends -Y).
+- **Not on the feed at all**: where a demo happened, boost pad pickups, missed (off-target) shots,
+  MMR / rank. Shown as "not tracked" on the maps, never as 0.
+- Alias accounts (`store.PLAYER_ALIASES`): scoreboard rows fold into the canonical identity and
+  the alias name is rewritten inside `raw_events` (`Store.apply_raw_name_aliases`), because every
+  name-keyed stat above joins by name. Before 11/13 this left Vex's demos, maps, goal speed,
+  hardest hit and highlights at 0.
+- The "Pro tier" column was removed 11/13: its numbers had no source.
+- Field maps (`fieldmap.py`) are one component on Compare, Player, Clubs and the match page.
+  Career maps flip Orange matches 180 degrees so the player always attacks right (checked 11/13:
+  all 112 of his Blue goals crossed at +Y, all 66 Orange at -Y). A pass is a touch followed by a
+  teammate's touch within 4 s and at least 600 uu away, with no opponent touch between.
 
 ## Requirements
 

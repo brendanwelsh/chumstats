@@ -144,6 +144,8 @@ class Store:
             c.executescript(SCHEMA)
             self._migrate(c)
             self._apply_player_aliases(c)
+            self.apply_raw_name_aliases(c)
+            self.backfill_air_ticks(c)
             self.derive_missing_mvps(c)
 
     @staticmethod
@@ -208,6 +210,60 @@ class Store:
             c.execute("UPDATE OR IGNORE match_player_stats SET name = ?, primary_id = ? "
                       "WHERE primary_id = ?", (cname, cpid, alias_pid))
             c.execute("DELETE FROM match_player_stats WHERE primary_id = ?", (alias_pid,))
+
+    @staticmethod
+    def apply_raw_name_aliases(c, match_id: str | None = None) -> int:
+        """Rename an alias account's in-game name inside raw_events payloads.
+
+        _apply_player_aliases folds the scoreboard rows (match_player_stats) into
+        the canonical identity, but every raw-event stat (demos given/taken, goal
+        speed, hardest hit, posts, highlights, touch/goal/shot maps) is joined by
+        NAME, and the raw payloads still carry the alias name. Measured 11/13:
+        Vex's Steam name "vexxlol" vs canonical "vexxloll" left all of those at 0
+        for him. The alias name comes from the PlayerJoined event, which carries
+        the account's PrimaryId. Only matches where the canonical id sits on the
+        roster are touched; exact JSON tokens only. Idempotent. Returns rows changed."""
+        changed = 0
+        for alias_pid, (cname, cpid) in PLAYER_ALIASES.items():
+            names = {r[0] for r in c.execute(
+                "SELECT DISTINCT json_extract(payload, '$.PlayerName') FROM raw_events "
+                "WHERE event = 'PlayerJoined' AND json_extract(payload, '$.PrimaryId') = ?",
+                (alias_pid,))}
+            names.discard(None)
+            names.discard(cname)
+            scope = "SELECT match_id FROM match_player_stats WHERE primary_id = ?"
+            args: list = [cpid]
+            if match_id is not None:
+                scope += " AND match_id = ?"
+                args.append(match_id)
+            for an in names:
+                for key in ("Name", "PlayerName"):
+                    old = json.dumps({key: an}, separators=(",", ":"))[1:-1]
+                    new = json.dumps({key: cname}, separators=(",", ":"))[1:-1]
+                    changed += c.execute(
+                        f"UPDATE raw_events SET payload = REPLACE(payload, ?, ?) "
+                        f"WHERE instr(payload, ?) > 0 AND match_id IN ({scope})",
+                        [old, new, old, *args]).rowcount
+        return changed
+
+    @staticmethod
+    def backfill_air_ticks(c, match_id: str | None = None) -> int:
+        """Fill ticks_in_air for rows the old client stored as 0.
+
+        The Stats API omits a boolean when it is false, so the old client never
+        saw bOnGround=false/bOnWall=false and counted no air at all. On the
+        wire a wall contact is also bOnGround=true (measured on a June capture:
+        air ticks = ticks - bOnGround ticks exactly), so with the stored split
+        (wall first, then ground) air = total - ground - wall. Idempotent."""
+        where = ("WHERE ticks_in_air = 0 AND ticks_total > 0 AND ticks_on_ground > 0 "
+                 "AND ticks_total > ticks_on_ground + ticks_on_wall")
+        args: list = []
+        if match_id is not None:
+            where += " AND match_id = ?"
+            args.append(match_id)
+        return c.execute(
+            "UPDATE match_player_stats SET ticks_in_air = "
+            f"ticks_total - ticks_on_ground - ticks_on_wall {where}", args).rowcount
 
     def _migrate(self, c) -> None:
         """Additive, idempotent migrations for DBs created before a column
@@ -587,6 +643,8 @@ class Store:
                     continue
                 self._insert_player_row(c, match_id, r, is_mvp_override=r.get("is_mvp", False))
                 result["others_inserted"] += 1
+            self.apply_raw_name_aliases(c, match_id)
+            self.backfill_air_ticks(c, match_id)
             self.derive_missing_mvps(c, match_id)
 
         return result

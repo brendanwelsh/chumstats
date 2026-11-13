@@ -473,10 +473,12 @@ class MatchAggregator:
                 line.ticks_on_wall += 1
             elif p.is_on_ground:
                 line.ticks_on_ground += 1
-            elif p.is_on_wall is False and p.is_on_ground is False:
-                # In-air only when we KNOW the other two are false (present-and-
-                # false). A lean payload missing bOnWall/bOnGround must NOT fall
-                # through to air -- that inflated air% toward 100%.
+            elif p.has_car and not p.is_on_ground and not p.is_on_wall:
+                # The Stats API OMITS a boolean when it is false, so "in the air"
+                # is a tick where the car exists (bHasCar) and neither bOnGround
+                # nor bOnWall was sent. The old rule waited for an explicit
+                # bOnGround=false that never arrives, so air was always 0.
+                # Ticks without bHasCar (lean/partial payloads) never count.
                 line.ticks_in_air += 1
 
             if p.speed is not None:

@@ -80,7 +80,7 @@ def test_shots_map_places_shot_at_shooters_touch(tmp_path):
 def test_goal_map_html_is_goals_only(tmp_path):
     st = _seed(tmp_path)
     html = server._goal_map_html(_pb(st))
-    assert "Goal map" in html and "goal-face" in html
+    assert "Goal map" in html and "fm-svg" in html and "fm-goal-path" in html
     assert "Shot" not in html
 
 
@@ -106,8 +106,11 @@ def test_real_mvp_withdraws_derived(tmp_path):
     assert rows == {"Ann": 0, "Bo": 1, "Cy": 0}
 
 
-def test_air_unrecorded_is_dash_on_compare(tmp_path):
-    st = _seed(tmp_path)
+def test_air_backfilled_from_ground_and_wall(tmp_path):
+    # Old clients stored ticks_in_air = 0 (the feed omits false booleans). On
+    # open, the store derives air = total - ground - wall (11/13 fix).
+    _seed(tmp_path)
+    st = Store(tmp_path / "t.db")
     page = server._compare_page_html(st, ["Ann"], last_n=0)
     row = page.split("Time in air %", 1)[1].split("</tr>", 1)[0]
-    assert "—" in row and "0.0%" not in row
+    assert "28.9%" in row

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import html
+import math
 import os
 import json
 import logging
@@ -1043,54 +1044,25 @@ def _empty_derived() -> dict:
 # StatfeedEvent.EventName values (plus a handful of synthesized kinds like
 # "Goal" from GoalScored). If a key isn't here we render no icon and fall
 # back to the text label, which all rows already include.
-# Soft competitive-RL benchmarks. Numbers approximate Champion-to-GC tier
-# play (the band where mechanics start to dominate) - they're meant as
-# orientation, not targets. Labels must match the row labels rendered in
-# `_compare_page_html` exactly.
-_PRO_BENCHMARKS: dict[str, str] = {
-    "Win rate":                   "55-60%",
-    "MVP rate":                   "18%",
-    "Shooting %":                 "30%",
-    "Score / touch":              "15",
-    "Goal participation":         "65%",
-    "Avg goal speed (kph)":       "85",
-    "Demos delivered (total)":    "--",
-    "Demos received (total)":     "--",
-    "Demos delivered / match":    "1.5",
-    "Demos received / match":     "1.0",
-    "Demo K/D":                   "1.5",
-    "Crossbar hits":              "--",
-    "Goals":                      "0.9 / match",
-    "Assists":                    "0.7 / match",
-    "Saves":                      "1.2 / match",
-    "Shots":                      "3.0 / match",
-    "Demos":                      "1.5 / match",
-    "Score":                      "450 / match",
-    "Touches":                    "30 / match",
-    "Supersonic %":               "35%",
-    "Time in air %":              "20%",
-    "Time on wall %":              "6%",
-    "Time on ground %":            "55%",
-    "Avg speed (km/h)":            "50",
-    "Boost used":                  "1400 / match",
-    "Time near-empty %":           "8%",
-    "Time at 100 boost %":         "5%",
-    "BPM (boost used per minute)": "400",
-    "Defensive third %":           "30%",
-    "Neutral third %":             "45%",
-    "Offensive third %":           "25%",
-    # Highlights are aspirational; not really expected per-match.
-    "Epic saves":      "--",
-    "Aerial goals":    "--",
-    "Bicycle hits":    "--",
-    "Flip resets":     "--",
-    "Hat tricks":      "--",
-    "Long goals":      "--",
-    "Backwards goals": "--",
-    "Saviors":         "--",
-    "Low fives":       "--",
-    "Total highlights":"--",
-}
+class _NotTracked(str):
+    """A stat the live feed cannot give for this player. Rendered as
+    "not tracked" with the reason on hover, never as 0 or a dash."""
+
+
+NT_MOVEMENT = _NotTracked(
+    "Not tracked: the game only sends car movement and boost for the player "
+    "recording and their teammates, so opponents have none.")
+
+
+def _nt_html(reason: str) -> str:
+    return (f'<span class="nt" title="{html.escape(reason)}" tabindex="0">'
+            f'not tracked</span>')
+
+
+def _movement_tracked(r: dict) -> bool:
+    """True when at least one match tracked this player's car for nearly the
+    whole game (see analytics.COVERAGE_MIN) and there is ~33 s of it."""
+    return bool(r.get("tracked_matches")) and (r.get("ticks") or 0) >= 1000
 
 
 _RL_ICON_FOR_EVENT: dict[str, str] = {
@@ -1747,6 +1719,194 @@ def _spot_map_svg(data: dict, *, compact: bool = False) -> str:
             f'xmlns="http://www.w3.org/2000/svg">{_pitch_frame_svg(svg)}{dots}</svg>')
 
 
+def _last_touch(ball_track: list, player: str, t: float, window: float):
+    """The player's own last ball touch at or before game time t, within
+    `window` seconds, or None."""
+    for bh in reversed(ball_track):
+        if bh["t"] > t:
+            continue
+        if t - bh["t"] > window:
+            return None
+        if bh["player"] == player:
+            return bh
+    return None
+
+
+def _match_spatial(pb: dict, name: str, team) -> dict:
+    """One player's map marks in one match, flipped so they attack right.
+    See fieldmap.py for what each kind means."""
+    from . import fieldmap as fm
+    bt = [bh for bh in (pb.get("ball_track") or [])]
+    out = {k: [] for k, _, _ in fm.KINDS if k != "touches"}
+    for g in pb.get("goals") or []:
+        if g.get("scorer") != name:
+            continue
+        bh = _last_touch(bt, name, g["t"], 3.0)
+        if not bh:
+            continue
+        sx, sy = fm.flip(bh["sx"], bh["sy"], team)
+        mark = {"sx": sx, "sy": sy, "ex": None, "ey": None,
+                "tip": f'Goal, {g.get("speed") or 0:.0f} km/h'}
+        if g.get("impact_ok"):
+            mark["ex"], mark["ey"] = fm.flip(g["isx"], g["isy"], team)
+        out["goals"].append(mark)
+    for sh in pb.get("shots") or []:
+        if sh.get("player") == name:
+            sx, sy = fm.flip(sh["sx"], sh["sy"], team)
+            out["shots"].append({"sx": sx, "sy": sy, "tip": "Shot on goal"})
+    for ev in pb.get("events") or []:
+        if ev.get("player") != name:
+            continue
+        kind, window = None, 0.0
+        if ev.get("kind") == "assist":
+            kind, window = "assists", 10.0
+        elif ev.get("event") in ("Save", "EpicSave"):
+            kind, window = "saves", 2.0
+        if not kind:
+            continue
+        bh = _last_touch(bt, name, ev["t"], window)
+        if bh:
+            sx, sy = fm.flip(bh["sx"], bh["sy"], team)
+            out[kind].append({"sx": sx, "sy": sy, "tip": ev.get("label") or ""})
+    for a, b in zip(bt, bt[1:]):
+        if a.get("player") != name or not b.get("player") or b["player"] == name:
+            continue
+        if b.get("team") != a.get("team") or b.get("is_kickoff"):
+            continue
+        if not (0 <= b["t"] - a["t"] <= fm.PASS_WINDOW):
+            continue
+        if math.hypot(b["x"] - a["x"], b["y"] - a["y"]) < fm.PASS_MIN_UU:
+            continue
+        sx, sy = fm.flip(a["sx"], a["sy"], team)
+        ex, ey = fm.flip(b["sx"], b["sy"], team)
+        out["passes"].append({"sx": sx, "sy": sy, "ex": ex, "ey": ey,
+                              "tip": f'Pass to {b["player"]}'})
+    return out
+
+
+def _lifetime_maps(store, names, match_ids: set | None = None) -> dict:
+    """Map marks for one player (or a club: several names) across their
+    matches, flipped so each always attacks right. `match_ids` limits the
+    scope (Compare's last-N window)."""
+    from . import fieldmap as fm
+    if isinstance(names, str):
+        names = [names]
+    out = {"touches": [], "thirds": {"def": 0, "neu": 0, "off": 0},
+           "matches": 0, **{k: [] for k, _, _ in fm.KINDS if k != "touches"}}
+    if not store or not names or (match_ids is not None and not match_ids):
+        return out
+    seen = set()
+    for nm in names:
+        if not nm:
+            continue
+        td = _lifetime_touch_data(store, nm, match_ids)
+        for bh in td.get("ball_track") or []:
+            if abs(bh.get("x", 0)) <= _KICKOFF_CENTER_UU and abs(bh.get("y", 0)) <= _KICKOFF_CENTER_UU:
+                continue
+            sx, sy = fm.flip(bh["sx"], bh["sy"], bh.get("team"))
+            out["touches"].append({"sx": sx, "sy": sy})
+        for k, v in (td.get("thirds") or {}).items():
+            out["thirds"][k] += v
+        with store._conn() as con:
+            rows = con.execute(
+                "SELECT match_id, team_num FROM match_player_stats WHERE name = ?",
+                (nm,)).fetchall()
+        for r in rows:
+            mid = r["match_id"]
+            if match_ids is not None and mid not in match_ids:
+                continue
+            pb = _cached_playback(store, mid)
+            if not pb:
+                continue
+            seen.add(mid)
+            sp = _match_spatial(pb, nm, r["team_num"])
+            for k, v in sp.items():
+                out[k].extend(v)
+    out["matches"] = len(seen)
+    return out
+
+
+def _map_body_html(kind: str, data: dict, *, compact: bool, key: str) -> str:
+    """One map (pitch + header + caption + legend) of one kind."""
+    from . import fieldmap as fm
+    unit = {k: u for k, _, u in fm.KINDS}[kind]
+    pts = data.get(kind) or []
+    n = len(pts)
+    if not n:
+        return (f'<div class="fm-map">{fm.head_html()}'
+                f'<div class="fm-empty">No {unit} in this sample.</div></div>')
+    extra = ""
+    if kind == "touches":
+        img = _heat_png_data_uri(pts, fm.GEOM, 0, compact, alpha=fm.HEAT_ALPHA)
+        img_l = _heat_png_data_uri(pts, fm.GEOM, "light", compact, alpha=fm.HEAT_ALPHA)
+        box = (f'x="{fm.PAD_X}" y="{fm.PAD_Y}" width="{fm.PITCH_W}" '
+               f'height="{fm.PITCH_H}" preserveAspectRatio="none"')
+        inner = (f'<image class="fm-heat-dark" href="{img}" {box}/>'
+                 f'<image class="fm-heat-light" href="{img_l}" {box}/>')
+        th = data.get("thirds") or {}
+        tot = sum(th.values()) or 1
+        legend = fm.LEGENDS["touches"]
+        extra = ('<div class="fm-thirds">'
+                 f'<span>Own third <b class="tnum">{th.get("def", 0) / tot * 100:.0f}%</b></span>'
+                 f'<span>Middle <b class="tnum">{th.get("neu", 0) / tot * 100:.0f}%</b></span>'
+                 f'<span>Their third <b class="tnum">{th.get("off", 0) / tot * 100:.0f}%</b></span>'
+                 '</div>')
+    elif kind == "goals":
+        inner, legend = fm.goals_svg(pts), fm.LEGENDS["goals"]
+    elif kind == "passes":
+        inner, legend = fm.arrows_svg(pts), fm.LEGENDS["passes"]
+    else:
+        inner, legend = fm.dots_svg(pts), fm.LEGENDS[kind]
+    cap = f'{n:,} {unit if n != 1 else unit.rstrip("s").replace("passe", "pass")}'
+    return (f'<div class="fm-map">{fm.head_html()}{fm.svg(inner, compact=compact)}{extra}'
+            f'<div class="fm-foot"><span class="fm-count tnum">{cap}</span>'
+            f'{fm.legend_html(legend)}</div></div>')
+
+
+def _maps_block(entries: list, *, title: str, key: str, scope_label: str = "") -> str:
+    """The shared Maps card: a kind switch (Touches, Goals, Shots, Passes,
+    Assists, Saves; kinds the feed cannot place shown as not tracked) over one
+    map per entry. entries = [(label or "", data from _lifetime_maps)]."""
+    from . import fieldmap as fm
+    if not any(any(d.get(k) for k, _, _ in fm.KINDS) for _, d in entries if d):
+        return ""
+    multi = len(entries) > 1
+    btns = "".join(
+        f'<button type="button" class="fm-btn{" active" if i == 0 else ""}" data-k="{k}">{lbl}</button>'
+        for i, (k, lbl, _) in enumerate(fm.KINDS))
+    nts = ", ".join(
+        f'<span class="nt" title="{html.escape(why)}" tabindex="0">{lbl}</span>'
+        for lbl, why in fm.NOT_TRACKED)
+    cols = []
+    for label, data in entries:
+        head = (f'<div class="fm-who" title="{html.escape(label)}">{html.escape(label)}</div>'
+                if multi else "")
+        if not data:
+            cols.append(f'<div class="fm-col">{head}<div class="fm-empty">No data yet.</div></div>')
+            continue
+        bodies = "".join(
+            f'<div class="fm-kind" data-k="{k}"{"" if i == 0 else " hidden"}>'
+            f'{_map_body_html(k, data, compact=multi, key=f"{key}-{k}")}</div>'
+            for i, (k, _, _) in enumerate(fm.KINDS))
+        cols.append(f'<div class="fm-col">{head}{bodies}</div>')
+    js = ("<script>(function(){var c=document.getElementById('" + key + "');if(!c)return;"
+          "c.querySelectorAll('button.fm-btn').forEach(function(b){b.addEventListener('click',function(){"
+          "var k=b.dataset.k;c.querySelectorAll('button.fm-btn').forEach(function(x){x.classList.toggle('active',x===b);});"
+          "c.querySelectorAll('.fm-kind').forEach(function(e){e.hidden=e.dataset.k!==k;});});});})();</script>")
+    scope = f' <span class="fm-scope">{html.escape(scope_label)}</span>' if scope_label else ""
+    return f"""
+      <div class="card fm-card" id="{key}">
+        <div class="fm-top">
+          <div class="section-title" style="margin:0"><span>{html.escape(title)}{scope}</span></div>
+          <div class="seg fm-seg" role="group" aria-label="Map type">{btns}</div>
+        </div>
+        <div class="fm-note"><span>{fm.FLIP_NOTE}</span><span class="fm-nts">Not tracked: {nts}</span></div>
+        <div class="fm-grid{' fm-grid-multi' if multi else ''}">{"".join(cols)}</div>
+        {js}
+      </div>
+    """
+
+
 def _recent_form_html(store, primary_id: str | None, name: str | None,
                       *, include_bots: bool = True, limit: int = 10) -> str:
     """Form-dot strip of the last N matches. Replaces the stale ASCII
@@ -1822,60 +1982,22 @@ def _player_ball_section_html(store, name: str | None) -> str:
     bpm_html = (f'<li><b>{bpm:.0f}</b> <span>BPM (lifetime avg)</span></li>'
                 if bpm is not None else "")
 
-    name_slug = "".join(ch if ch.isalnum() else "_" for ch in name)
-    heatmap = _ball_heatmap_svg(td, key=f"player-{name_slug}")
-
-    touch_card = f"""
+    maps = _maps_block([("", _lifetime_maps(store, name))], title="Maps",
+                       key="player-maps", scope_label="lifetime")
+    stats = f"""
       <div class="card insights-card">
-        <div class="section-title">
-          <span>Where they touch the ball (lifetime)</span>
-          <span class="dim" style="text-transform:none;letter-spacing:0">
-            Every BallHit this player has been on across
-            {td['matches_with_touches']} stored match{'' if td['matches_with_touches'] == 1 else 'es'},
-            rotated so they always attack &#8594; (right). Brighter = more touches.
-            Kickoff first-touches (always dead-centre) are excluded so they don't
-            skew the map.
-          </span>
-        </div>
-        <div class="insights-heatmap">
-          <div class="hm-wrap">{heatmap}</div>
-        </div>
-        <ul class="rc-stat-line" style="margin-top:14px">
+        <div class="section-title"><span>Ball contacts (lifetime)</span></div>
+        <ul class="rc-stat-line" style="margin-top:6px">
           <li><b>{touches}</b> <span>ball contacts mapped</span></li>
           <li><b>{touches_per_match:.1f}</b> <span>mapped per match</span></li>
           {bpm_html}
-          <li><b>{def_pct:.0f}%</b> <span>defensive third</span></li>
-          <li><b>{neu_pct:.0f}%</b> <span>neutral</span></li>
-          <li><b>{off_pct:.0f}%</b> <span>offensive third</span></li>
+          <li><b>{def_pct:.0f}%</b> <span>own third</span></li>
+          <li><b>{neu_pct:.0f}%</b> <span>middle third</span></li>
+          <li><b>{off_pct:.0f}%</b> <span>their third</span></li>
         </ul>
       </div>
     """
-
-    # Goal map (only real goals, where the ball crossed the line) and Shots map
-    # (each shot on goal at the shooter's last touch) are separate: a shot or a
-    # touch is not a goal.
-    gd = _lifetime_goal_data(store, name)
-    sd = _lifetime_shot_data(store, name)
-    def _spot_card(title: str, sub: str, data: dict) -> str:
-        if not data["count"]:
-            return ""
-        return f"""
-      <div class="card insights-card">
-        <div class="section-title"><span>{title}</span></div>
-        <div class="map-sub dim">{sub}</div>
-        <div class="map-pitch">{_spot_map_svg(data)}</div>
-      </div>
-    """
-    shot_card = '<div class="md-maps" style="margin-top:16px">' + (
-        _spot_card("Goal map",
-                   f"{gd['count']} goal{'' if gd['count'] == 1 else 's'} across "
-                   f"{gd['matches']} match{'' if gd['matches'] == 1 else 'es'}: where the ball "
-                   f"crossed the line, seen from the front of the net.", gd)
-        + _spot_card("Shots",
-                     f"{sd['count']} shot{'' if sd['count'] == 1 else 's'} on goal across "
-                     f"{sd['matches']} match{'' if sd['matches'] == 1 else 'es'}, at the "
-                     f"shooter's last touch. Attacking right.", sd)) + '</div>'
-    return touch_card + shot_card
+    return maps + stats
 
 
 def _radar_block_for_player(store, primary_id: str | None, name: str | None,
@@ -3159,6 +3281,9 @@ def _match_detail_html(store, match_id: str, viewer_pid: str | None, viewer_name
                 air=((p["ticks_in_air"] / pos * 100) if p["ticks_in_air"] else None),
                 wall=(p["ticks_on_wall"] or 0) / pos * 100,
             )
+        else:
+            for k in ("bpm", "boost_used", "zero", "full", "avg_sp", "sup", "ground", "air", "wall"):
+                d[k] = NT_MOVEMENT
         return d
 
     _adv_rows = [_adv(p) for p in all_pl]
@@ -3169,6 +3294,8 @@ def _match_detail_html(store, match_id: str, viewer_pid: str | None, viewer_name
         head = "".join(f'<th class="num">{h}</th>' for h, _, _ in cols)
         def _cell(r, k, fmt):
             v = r.get(k)
+            if isinstance(v, _NotTracked):
+                return f'<td class="num">{_nt_html(v)}</td>'
             return '<td class="num dim">&mdash;</td>' if v is None else f'<td class="num tnum">{fmt(v)}</td>'
         def _cell_l(r, h, k, fmt):
             return _cell(r, k, fmt).replace("<td ", f'<td data-label="{h}" ', 1)
@@ -3858,13 +3985,15 @@ def _goal_face_points(goals: list, *, attacker_view: bool = True) -> list:
 
 
 def _goal_map_html(playback: dict) -> str:
-    """Goal map: ONLY real goals, each drawn where the ball crossed the goal
-    line, seen from the front of the net it went into, numbered in order and
-    team-coloured. Shots and touches are never drawn here."""
+    """Match goal map on the shared field component, as played (Blue attacks
+    right): each goal numbered at the scorer's last touch, a line to where it
+    crossed the line, team-coloured. Shots and touches are never drawn here."""
+    from . import fieldmap as fm
     goals = playback.get("goals") or []
     if not goals:
         return ""
-    items, by_net = [], {0: [], 1: []}
+    bt = playback.get("ball_track") or []
+    items, marks = [], []
     for gi, g in enumerate(goals):
         tcls = "team-blue" if g.get("team") == 0 else "team-orng"
         meta = []
@@ -3876,51 +4005,45 @@ def _goal_map_html(playback: dict) -> str:
             f'<li class="gm-item {tcls}"><span class="gm-num tnum">{gi + 1}</span>'
             f'<b>{html.escape(g.get("scorer") or "?")}</b>'
             f'<span class="dim">{" &middot; ".join(meta)}</span></li>')
-        if g.get("impact_ok") and g.get("team") in (0, 1):
-            pt = _goal_face_points([g])[0]
-            pt["n"] = gi + 1
-            pt["tip"] = f'Goal {gi + 1}: {g.get("scorer") or "?"}'
-            # Blue scores into Orange's net and vice versa.
-            by_net[1 - g["team"]].append(pt)
-    faces = (f'<div class="gf-pair">'
-             f'<div>{_goal_face_svg(by_net[0], "Blue net")}</div>'
-             f'<div>{_goal_face_svg(by_net[1], "Orange net")}</div></div>')
+        bh = _last_touch(bt, g.get("scorer") or "", g["t"], 3.0)
+        if not bh:
+            continue
+        marks.append({"sx": bh["sx"], "sy": bh["sy"], "n": gi + 1, "team": g.get("team"),
+                      "ex": g["isx"] if g.get("impact_ok") else None,
+                      "ey": g["isy"] if g.get("impact_ok") else None,
+                      "tip": f'Goal {gi + 1}: {g.get("scorer") or "?"}'})
+    meta = playback.get("meta") or {}
+    inner = fm.goals_svg(marks, numbered=True)
     return f"""
       <section id="goalmap" class="card">
         <div class="section-title"><span>Goal map</span></div>
-        <div class="map-sub dim">Goals only: where the ball crossed the line, seen from the front of the net.</div>
-        {faces}
+        <div class="fm-map">{fm.head_html(False, meta.get("t0_name") or "Blue", meta.get("t1_name") or "Orange")}
+        {fm.svg(inner, oriented=False)}
+        <div class="fm-foot"><span class="fm-count tnum">{len(goals)} goal{"s" if len(goals) != 1 else ""}</span>
+        {fm.legend_html(fm.LEGENDS["goals"])}</div></div>
         <ol class="gm-list">{"".join(items)}</ol>
       </section>
     """
 
 
 def _shot_map_html(playback: dict) -> str:
-    """Shots map: each 'Shot on goal' placed at the shooter's last touch."""
+    """Match shots map on the shared field component, as played: each shot on
+    goal at the shooter's last touch, team-coloured."""
+    from . import fieldmap as fm
     shots = playback.get("shots") or []
     if not shots:
         return ""
-    svg = playback["svg"]
-    vb_w, vb_h = svg["vb_w"], svg["vb_h"]
-    dots = "".join(
-        f'<circle cx="{sh["sx"]:.1f}" cy="{sh["sy"]:.1f}" r="6" '
-        f'fill="{"var(--team-blue)" if sh.get("team") == 0 else "var(--team-orng)"}" '
-        f'fill-opacity="0.85" stroke="var(--card)" stroke-width="1.5">'
-        f'<title>{html.escape(sh.get("player") or "")}</title></circle>'
-        for sh in shots)
+    pts = [{**sh, "tip": sh.get("player") or ""} for sh in shots]
     b = sum(1 for sh in shots if sh.get("team") == 0)
     o = sum(1 for sh in shots if sh.get("team") == 1)
-    pitch = (f'<svg viewBox="0 0 {vb_w} {vb_h}" class="hm-pitch" xmlns="http://www.w3.org/2000/svg">'
-             f'{_pitch_frame_svg(svg)}{dots}</svg>')
+    meta = playback.get("meta") or {}
     return f"""
       <section id="shotmap" class="card">
         <div class="section-title"><span>Shots</span></div>
-        <div class="map-sub dim">Each shot on goal, at the shooter's last touch.</div>
-        <div class="map-pitch">{pitch}</div>
-        <ul class="gm-list">
-          <li class="gm-item team-blue"><b class="tnum">{b}</b><span class="dim">Blue shots</span></li>
-          <li class="gm-item team-orng"><b class="tnum">{o}</b><span class="dim">Orange shots</span></li>
-        </ul>
+        <div class="fm-map">{fm.head_html(False, meta.get("t0_name") or "Blue", meta.get("t1_name") or "Orange")}
+        {fm.svg(fm.dots_svg(pts, team_colours=True), oriented=False)}
+        <div class="fm-foot"><span class="fm-count tnum">{b} Blue &middot; {o} Orange</span>
+        {fm.legend_html(fm.LEGENDS["shots"])}</div></div>
       </section>
     """
 
@@ -4809,27 +4932,9 @@ def _touch_spots_svg(playback: dict, player_filter: str | None = None,
              if bh.get("team") == 1 else bh)
             for bh in ball
         ]
-    r = 9 if compact else 7
-    dots = "".join(
-        f'<circle class="tspot" cx="{bh["sx"]:.1f}" cy="{bh["sy"]:.1f}" r="{r}"/>'
-        for bh in ball
-    )
-    pitch_cls = "hm-pitch hm-pitch-compact" if compact else "hm-pitch"
-    return (
-        f'<svg viewBox="0 0 {vb_w} {vb_h}" class="{pitch_cls}" '
-        f'xmlns="http://www.w3.org/2000/svg">'
-        f'<rect class="pb-field" x="{pad_x:.1f}" y="{pad_y:.1f}" '
-        f'width="{pitch_w}" height="{pitch_h}" />'
-        f'<line class="pb-midline" x1="{vb_w/2:.1f}" y1="{pad_y:.1f}" '
-        f'x2="{vb_w/2:.1f}" y2="{pad_y + pitch_h:.1f}" />'
-        f'<circle class="pb-midcircle" cx="{vb_w/2:.1f}" cy="{vb_h/2:.1f}" r="48" fill="none" />'
-        f'<rect class="pb-net pb-net-blue" x="{pad_x - 10:.1f}" '
-        f'y="{pad_y + pitch_h/2 - 60:.1f}" width="10" height="120" />'
-        f'<rect class="pb-net pb-net-orng" x="{pad_x + pitch_w:.1f}" '
-        f'y="{pad_y + pitch_h/2 - 60:.1f}" width="10" height="120" />'
-        f'<g class="tspots">{dots}</g>'
-        f'</svg>'
-    )
+    from . import fieldmap as fm
+    pts = [{"sx": bh["sx"], "sy": bh["sy"], "team": bh.get("team")} for bh in ball]
+    return fm.svg(fm.dots_svg(pts, team_colours=True), oriented=orient, compact=compact)
 
 
 _HEAT_RAMPS = {
@@ -4838,13 +4943,17 @@ _HEAT_RAMPS = {
         "0.30 0.55 0.78 0.92 0.99 1 1 1"),
     1: ("0.25 0.50 0.74 0.92 1 1 1 1", "0.08 0.20 0.36 0.52 0.68 0.82 0.92 1",
         "0.05 0.06 0.09 0.16 0.28 0.48 0.74 1"),
+    # Light theme field maps: pale blue -> accent -> deep navy.
+    "light": ("0.62 0.45 0.30 0.18 0.10 0.07 0.05 0.04", "0.80 0.68 0.56 0.47 0.40 0.30 0.20 0.13",
+              "0.95 0.90 0.84 0.78 0.69 0.56 0.43 0.30"),
     None: ("0.13 0.10 0.12 0.34 0.74 0.97 1 1", "0.09 0.36 0.66 0.86 0.89 0.70 0.40 0.18",
            "0.28 0.69 0.73 0.43 0.17 0.06 0.05 0.12"),
 }
 _HEAT_ALPHA = "0 0.55 0.72 0.84 0.90 0.95 0.98 1"
 
 
-def _heat_png_data_uri(ball: list, svg: dict, team, compact: bool) -> str:
+def _heat_png_data_uri(ball: list, svg: dict, team, compact: bool,
+                       alpha: str | None = None) -> str:
     """Density image for a heatmap, computed server-side.
 
     Touches are binned onto a grid over the pitch, smoothed with a Gaussian and
@@ -4872,7 +4981,7 @@ def _heat_png_data_uri(ball: list, svg: dict, team, compact: bool) -> str:
              for x in range(nx)] for y in range(ny)]
     peak = max(max(r) for r in dens) or 1.0
     rr, gg, bb = (list(map(float, t.split())) for t in _HEAT_RAMPS.get(team, _HEAT_RAMPS[None]))
-    aa = list(map(float, _HEAT_ALPHA.split()))
+    aa = list(map(float, (alpha or _HEAT_ALPHA).split()))
 
     def lut(tab, v):
         f = v * (len(tab) - 1)
@@ -5202,15 +5311,6 @@ PortNumber=49123</pre>
       </section>
 
       <section>
-        <h2>Pro-tier benchmarks</h2>
-        <p>The Compare page now shows a <em>Pro tier</em> reference column. Those
-          numbers are rough averages from Champion-through-Grand-Champion-tier
-          competitive play; treat them as orientation, not targets. A 30% shooting
-          percentage looks pedestrian until you realize that's the GC range and you
-          rarely see better even in RLCS broadcasts.</p>
-      </section>
-
-      <section>
         <h2>Icons + attribution</h2>
         <p>The point icons (Goal, Aerial Goal, Epic Save, Hat Trick, MVP, etc.) are
           from the
@@ -5255,9 +5355,11 @@ def _player_breakdown_html(store, primary_id: str | None, name: str | None,
     def sd(a, b):
         return (a or 0) / b if b else 0.0
 
+    tracked = _movement_tracked(r)
+
     def tickpct(n):
-        """Tick-share % — needs ~1000 ticks of coverage to be representative."""
-        return (n or 0) / ticks * 100 if ticks >= 1000 else None
+        """Tick-share %, or not tracked (opponents' car state never arrives)."""
+        return (n or 0) / ticks * 100 if tracked else NT_MOVEMENT
 
     def third(key):
         thirds = td.get("thirds") if td else None
@@ -5267,16 +5369,18 @@ def _player_breakdown_html(store, primary_id: str | None, name: str | None,
         return thirds.get(key, 0) / t * 100 if t else None
 
     def num(v, fmt):
+        if isinstance(v, _NotTracked):
+            return _nt_html(v)
         return fmt.format(v) if isinstance(v, (int, float)) else "\u2014"
 
     gp = (d.get("goal_participation_num", 0) / d["goal_participation_den"] * 100) \
         if d.get("goal_participation_den") else None
     ags = (d.get("goal_speed_sum", 0) / d["goal_count"]) if d.get("goal_count") else None
-    bpm = ((r.get("boost_used") or 0) / (ticks / 30 / 60)) if ticks >= 1000 else None
-    avg_speed = sd(r.get("speed_sum"), ticks) if ticks >= 1000 else None
-    boost_tot = r.get("boost_used") if ticks >= 1000 else None
-    boost_avg = sd(r.get("boost_used"), m) if ticks >= 1000 else None
-    dg, dr = d.get("demos_given", 0), d.get("demos_received", 0)
+    bpm = ((r.get("boost_used") or 0) / (ticks / 30 / 60)) if tracked else NT_MOVEMENT
+    avg_speed = sd(r.get("speed_sum"), ticks) if tracked else NT_MOVEMENT
+    boost_tot = r.get("boost_used") if tracked else NT_MOVEMENT
+    boost_avg = sd(r.get("boost_used"), r.get("tracked_matches")) if tracked else NT_MOVEMENT
+    dg, dr = (r.get("demos") or 0), d.get("demos_received", 0)
     kd = "∞" if (dr == 0 and dg > 0) else (f"{dg / dr:.2f}" if dr else "\u2014")
 
     sections = [
@@ -5295,9 +5399,7 @@ def _player_breakdown_html(store, primary_id: str | None, name: str | None,
             ("Hardest hit (kph)", num(d.get("hit_speed_max") or None, "{:.0f}")),
         ]),
         ("Combat", "single", [
-            ("Demos delivered (total)", f"{dg:.0f}"),
             ("Demos received (total)", f"{dr:.0f}"),
-            ("Demos delivered / match", num(sd(dg, m), "{:.2f}")),
             ("Demos received / match", num(sd(dr, m), "{:.2f}")),
             ("Demo K/D", kd),
             ("Crossbar hits", f"{d.get('crossbar_hits', 0):.0f}"),
@@ -5327,7 +5429,7 @@ def _player_breakdown_html(store, primary_id: str | None, name: str | None,
         ]),
         ("Movement (where they are on the field)", "single", [
             ("Supersonic %", num(tickpct(r.get('ticks_super')), "{:.1f}%")),
-            ("Time in air %", num(tickpct(r.get('ticks_air')) if r.get('ticks_air') else None, "{:.1f}%")),
+            ("Time in air %", num(tickpct(r.get('ticks_air')), "{:.1f}%")),
             ("Time on wall %", num(tickpct(r.get('ticks_wall')), "{:.1f}%")),
             ("Time on ground %", num(tickpct(r.get('ticks_ground')), "{:.1f}%")),
             ("Avg speed (km/h)", num(avg_speed, "{:.1f}")),
@@ -5361,7 +5463,7 @@ def _player_breakdown_html(store, primary_id: str | None, name: str | None,
             else:
                 label, tot, avg = mrow
                 avg_html = (f'<div class="compare-avg">{avg} / match</div>'
-                            if avg != "\u2014" else "")
+                            if avg != "\u2014" and 'class="nt"' not in avg else "")
                 out.append(
                     f'<tr><td class="compare-metric">{_stat_icon_html(label)}{label}</td>'
                     f'<td class="compare-val compare-totavg">'
@@ -5422,23 +5524,12 @@ def _compare_page_html(store, slots: list[str], *, self_name: str | None = None,
         _lifetime_touch_data(store, slot_name, scopes[i]) if slot_name else None
         for i, slot_name in enumerate(slots)
     ]
-    # Shot maps (where each player's goals were struck from) — selectable
-    # alongside touch maps via the heatmap-type dropdown. Scoped to the same
-    # last-N sample window as the rest of the page so the "Sample" filter
-    # actually moves the maps.
-    shot_data = [
-        _lifetime_shot_data(store, slot_name, scopes[i]) if slot_name else None
+    # Field maps (touches, goals, shots, passes, assists, saves), scoped to the
+    # same last-N window as the table.
+    map_data = [
+        _lifetime_maps(store, slot_name, scopes[i]) if slot_name else None
         for i, slot_name in enumerate(slots)
     ]
-    goal_data = [
-        _lifetime_goal_data(store, slot_name, scopes[i]) if slot_name else None
-        for i, slot_name in enumerate(slots)
-    ]
-    # Heatmaps share the sampled `touch_data` (already scoped to scopes[i]) so the
-    # touch map, the shot map, and the positioning rows in the table all reflect
-    # the same window the user picked. With no sample (last falsy) every scope is
-    # None → full history, matching the "(lifetime)" heading.
-    touch_data_hm = touch_data
 
     def option_list(selected: str) -> str:
         opts = ['<option value="">(select a player)</option>']
@@ -5468,18 +5559,21 @@ def _compare_page_html(store, slots: list[str], *, self_name: str | None = None,
         return (a or 0) / b if b else 0.0
 
     def pct_if(ticks, num):
-        """Only return % when we have enough ticks for the value to be
-        representative. Below 1000 ticks (~33s of play), opponents' goal-cam
-        tail data leads to misleading splits."""
+        """Tick share, or NotTracked when the feed never tracked this player's
+        car for a whole match (opponents)."""
         if not ticks or ticks < 1000:
-            return None
+            return NT_MOVEMENT
         return (num or 0) / ticks
 
     # Pre-compute per-match averages for derived stats too.
     def avg_per_match(field):
         return [safe_div(d.get(field, 0), r.get("matches")) for d, r in zip(derived_rows, rows)]
 
-    demos_given_avg = avg_per_match("demos_given")
+    # Demos delivered = the scoreboard's own count (shown under Per-stat
+    # output); the stat feed's Demolish events can miss a few, so they only
+    # supply demos received.
+    for d, r in zip(derived_rows, rows):
+        d["demos_given"] = r.get("demos") or 0
     demos_received_avg = avg_per_match("demos_received")
     # K/D ratio with sensible behaviour when denominator is 0:
     def kd_pair(d):
@@ -5504,8 +5598,8 @@ def _compare_page_html(store, slots: list[str], *, self_name: str | None = None,
     # have enough ticks; falls back to None otherwise).
     def bpm_of(row):
         ticks = row.get("ticks") or 0
-        if ticks < 1000:
-            return None
+        if not _movement_tracked(row):
+            return NT_MOVEMENT
         minutes = ticks / 30 / 60
         return (row.get("boost_used") or 0) / minutes if minutes else None
     bpm_vals = [bpm_of(r) for r in rows]
@@ -5553,12 +5647,8 @@ def _compare_page_html(store, slots: list[str], *, self_name: str | None = None,
              [d.get("hit_speed_max") or None for d in derived_rows], True),
         ]),
         ("Combat", "single", [
-            ("Demos delivered (total)", lambda v: f"{v:.0f}",
-             [d.get("demos_given", 0)   for d in derived_rows], True),
             ("Demos received (total)",  lambda v: f"{v:.0f}",
              [d.get("demos_received", 0) for d in derived_rows], False),
-            ("Demos delivered / match",  lambda v: f"{v:.2f}",
-             demos_given_avg, True),
             ("Demos received / match",   lambda v: f"{v:.2f}",
              demos_received_avg, False),
             ("Demo K/D",                lambda v: ("∞" if v == float('inf') else f"{v:.2f}"),
@@ -5607,20 +5697,18 @@ def _compare_page_html(store, slots: list[str], *, self_name: str | None = None,
             ("Supersonic %",     lambda v: f"{v*100:.1f}%",
              [pct_if(r.get("ticks"), r.get("ticks_super"))  for r in rows], True),
             ("Time in air %",    lambda v: f"{v*100:.1f}%",
-             # 0 in-air ticks = not recorded by the feed -> dash, never 0%.
-             [pct_if(r.get("ticks"), r.get("ticks_air")) if r.get("ticks_air") else None
-              for r in rows], True),
+             [pct_if(r.get("ticks"), r.get("ticks_air")) for r in rows], True),
             ("Time on wall %",   lambda v: f"{v*100:.1f}%",
              [pct_if(r.get("ticks"), r.get("ticks_wall"))   for r in rows], True),
             ("Time on ground %", lambda v: f"{v*100:.1f}%",
              [pct_if(r.get("ticks"), r.get("ticks_ground")) for r in rows], False),
             ("Avg speed (km/h)", lambda v: f"{v:.1f}",
-             [safe_div(r.get("speed_sum"), r.get("ticks")) if (r.get("ticks") or 0) >= 1000 else None for r in rows], True),
+             [safe_div(r.get("speed_sum"), r.get("ticks")) if _movement_tracked(r) else NT_MOVEMENT for r in rows], True),
         ]),
         ("Boost (total · per match)", "totavg", [
             ("Boost used", lambda v: f"{v:,.0f}", lambda v: f"{v:,.0f}",
-             [r.get("boost_used") if (r.get("ticks") or 0) >= 1000 else None for r in rows],
-             [safe_div(r.get("boost_used"), r.get("matches")) if (r.get("ticks") or 0) >= 1000 else None for r in rows], True),
+             [r.get("boost_used") if _movement_tracked(r) else NT_MOVEMENT for r in rows],
+             [safe_div(r.get("boost_used"), r.get("tracked_matches")) if _movement_tracked(r) else NT_MOVEMENT for r in rows], True),
         ]),
         ("Boost timing", "single", [
             ("BPM (boost used per minute)", lambda v: f"{v:.0f}",
@@ -5639,79 +5727,108 @@ def _compare_page_html(store, slots: list[str], *, self_name: str | None = None,
         ]),
     ]
 
-    # Equal-width slot columns + a "Pro tier" benchmark column at the end.
+    # Two layouts of the same numbers: side by side (players as columns) and
+    # stacked (one table per section, players as rows). The choice is kept in
+    # localStorage ("chumstats-cmp-layout").
     n_slots = len(slots)
-    n_cols = 1 + n_slots + 1  # metric + slots + benchmark
+    n_cols = 1 + n_slots
     colgroup = ('<colgroup><col class="compare-col-metric"/>'
                 + ''.join('<col class="compare-col-slot"/>' for _ in slots)
-                + '<col class="compare-col-pro"/>'
                 + '</colgroup>')
     header_cells = ['<th class="compare-metric-col">Metric</th>']
     for i, slot in enumerate(slots):
         # slot is a raw, user-controlled player name (from ?names= or defaults).
         display_name = html.escape(slot or f"(empty slot {i+1})")
         header_cells.append(f'<th class="compare-col">{display_name}</th>')
-    header_cells.append(
-        '<th class="compare-pro-col" '
-        'title="Soft benchmarks from competitive RL play (Champion/GC tier). '
-        'Treat as references, not hard targets.">Pro tier</th>'
-    )
 
     def winner_classes(values, higher_better):
-        clean = [v for v in values if isinstance(v, (int, float))]
+        clean = [v for v in values
+                 if isinstance(v, (int, float)) and not isinstance(v, bool)]
         if len(clean) >= 2 and len(set(clean)) > 1:
             target = max(clean) if higher_better else min(clean)
             return ["best" if v == target else "" for v in values]
         return ["" for _ in values]
 
-    def pro_cell(label: str) -> str:
-        v = _PRO_BENCHMARKS.get(label)
-        if not v:
-            return '<td class="compare-pro-val dim">--</td>'
-        return f'<td class="compare-pro-val tnum">{v}</td>'
+    def fmt_cell(v, formatter):
+        if isinstance(v, _NotTracked):
+            return _nt_html(v)
+        if isinstance(v, (int, float)):
+            return formatter(v)
+        return "\u2014"
 
-    rows_html: list[str] = []
-    for section_entry in sections:
-        section_name, kind, section_metrics = section_entry
-        rows_html.append(
-            f'<tr class="compare-section-row"><td colspan="{n_cols}">{section_name}</td></tr>'
-        )
+    # Normalise each metric to (label, [(main_html, sub_html)], classes).
+    norm_sections: list = []
+    for section_name, kind, section_metrics in sections:
+        metrics = []
         if kind == "single":
             for label, formatter, values, higher_better in section_metrics:
-                formatted = [(formatter(v) if isinstance(v, (int, float)) else "\u2014") for v in values]
-                classes = winner_classes(values, higher_better)
-                cells = [f'<td class="compare-metric">{_stat_icon_html(label)}{label}</td>']
-                for v, c in zip(formatted, classes):
-                    cls = ("compare-val " + c).strip()
-                    cells.append(f'<td class="{cls}">{v}</td>')
-                cells.append(pro_cell(label))
-                rows_html.append(f'<tr>{"".join(cells)}</tr>')
-        else:  # totavg
+                cells = [(fmt_cell(v, formatter), "") for v in values]
+                metrics.append((label, cells, winner_classes(values, higher_better)))
+        else:  # totavg: highlight on the per-match average so match counts don't decide
             for label, f_tot, f_avg, totals_vals, avg_vals, higher_better in section_metrics:
-                # Highlight on per-match average so players with different match
-                # counts compare fairly (raw totals would just reward whoever has
-                # played more games).
-                classes = winner_classes(avg_vals, higher_better)
-                cells = [f'<td class="compare-metric">{_stat_icon_html(label)}{label}</td>']
-                for tot, avg, c in zip(totals_vals, avg_vals, classes):
-                    tot_s = f_tot(tot) if isinstance(tot, (int, float)) else "\u2014"
-                    avg_s = (f_avg(avg) + " / match") if isinstance(avg, (int, float)) else ""
-                    cls = ("compare-val compare-totavg " + c).strip()
-                    cells.append(
-                        f'<td class="{cls}">'
-                        f'<div class="compare-tot">{tot_s}</div>'
-                        f'<div class="compare-avg">{avg_s}</div>'
-                        f'</td>'
-                    )
-                cells.append(pro_cell(label))
-                rows_html.append(f'<tr>{"".join(cells)}</tr>')
+                cells = []
+                for tot, avg in zip(totals_vals, avg_vals):
+                    sub = (f_avg(avg) + " / match") if (
+                        isinstance(avg, (int, float)) and not isinstance(avg, _NotTracked)) else ""
+                    cells.append((fmt_cell(tot, f_tot), sub))
+                metrics.append((label, cells, winner_classes(avg_vals, higher_better)))
+        norm_sections.append((section_name, kind, metrics))
+
+    rows_html: list[str] = []
+    for section_name, kind, metrics in norm_sections:
+        rows_html.append(
+            f'<tr class="compare-section-row"><td colspan="{n_cols}">{section_name}</td></tr>')
+        for label, cells, classes in metrics:
+            tds = [f'<td class="compare-metric">{_stat_icon_html(label)}{label}</td>']
+            for (main, sub), c in zip(cells, classes):
+                if kind == "single":
+                    tds.append(f'<td class="{("compare-val " + c).strip()}">{main}</td>')
+                else:
+                    tds.append(f'<td class="{("compare-val compare-totavg " + c).strip()}">'
+                               f'<div class="compare-tot">{main}</div>'
+                               f'<div class="compare-avg">{sub}</div></td>')
+            rows_html.append(f'<tr>{"".join(tds)}</tr>')
+
+    stacked_html: list[str] = []
+    for section_name, kind, metrics in norm_sections:
+        head = "".join(f'<th class="num">{_stat_icon_html(lbl)}{lbl}</th>' for lbl, _, _ in metrics)
+        body_rows = []
+        for i, slot in enumerate(slots):
+            nm = html.escape(slot or f"(empty slot {i+1})")
+            tds = [f'<th class="cmp-stack-name" scope="row">{nm}</th>']
+            for _lbl, cells, classes in metrics:
+                main, sub = cells[i]
+                sub_html = f'<div class="compare-avg">{sub}</div>' if sub else ""
+                tds.append(f'<td class="{("compare-val " + classes[i]).strip()}">'
+                           f'<div class="compare-tot">{main}</div>{sub_html}</td>')
+            body_rows.append(f'<tr>{"".join(tds)}</tr>')
+        stacked_html.append(
+            f'<div class="card cmp-stack-sec"><div class="section-title"><span>{section_name}</span></div>'
+            f'<div class="cmp-stack-scroll"><table class="compare-table cmp-stack-table">'
+            f'<thead><tr><th class="cmp-stack-name">Player</th>{head}</tr></thead>'
+            f'<tbody>{"".join(body_rows)}</tbody></table></div></div>')
+
+    layout_seg = (
+        '<div class="seg cmp-layout-seg" role="group" aria-label="Layout">'
+        '<button type="button" class="cmp-layout-btn active" data-layout="side">Side by side</button>'
+        '<button type="button" class="cmp-layout-btn" data-layout="stack">Stacked</button>'
+        '</div>')
+    layout_js = (
+        "<script>(function(){var root=document.getElementById('cmp-root');if(!root)return;"
+        "var btns=root.querySelectorAll('.cmp-layout-btn');"
+        "function set(v){root.setAttribute('data-layout',v);"
+        "btns.forEach(function(b){b.classList.toggle('active',b.dataset.layout===v);});"
+        "try{localStorage.setItem('chumstats-cmp-layout',v);}catch(e){}}"
+        "var saved='side';try{saved=localStorage.getItem('chumstats-cmp-layout')||'side';}catch(e){}"
+        "set(saved==='stack'?'stack':'side');"
+        "btns.forEach(function(b){b.addEventListener('click',function(){set(b.dataset.layout);});});"
+        "})();</script>")
 
     body = f"""
       <div class="page-head">
         <div>
           <h1>Compare players</h1>
-          <div class="sub">Side-by-side lifetime stats. Pick up to 3 players —
-            defaults to the most-played. Best value in each row is highlighted by per-match average.</div>
+          <div class="sub">Pick up to 3 players. Best value in each row is highlighted by per-match average.</div>
         </div>
       </div>
 
@@ -5723,15 +5840,20 @@ def _compare_page_html(store, slots: list[str], *, self_name: str | None = None,
         <button type="submit" class="copy-btn" style="padding:8px 18px;font-size:12px">Compare</button>
       </form>
 
-      {_compare_heatmap_row(slots, touch_data_hm, shot_data, goal_data, scope_label=(f"last {last_n}" if last_n else "lifetime"))}
+      <div id="cmp-root" class="cmp-root" data-layout="side">
+        <div class="cmp-layout-bar">{layout_seg}</div>
+        {_maps_block([(slots[i] or f"(empty slot {i+1})", map_data[i]) for i in range(len(slots))], title="Maps", key="cmp-maps", scope_label=(f"last {last_n} matches" if last_n else "lifetime"))}
 
-      <div class="card" style="padding:0;overflow:hidden;margin-top:16px">
-        <table class="compare-table">
-          {colgroup}
-          <thead><tr>{"".join(header_cells)}</tr></thead>
-          <tbody>{"".join(rows_html)}</tbody>
-        </table>
+        <div class="card cmp-side" style="padding:0;overflow:hidden;margin-top:16px">
+          <table class="compare-table">
+            {colgroup}
+            <thead><tr>{"".join(header_cells)}</tr></thead>
+            <tbody>{"".join(rows_html)}</tbody>
+          </table>
+        </div>
+        <div class="cmp-stack">{"".join(stacked_html)}</div>
       </div>
+      {layout_js}
     """
     return _page_wrap("Compare players", body, active="compare")
 
@@ -6634,33 +6756,12 @@ def _clan_page_html(store, members: list[str], *, self_name: str | None = None,
           </tr>
         """)
 
-    # Club Goal map (real goals only, where the ball crossed the line) and a
-    # separate Shots map. Shots and touches are never labelled as goals.
-    merged_goals, merged_shots = [], []
-    for nm in members:
-        merged_goals.extend(_lifetime_goal_data(store, nm).get("ball_track") or [])
-        merged_shots.extend(_lifetime_shot_data(store, nm).get("ball_track") or [])
-    _svg = {"vb_w": 880, "vb_h": 380, "pitch_w": 800, "pitch_h": 320,
-            "pad_x": 40.0, "pad_y": 30.0}
-
-    def _club_map(title: str, sub: str, pts: list, kind: str = "") -> str:
-        if not pts:
-            return ""
-        return f"""
-          <div class="card">
-            <div class="section-title"><span>{title}</span></div>
-            <div class="map-sub dim">{sub}</div>
-            <div class="map-pitch">{_spot_map_svg({"ball_track": pts, "svg": _svg, "kind": kind})}</div>
-          </div>
-        """
-    heatmap_html = '<div class="md-maps" style="margin-top:14px">' + (
-        _club_map("Goal map",
-                  f"{len(merged_goals)} goal{'s' if len(merged_goals) != 1 else ''} by "
-                  f"{len(members)} member{'s' if len(members) != 1 else ''}: where the ball crossed the line, seen from the front of the net.",
-                  merged_goals, "goals")
-        + _club_map("Shots",
-                    f"{len(merged_shots)} shot{'s' if len(merged_shots) != 1 else ''} on goal, "
-                    f"at the shooter's last touch. Attacking right.", merged_shots)) + '</div>'
+    # Club maps: all members' marks together, each match flipped so the club
+    # attacks right. Same component as Compare and the player page.
+    heatmap_html = '<div style="margin-top:14px">' + _maps_block(
+        [("", _lifetime_maps(store, members, {cm["id"] for cm in clan_matches}))],
+        title="Club maps", key="club-maps",
+        scope_label=f"{len(clan_matches)} club matches") + '</div>'
 
     # Recent clan matches list (last 20).
     mvps_lookup = _match_mvp_lookup(store, [cm["id"] for cm in clan_matches[:20]])
@@ -9902,6 +10003,87 @@ table.history th .rl-icon,
 /* Per-match touch spots: one marker per touch (overlap darkens, so density
    still reads) — clearer than a density heatmap on a single match's ~40 touches. */
 .tspot { fill: var(--accent); fill-opacity: 0.5; stroke: var(--bg-elev); stroke-width: 0.6; }
+
+/* ---- Field maps: one component (fieldmap.py) on Compare, Player, Clubs ---- */
+:root {
+  --fm-turf: #10201f; --fm-line: rgba(255,255,255,0.13); --fm-third: rgba(255,255,255,0.06);
+  --fm-own: rgba(255,255,255,0.28); --fm-dot: #5fb4ec; --fm-halo: rgba(95,180,236,0.16);
+}
+[data-theme="light"] {
+  --fm-turf: #eaf2ee; --fm-line: rgba(12,20,38,0.16); --fm-third: rgba(12,20,38,0.07);
+  --fm-own: rgba(12,20,38,0.30); --fm-dot: #1A74B0; --fm-halo: rgba(26,116,176,0.14);
+}
+.fm-card { margin-top: 16px; }
+.fm-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.fm-scope { color: var(--text-faint); font-weight: 500; text-transform: none; letter-spacing: 0; margin-left: 6px; }
+.fm-seg { flex-wrap: wrap; }
+.fm-note { display: flex; justify-content: space-between; gap: 6px 16px; flex-wrap: wrap; color: var(--text-dim); font-size: 12.5px; margin: 10px 0 16px; }
+.fm-nts { color: var(--text-faint); font-size: 11.5px; }
+.fm-thirds { display: grid; grid-template-columns: repeat(3, 1fr); margin: 6px 4.55% 0; font-size: 11px; color: var(--text-faint); text-align: center; }
+.fm-thirds span { border-top: 2px solid var(--border); padding-top: 4px; }
+.fm-thirds b { color: var(--text); font-weight: 700; }
+.fm-grid { display: grid; grid-template-columns: minmax(0, 760px); justify-content: center; gap: 22px; }
+.fm-heat-light { display: none; }
+[data-theme="light"] .fm-heat-light { display: inline; }
+[data-theme="light"] .fm-heat-dark { display: none; }
+[data-theme="light"] .fm-sw-heat { background: linear-gradient(90deg, rgba(158,204,242,0.4), rgb(26,116,176), rgb(10,33,77)); }
+.fm-grid-multi { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 18px; }
+.fm-grid > .fm-col { min-width: 0; }
+.fm-who { font-weight: 700; font-size: 13px; margin-bottom: 8px; overflow-wrap: anywhere; }
+.fm-head { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 8px;
+  font-size: 11px; font-weight: 600; letter-spacing: 0.02em; color: var(--text-dim); margin-bottom: 6px; }
+.fm-head .fm-own, .fm-head .fm-blue { justify-self: start; }
+.fm-head .fm-opp, .fm-head .fm-orng { justify-self: end; }
+.fm-head .fm-opp { color: var(--accent); }
+.fm-head .fm-blue { color: var(--team-blue); }
+.fm-head .fm-orng { color: var(--team-orng); }
+.fm-head .fm-dir { color: var(--text); white-space: nowrap; }
+.fm-head .fm-dir b { color: var(--accent); font-size: 14px; margin-left: 2px; }
+.fm-svg { display: block; width: 100%; height: auto; }
+.fm-turf { fill: var(--fm-turf); stroke: var(--fm-line); stroke-width: 2; }
+.fm-line { stroke: var(--fm-line); stroke-width: 1.6; }
+.fm-third { stroke: var(--fm-third); stroke-width: 1.4; stroke-dasharray: 6 7; }
+.fm-spot { fill: var(--fm-line); }
+.fm-net-own { fill: var(--fm-own); }
+.fm-net-opp { fill: var(--accent); }
+.fm-net-blue { fill: var(--team-blue); }
+.fm-net-orng { fill: var(--team-orng); }
+.fm-halo { fill: var(--fm-halo); }
+.fm-dot { fill: var(--fm-dot); fill-opacity: 0.85; stroke: var(--card); stroke-width: 0.8; }
+.fm-dot.fm-t0 { fill: var(--team-blue); }
+.fm-dot.fm-t1 { fill: var(--team-orng); }
+.fm-num { fill: #fff; font-size: 12px; font-weight: 800; font-family: Inter, sans-serif; pointer-events: none; }
+.fm-goal-path { stroke: var(--fm-dot); stroke-opacity: 0.32; stroke-width: 1.3; }
+.fm-goal-cross { fill: var(--text); fill-opacity: 0.55; }
+.fm-pass line { stroke: var(--fm-dot); stroke-opacity: 0.5; stroke-linecap: round; }
+.fm-pass polygon { fill: var(--fm-dot); fill-opacity: 0.75; }
+.fm-pass:hover line { stroke-opacity: 1; }
+.fm-foot { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
+.fm-count { font-size: 12px; font-weight: 700; color: var(--text); }
+.fm-legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 11.5px; color: var(--text-dim); }
+.fm-leg { display: inline-flex; align-items: center; gap: 6px; }
+.fm-sw { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--fm-dot); }
+.fm-sw-goal { background: var(--fm-dot); }
+.fm-sw-path { width: 14px; height: 2px; border-radius: 0; background: var(--fm-dot); opacity: 0.5; }
+.fm-sw-pass { width: 14px; height: 2px; border-radius: 0; background: var(--fm-dot); }
+.fm-sw-heat { width: 22px; height: 7px; border-radius: 0; background: linear-gradient(90deg, rgba(38,110,200,0.2), rgb(38,110,200), rgb(120,200,255), rgb(235,248,255)); }
+.fm-sw-none { display: none; }
+.fm-empty { padding: 34px 12px; text-align: center; color: var(--text-faint); font-size: 12.5px;
+  background: var(--fm-turf); border: 1px solid var(--border); }
+/* Compare: two layouts */
+.cmp-layout-bar { display: flex; justify-content: flex-end; margin-top: 14px; }
+.cmp-root[data-layout="side"] .cmp-stack { display: none; }
+.cmp-root[data-layout="stack"] .cmp-side { display: none; }
+.cmp-root[data-layout="stack"] .fm-grid-multi { grid-template-columns: minmax(0, 640px); justify-content: center; }
+.cmp-stack-sec { margin-top: 16px; padding-bottom: 6px; }
+.cmp-stack-scroll { overflow-x: auto; }
+.cmp-stack-table { width: 100%; }
+.cmp-stack-table th, .cmp-stack-table td { white-space: nowrap; padding: 8px 12px; }
+.cmp-stack-table thead th.num { text-align: right; font-size: 11px; color: var(--text-dim); font-weight: 600; }
+.cmp-stack-table td.compare-val { text-align: right; }
+.cmp-stack-name { text-align: left; font-weight: 700; text-transform: none; letter-spacing: 0; position: sticky; left: 0; background: var(--card); }
+/* Not tracked: a stat the live feed cannot give for this player */
+.nt { color: var(--text-faint); font-size: 11.5px; font-weight: 500; border-bottom: 1px dotted var(--text-faint); cursor: help; white-space: nowrap; }
 .hm-layer { mix-blend-mode: screen; }
 [data-theme="light"] .hm-layer { mix-blend-mode: multiply; }
 .hm-legend {
