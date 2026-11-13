@@ -9407,7 +9407,7 @@ p, li { max-width: 72ch; }
 }
 .compare-table td.compare-pro-val.dim { color: var(--text-faint); }
 .compare-pro-src { font-size: 10px; font-weight: 500; font-style: normal; color: var(--text-faint);
-  margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  margin-top: 2px; white-space: normal; line-height: 1.25; }
 .cmp-stack-table td.compare-pro-val, .cmp-stack-table th.cmp-stack-pro {
   border-left: 0; border-top: 1px dashed var(--border-strong); }
 .cmp-stack-table th.cmp-stack-pro { color: var(--text-dim); font-style: italic; font-weight: 600; }
