@@ -9412,6 +9412,7 @@ p, li { max-width: 72ch; }
   margin-top: 2px; white-space: normal; line-height: 1.25; }
 .cmp-stack-table td.compare-pro-val, .cmp-stack-table th.cmp-stack-pro {
   border-left: 0; border-top: 1px dashed var(--border-strong); }
+.cmp-stack-table td.compare-pro-val { text-align: right; }
 .cmp-stack-table th.cmp-stack-pro { color: var(--text-dim); font-style: italic; font-weight: 600; }
 .compare-table td.compare-totavg .compare-tot {
   font-size: 17px; font-weight: 800; line-height: 1.1;
