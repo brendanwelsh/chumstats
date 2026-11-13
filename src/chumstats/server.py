@@ -9376,9 +9376,11 @@ p, li { max-width: 72ch; }
 .compare-table col.compare-col-slot   { width: auto; }
 .compare-table col.compare-col-pro    { width: 150px; }
 @media (max-width: 600px) {
-  .compare-table col.compare-col-metric { width: 30%; }
-  .compare-table col.compare-col-pro { width: 19%; }
+  .compare-table col.compare-col-metric { width: 28%; }
+  .compare-table col.compare-col-pro { width: 16%; }
   .compare-pro-src { display: none; }
+  .compare-table td.compare-totavg .compare-tot { font-size: 13px !important; white-space: nowrap; }
+  .compare-table td.compare-pro-val { font-size: 11px; }
   .compare-table thead th, .compare-table tbody td { padding: 8px 6px !important; font-size: 12px; }
   .compare-table thead th.compare-col { overflow-wrap: anywhere; word-break: break-word; white-space: normal; }
   .compare-table td.compare-val { word-break: normal; overflow-wrap: anywhere; }
