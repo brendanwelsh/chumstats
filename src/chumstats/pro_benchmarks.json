@@ -1,0 +1,52 @@
+{
+  "fetched": "2026-11-13",
+  "note": "Pooled from ballchasing.com group Players stats pages (one saved page each). Built by scripts/build_pro_benchmarks.py.",
+  "modes": {
+    "3": {
+      "players": 63,
+      "player_games": 1254,
+      "values": {
+        "goals_pm": 0.635,
+        "assists_pm": 0.486,
+        "saves_pm": 1.757,
+        "shots_pm": 2.802,
+        "score_pm": 377.064,
+        "shooting_pct": 22.652,
+        "demos_pm": 1.514,
+        "demos_received_pm": 1.514,
+        "bpm": 435.956,
+        "supersonic_pct": 17.301,
+        "avg_speed_kmh": 56.384,
+        "full_boost_pct": 10.685
+      },
+      "games": 209,
+      "team_size": 3,
+      "label": "RLCS 2026 Worlds",
+      "source": "ballchasing.com",
+      "url": "https://ballchasing.com/group/world-championship-bdh552n3l3/players-stats"
+    },
+    "2": {
+      "players": 8,
+      "player_games": 76,
+      "values": {
+        "goals_pm": 1.395,
+        "assists_pm": 0.776,
+        "saves_pm": 2.855,
+        "shots_pm": 5.026,
+        "score_pm": 601.487,
+        "shooting_pct": 27.749,
+        "demos_pm": 1.289,
+        "demos_received_pm": 1.289,
+        "bpm": 463.264,
+        "supersonic_pct": 19.493,
+        "avg_speed_kmh": 57.649,
+        "full_boost_pct": 11.59
+      },
+      "games": 19,
+      "team_size": 2,
+      "label": "RLCS 2026 Worlds 2v2",
+      "source": "ballchasing.com",
+      "url": "https://ballchasing.com/group/1-world-championship-r7u5gew0w0/players-stats"
+    }
+  }
+}

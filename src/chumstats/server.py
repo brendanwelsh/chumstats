@@ -5472,6 +5472,51 @@ def _player_breakdown_html(store, primary_id: str | None, name: str | None,
     return "".join(out)
 
 
+# Pro benchmark column on Compare. Numbers come from pro_benchmarks.json,
+# built by scripts/build_pro_benchmarks.py from ballchasing.com group pages
+# (RLCS 2026 World Championship). Only stats defined the same way as ours are
+# mapped; everything else stays blank. Compare row label -> (json key, format,
+# shown as "/ match").
+PRO_BENCHMARKS_PATH = Path(__file__).resolve().parent / "pro_benchmarks.json"
+_PRO_ROWS: dict[str, tuple[str, str, bool]] = {
+    "Shooting %":                  ("shooting_pct", "{:.1f}%", False),
+    "Demos received / match":      ("demos_received_pm", "{:.2f}", False),
+    "Goals":                       ("goals_pm", "{:.2f}", True),
+    "Assists":                     ("assists_pm", "{:.2f}", True),
+    "Saves":                       ("saves_pm", "{:.2f}", True),
+    "Shots":                       ("shots_pm", "{:.2f}", True),
+    "Demos":                       ("demos_pm", "{:.2f}", True),
+    "Score":                       ("score_pm", "{:,.0f}", True),
+    "Supersonic %":                ("supersonic_pct", "{:.1f}%", False),
+    "Avg speed (km/h)":            ("avg_speed_kmh", "{:.1f}", False),
+    "BPM (boost used per minute)": ("bpm", "{:.0f}", False),
+    "Time at 100 boost %":         ("full_boost_pct", "{:.1f}%", False),
+}
+
+
+def _load_pro_benchmarks(path: Path | None = None) -> dict:
+    try:
+        return json.loads((path or PRO_BENCHMARKS_PATH).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def _pro_bench_for_mode(mode_filter: int | None, data: dict | None = None) -> dict | None:
+    """The benchmark block for this Compare view: 2v2 when filtered to 2v2,
+    3v3 for 3v3 and for all modes; none for 1v1 / 4v4 (no pro sample)."""
+    data = _load_pro_benchmarks() if data is None else data
+    key = {None: "3", 3: "3", 2: "2"}.get(mode_filter)
+    return (data.get("modes") or {}).get(key) if key else None
+
+
+def _pro_bench_title(b: dict, fetched: str) -> str:
+    n = b.get("team_size") or 3
+    size = f"{n}v{n}"
+    return (f"{b.get('source', '')}: {b.get('label', '')} ({size}), "
+            f"{b.get('player_games', 0):,} player-games from {b.get('games', 0):,} games, "
+            f"{b.get('players', 0)} players. Saved {fetched}. {b.get('url', '')}")
+
+
 def _compare_page_html(store, slots: list[str], *, self_name: str | None = None,
                        include_bots: bool = False,
                        mode_filter: int | None = None,
@@ -5731,15 +5776,40 @@ def _compare_page_html(store, slots: list[str], *, self_name: str | None = None,
     # stacked (one table per section, players as rows). The choice is kept in
     # localStorage ("chumstats-cmp-layout").
     n_slots = len(slots)
-    n_cols = 1 + n_slots
+    _pro_data = _load_pro_benchmarks()
+    pro = _pro_bench_for_mode(mode_filter, _pro_data)
+    pro_title = html.escape(_pro_bench_title(pro, _pro_data.get("fetched", ""))) if pro else ""
+    pro_label = html.escape(pro.get("label", "")) if pro else ""
+    n_cols = 1 + n_slots + (1 if pro else 0)
     colgroup = ('<colgroup><col class="compare-col-metric"/>'
                 + ''.join('<col class="compare-col-slot"/>' for _ in slots)
+                + ('<col class="compare-col-pro"/>' if pro else '')
                 + '</colgroup>')
     header_cells = ['<th class="compare-metric-col">Metric</th>']
     for i, slot in enumerate(slots):
         # slot is a raw, user-controlled player name (from ?names= or defaults).
         display_name = html.escape(slot or f"(empty slot {i+1})")
         header_cells.append(f'<th class="compare-col">{display_name}</th>')
+    if pro:
+        header_cells.append(
+            f'<th class="compare-pro-col" title="{pro_title}">Pros'
+            f'<div class="compare-pro-src">ballchasing, {pro_label}</div></th>')
+
+    def pro_text(label: str) -> str | None:
+        """Formatted pro value for a row, or None when not comparable."""
+        spec = _PRO_ROWS.get(label)
+        if not pro or not spec:
+            return None
+        v = (pro.get("values") or {}).get(spec[0])
+        if not isinstance(v, (int, float)):
+            return None
+        return spec[1].format(v) + (" / match" if spec[2] else "")
+
+    def pro_td(label: str) -> str:
+        t = pro_text(label)
+        if t is None:
+            return '<td class="compare-pro-val dim"></td>'
+        return f'<td class="compare-pro-val" title="{pro_title}">{t}</td>'
 
     def winner_classes(values, higher_better):
         clean = [v for v in values
@@ -5787,6 +5857,8 @@ def _compare_page_html(store, slots: list[str], *, self_name: str | None = None,
                     tds.append(f'<td class="{("compare-val compare-totavg " + c).strip()}">'
                                f'<div class="compare-tot">{main}</div>'
                                f'<div class="compare-avg">{sub}</div></td>')
+            if pro:
+                tds.append(pro_td(label))
             rows_html.append(f'<tr>{"".join(tds)}</tr>')
 
     stacked_html: list[str] = []
@@ -5802,6 +5874,14 @@ def _compare_page_html(store, slots: list[str], *, self_name: str | None = None,
                 tds.append(f'<td class="{("compare-val " + classes[i]).strip()}">'
                            f'<div class="compare-tot">{main}</div>{sub_html}</td>')
             body_rows.append(f'<tr>{"".join(tds)}</tr>')
+        if pro and any(pro_text(lbl) for lbl, _, _ in metrics):
+            tds = [f'<th class="cmp-stack-name cmp-stack-pro" scope="row" title="{pro_title}">Pros'
+                   f'<div class="compare-pro-src">ballchasing, {pro_label}</div></th>']
+            for lbl, _cells, _classes in metrics:
+                t = pro_text(lbl)
+                tds.append(f'<td class="compare-pro-val" title="{pro_title}">{t}</td>' if t
+                           else '<td class="compare-pro-val dim"></td>')
+            body_rows.append(f'<tr class="cmp-stack-pro-row">{"".join(tds)}</tr>')
         stacked_html.append(
             f'<div class="card cmp-stack-sec"><div class="section-title"><span>{section_name}</span></div>'
             f'<div class="cmp-stack-scroll"><table class="compare-table cmp-stack-table">'
@@ -9294,11 +9374,11 @@ p, li { max-width: 72ch; }
 .compare-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
 .compare-table col.compare-col-metric { width: 220px; }
 .compare-table col.compare-col-slot   { width: auto; }
-.compare-table col.compare-col-pro    { width: 110px; }
+.compare-table col.compare-col-pro    { width: 150px; }
 @media (max-width: 600px) {
-  .compare-table col.compare-col-metric { width: 34%; }
-  .compare-table col.compare-col-pro { width: 0; }
-  .compare-table th.compare-pro-col, .compare-table td.compare-pro-val { display: none; }
+  .compare-table col.compare-col-metric { width: 30%; }
+  .compare-table col.compare-col-pro { width: 19%; }
+  .compare-pro-src { display: none; }
   .compare-table thead th, .compare-table tbody td { padding: 8px 6px !important; font-size: 12px; }
   .compare-table thead th.compare-col { overflow-wrap: anywhere; word-break: break-word; white-space: normal; }
   .compare-table td.compare-val { word-break: normal; overflow-wrap: anywhere; }
@@ -9326,6 +9406,11 @@ p, li { max-width: 72ch; }
   border-left: 1px dashed var(--border-strong);
 }
 .compare-table td.compare-pro-val.dim { color: var(--text-faint); }
+.compare-pro-src { font-size: 10px; font-weight: 500; font-style: normal; color: var(--text-faint);
+  margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cmp-stack-table td.compare-pro-val, .cmp-stack-table th.cmp-stack-pro {
+  border-left: 0; border-top: 1px dashed var(--border-strong); }
+.cmp-stack-table th.cmp-stack-pro { color: var(--text-dim); font-style: italic; font-weight: 600; }
 .compare-table td.compare-totavg .compare-tot {
   font-size: 17px; font-weight: 800; line-height: 1.1;
 }

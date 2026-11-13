@@ -114,7 +114,19 @@ Everything comes from Rocket League's local Stats API on the recording PC. Three
   the alias name is rewritten inside `raw_events` (`Store.apply_raw_name_aliases`), because every
   name-keyed stat above joins by name. Before 11/13 this left Vex's demos, maps, goal speed,
   hardest hit and highlights at 0.
-- The "Pro tier" column was removed 11/13: its numbers had no source.
+- The old "Pro tier" column was removed 11/13: its numbers had no source. Its replacement,
+  **Pros** on Compare, is sourced: RLCS 2026 World Championship player stats from ballchasing.com
+  group pages (3v3: 1,254 player-games, 209 games, 63 players; 2v2 when Compare is filtered to
+  2v2: 76 player-games, 19 games). Saved once by hand on 11/13 (no API token on file; ballchasing's
+  terms rule out crawling) and pooled by `scripts/build_pro_benchmarks.py` into
+  `src/chumstats/pro_benchmarks.json`, which keeps the date and source URLs. Shown only where
+  the stat means the same thing as ours: goals, assists, saves, shots, score and demos per match,
+  shooting %, demos received / match, BPM (boost used per minute, 0-100 scale), supersonic %
+  (2200 uu/s), avg speed (uu/s x 0.036 = km/h), time at 100 boost %. Blank on purpose: ground /
+  wall / air (ballchasing splits by height, we by wheel contact), thirds (their share of time vs
+  our share of touches), touches, win and MVP rate, goal speed, highlights. This is a static
+  reference file; player data still never comes from a third party. To refresh: save the two
+  group "Players stats" pages and rerun the script (usage in its header).
 - Field maps (`fieldmap.py`) are one component on Compare, Player, Clubs and the match page.
   Career maps flip Orange matches 180 degrees so the player always attacks right (checked 11/13:
   all 112 of his Blue goals crossed at +Y, all 66 Orange at -Y). A pass is a touch followed by a
