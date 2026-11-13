@@ -9294,38 +9294,13 @@ p, li { max-width: 72ch; }
 .compare-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
 .compare-table col.compare-col-metric { width: 220px; }
 .compare-table col.compare-col-slot   { width: auto; }
-.compare-table col.compare-col-pro    { width: 110px; }
 @media (max-width: 600px) {
   .compare-table col.compare-col-metric { width: 34%; }
-  .compare-table col.compare-col-pro { width: 0; }
-  .compare-table th.compare-pro-col, .compare-table td.compare-pro-val { display: none; }
   .compare-table thead th, .compare-table tbody td { padding: 8px 6px !important; font-size: 12px; }
   .compare-table thead th.compare-col { overflow-wrap: anywhere; word-break: break-word; white-space: normal; }
   .compare-table td.compare-val { word-break: normal; overflow-wrap: anywhere; }
 }
 
-/* Pro benchmark column: text-only, italic, lower contrast — reads as a
-   reference, not a participating stat. */
-.compare-table th.compare-pro-col {
-  color: var(--text-dim);
-  font-style: italic;
-  font-size: 11px;
-  letter-spacing: 0;
-  text-transform: none;
-  border-left: 1px dashed var(--border-strong);
-  text-align: center;
-}
-.compare-table td.compare-pro-val {
-  text-align: center;
-  font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 12px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  color: var(--text-dim);
-  font-style: italic;
-  border-left: 1px dashed var(--border-strong);
-}
-.compare-table td.compare-pro-val.dim { color: var(--text-faint); }
 .compare-table td.compare-totavg .compare-tot {
   font-size: 17px; font-weight: 800; line-height: 1.1;
 }
