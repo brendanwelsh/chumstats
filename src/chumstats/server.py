@@ -7427,15 +7427,41 @@ def _nav(active: str = "", friend_mode: bool = False) -> str:
   </a>
   <div class="navlinks">{"".join(parts)}</div>
   <div class="nav-aside">
-    {"".join(util_parts)}
+    <div class="nav-utils" id="nav-utils">{"".join(util_parts)}</div>
     {live_pip}
     <button id="theme-toggle" type="button" aria-label="Toggle theme">
       <span class="theme-icon" id="theme-icon"></span>
       <span id="theme-label">Dark</span>
     </button>
+    <button id="nav-more" type="button" aria-label="More" aria-expanded="false" aria-controls="nav-utils">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    </button>
   </div>
 </nav>
-'''
+''' + _NAV_MORE_SCRIPT
+
+_NAV_MORE_SCRIPT = """
+<script>
+(function () {
+  var nav = document.currentScript.previousElementSibling;
+  var btn = document.getElementById('nav-more');
+  if (!nav || !btn) return;
+  function set(open) {
+    nav.classList.toggle('more-open', open);
+    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  }
+  btn.addEventListener('click', function (e) {
+    e.stopPropagation();
+    set(!nav.classList.contains('more-open'));
+  });
+  var menu = document.getElementById('nav-utils');
+  document.addEventListener('click', function (e) {
+    if (menu && !menu.contains(e.target)) set(false);
+  });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') set(false); });
+}());
+</script>
+"""
 
 _THEME_SCRIPT = """
 <script>
@@ -7835,7 +7861,7 @@ svg.plat-ic { width: 15px; height: 15px; flex: 0 0 auto; }
     scrollbar-width: none;
   }
   .topnav > .navlinks::-webkit-scrollbar { height: 0; }
-  .topnav > .navlinks .navlink { flex: 0 0 auto; }
+  .topnav > .navlinks .navlink { flex: 1 0 auto; justify-content: center; }
 }
 .navlink:hover, .nav-link:hover { color: var(--text); background: var(--card); }
 .navlink.active, .nav-link.active {
@@ -7845,6 +7871,16 @@ svg.plat-ic { width: 15px; height: 15px; flex: 0 0 auto; }
 }
 
 .nav-aside { display: flex; align-items: center; gap: 10px; }
+.nav-utils { display: flex; align-items: center; gap: 1px; }
+#nav-more {
+  display: none; align-items: center; justify-content: center;
+  width: 34px; height: 34px; padding: 0;
+  background: var(--card); color: var(--text-dim);
+  border: 1px solid var(--border); border-radius: 0; cursor: pointer;
+  transition: all 150ms ease;
+}
+#nav-more:hover, .topnav.more-open #nav-more { color: var(--accent); border-color: var(--accent-line); }
+#nav-more svg { width: 16px; height: 16px; }
 #theme-toggle, .theme-toggle {
   display: inline-flex; align-items: center; gap: 8px;
   background: var(--card); color: var(--text-dim);
@@ -7879,6 +7915,25 @@ svg.plat-ic { width: 15px; height: 15px; flex: 0 0 auto; }
   100% { box-shadow: 0 0 0 0    rgba(52, 211, 153, 0.0);  }
 }
 .live-pip.off .dot { background: var(--text-faint); animation: none; }
+@media (max-width: 760px) {
+  /* Phones: "Get the client" / "How it works" fold into a small menu so the
+     top row is just brand on the left, two square buttons on the right. */
+  .topnav { position: relative; }
+  .topnav > .nav-aside { flex-wrap: nowrap; gap: 8px; }
+  #nav-more { display: inline-flex; }
+  #theme-toggle { width: 34px; height: 34px; padding: 0; justify-content: center; }
+  #theme-label { display: none; }
+  .nav-utils {
+    display: none;
+    position: absolute; top: 52px; right: 0; z-index: 50;
+    flex-direction: column; align-items: stretch;
+    min-width: 180px; padding: 6px;
+    background: var(--card); border: 1px solid var(--border);
+    box-shadow: 0 10px 28px rgba(0,0,0,.28);
+  }
+  .topnav.more-open .nav-utils { display: flex; }
+  .nav-utils .navlink { padding: 10px 12px; font-size: 13.5px; }
+}
 
 /* Page chrome */
 .page-head {
