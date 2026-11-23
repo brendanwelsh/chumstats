@@ -173,3 +173,20 @@ def test_maps_block_lists_not_tracked_kinds(tmp_path):
     for lbl, _ in fm.NOT_TRACKED:
         assert lbl in html
     assert "You attack this way" in html and "Your goal" in html and "Their goal" in html
+
+
+def test_kickoff_scramble_dropped_from_touch_maps():
+    """11/23: the kickoff scramble (tagged kickoff touch plus the 50/50 hits in
+    the next second near the spot) and untagged overtime kickoffs stay off the
+    career touch map; play elsewhere and a mid-match first touch stay."""
+    bt = [
+        {"t": 10.0, "x": 0, "y": 2000, "z": 90, "is_kickoff": True},      # joined mid-match
+        {"t": 20.0, "x": 10, "y": -40, "z": 93, "is_kickoff": True},      # kickoff
+        {"t": 20.3, "x": 120, "y": -380, "z": 150, "is_kickoff": False},  # scramble
+        {"t": 21.5, "x": 300, "y": -500, "z": 93, "is_kickoff": False},   # play
+        {"t": 300.0, "x": 5, "y": 20, "z": 93, "is_kickoff": False},      # overtime kickoff
+        {"t": 300.4, "x": -90, "y": 300, "z": 120, "is_kickoff": False},  # scramble
+        {"t": 305.0, "x": 2500, "y": 3000, "z": 300, "is_kickoff": False},
+    ]
+    kept = [b["t"] for b in server._drop_kickoff_scramble(bt)]
+    assert kept == [10.0, 21.5, 305.0]

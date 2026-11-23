@@ -119,6 +119,13 @@ Everything comes from Rocket League's local Stats API on the recording PC. Three
   Career maps flip Orange matches 180 degrees so the player always attacks right (checked 11/13:
   all 112 of his Blue goals crossed at +Y, all 66 Orange at -Y). A pass is a touch followed by a
   teammate's touch within 4 s and at least 600 uu away, with no opponent touch between.
+- Career touch maps (11/23) read the same per-match playback track as the match page, so goal-replay
+  re-broadcasts are gone, and drop the kickoff scramble: the kickoff touch plus any touch within 1 s
+  and 700 uu of the centre spot (`server._drop_kickoff_scramble`). An untagged overtime kickoff (a
+  resting ball on the spot) counts too. Measured on his 237 matches: 9,159 raw touches became 7,512;
+  the thirds moved from 35/42/23 to 41/31/28. Passes no longer start or end in the scramble (747 to
+  662) and a map with more than 200 passes draws each arrow faint. Touch maps under 1,500 touches
+  blur wider so a last-20 Compare map is not speckle.
 
 ## Requirements
 

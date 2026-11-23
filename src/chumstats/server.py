@@ -1519,6 +1519,34 @@ def _lifetime_derived(store, name: str | None, match_ids: set | None = None) -> 
     return totals
 
 
+# The kickoff scramble: the first touch after the ball is placed (tagged
+# is_kickoff) and the 50/50 hits right after it, all within a few metres of
+# the centre spot. Measured 11/23 on 237 matches: ~990 touches land within
+# 700 uu of centre inside 1 s of the kickoff touch, against ~30 in the next
+# half second. Left in, they swamp a career touch map.
+KICKOFF_SCRAMBLE_S = 1.0
+KICKOFF_SCRAMBLE_UU = 700.0
+
+
+def _drop_kickoff_scramble(ball_track: list) -> list:
+    out, k_t = [], None
+    for bh in ball_track:
+        # The overtime kickoff follows no goal, so the playback never tags it;
+        # a touch of a resting ball on the centre spot can only be a kickoff.
+        # A tagged first touch far from the spot (recording joined mid-match)
+        # is ordinary play and stays.
+        d = math.hypot(bh.get("x", 0), bh.get("y", 0))
+        if ((bh.get("is_kickoff") and d < KICKOFF_SCRAMBLE_UU)
+                or (d < 160 and (bh.get("z") or 0) <= 130)):
+            k_t = bh.get("t", 0)
+            continue
+        if (k_t is not None and bh.get("t", 0) - k_t <= KICKOFF_SCRAMBLE_S
+                and math.hypot(bh.get("x", 0), bh.get("y", 0)) < KICKOFF_SCRAMBLE_UU):
+            continue
+        out.append(bh)
+    return out
+
+
 def _lifetime_touch_data(store, name: str | None, match_ids: set | None = None) -> dict:
     """Aggregate BallHit positions across every match the player appeared in,
     plus a defensive/neutral/offensive third breakdown using the team_num
@@ -1568,47 +1596,39 @@ def _lifetime_touch_data(store, name: str | None, match_ids: set | None = None) 
         }
         if not team_by_match:
             return empty
-        # Limit raw event scan to BallHits from this player's (in-scope) matches.
-        rows = con.execute(f"""
-            SELECT match_id, payload FROM raw_events
-            WHERE event = 'BallHit'
-              AND match_id IN (SELECT match_id FROM match_player_stats WHERE name = ?{team_filter})
-        """, base_args).fetchall()
-
+    # Touches come from the same per-match playback track as the match page
+    # (11/23): goal-replay re-broadcasts are dropped there and kickoff first
+    # touches are tagged. Reading raw BallHits here counted the replays and the
+    # whole kickoff scramble, which drew a hot spot beside the centre spot and
+    # skewed the thirds.
     touches: list[dict] = []
     thirds = {"def": 0, "neu": 0, "off": 0}
     seen_matches: set[str] = set()
-    for r in rows:
-        try:
-            d = _json.loads(r["payload"])
-        except Exception:
+    for mid, team in team_by_match.items():
+        team = team if team in (0, 1) else 0
+        pb = _cached_playback(store, mid)
+        if not pb:
             continue
-        players_arr = d.get("Players") or []
-        # Credit the touch only to the actual toucher (Players[0]), matching the
-        # per-match path. The old `any(name in Players)` over-credited a teammate's
-        # hit to this player.
-        if (players_arr[0].get("Name") if players_arr else "") != name:
-            continue
-        loc = (d.get("Ball") or {}).get("Location") or {}
-        x = float(loc.get("X") or 0)
-        y = float(loc.get("Y") or 0)
-        team = team_by_match.get(r["match_id"], 0)
-        sx, sy = project(x, y)
-        touches.append({
-            "x": x, "y": y, "sx": sx, "sy": sy,
-            "player": name, "team": team, "t": 0,
-        })
-        seen_matches.add(r["match_id"])
-        # Defensive-third sign: Team 0 (Blue) defends -Y (its goals land at +Y,
-        # checked against GoalScored impacts 10/24), so signed_y = y * (-1 if team 0
-        # else +1) gives a defensive-positive value.
-        signed_y = y * (-1 if team == 0 else 1)
-        if signed_y > 1707:
-            thirds["def"] += 1
-        elif signed_y < -1707:
-            thirds["off"] += 1
-        else:
-            thirds["neu"] += 1
+        for bh in _drop_kickoff_scramble(pb.get("ball_track") or []):
+            if bh.get("player") != name:
+                continue
+            x, y = float(bh.get("x") or 0), float(bh.get("y") or 0)
+            sx, sy = project(x, y)
+            touches.append({
+                "x": x, "y": y, "sx": sx, "sy": sy,
+                "player": name, "team": team, "t": bh.get("t", 0),
+            })
+            seen_matches.add(mid)
+            # Defensive-third sign: Team 0 (Blue) defends -Y (its goals land at
+            # +Y, checked against GoalScored impacts 10/24), so signed_y = y *
+            # (-1 if team 0 else +1) gives a defensive-positive value.
+            signed_y = y * (-1 if team == 0 else 1)
+            if signed_y > 1707:
+                thirds["def"] += 1
+            elif signed_y < -1707:
+                thirds["off"] += 1
+            else:
+                thirds["neu"] += 1
 
     return {
         "ball_track": touches,
@@ -1768,8 +1788,13 @@ def _match_spatial(pb: dict, name: str, team) -> dict:
         if bh:
             sx, sy = fm.flip(bh["sx"], bh["sy"], team)
             out[kind].append({"sx": sx, "sy": sy, "tip": ev.get("label") or ""})
+    # Kickoff scramble touches are neither the start nor the end of a pass
+    # (11/23: 70 of 747 career passes fanned out from the centre spot).
+    play = {id(x) for x in _drop_kickoff_scramble(bt)}
     for a, b in zip(bt, bt[1:]):
         if a.get("player") != name or not b.get("player") or b["player"] == name:
+            continue
+        if id(a) not in play or id(b) not in play:
             continue
         if b.get("team") != a.get("team") or b.get("is_kickoff"):
             continue
@@ -1801,8 +1826,6 @@ def _lifetime_maps(store, names, match_ids: set | None = None) -> dict:
             continue
         td = _lifetime_touch_data(store, nm, match_ids)
         for bh in td.get("ball_track") or []:
-            if abs(bh.get("x", 0)) <= _KICKOFF_CENTER_UU and abs(bh.get("y", 0)) <= _KICKOFF_CENTER_UU:
-                continue
             sx, sy = fm.flip(bh["sx"], bh["sy"], bh.get("team"))
             out["touches"].append({"sx": sx, "sy": sy})
         for k, v in (td.get("thirds") or {}).items():
@@ -4972,7 +4995,10 @@ def _heat_png_data_uri(ball: list, svg: dict, team, compact: bool,
         gy = int((bh["sy"] - pad_y) / ph * ny)
         grid[min(max(gy, 0), ny - 1)][min(max(gx, 0), nx - 1)] += 1.0
     n = len(ball)
-    sigma = (2.2 if compact else 2.6) if n < 80 else (1.8 if n < 400 else 1.4)
+    # Smoothing by sample size: a few hundred touches on a 100 x 40 grid at
+    # sigma 1.4 read as speckle (11/23, Compare's last-20 maps), so the blur
+    # stays wide until there are thousands of touches.
+    sigma = (2.2 if compact else 2.6) if n < 80 else (2.6 if n < 1500 else (2.0 if n < 5000 else 1.7))
     rad = int(math.ceil(sigma * 3))
     ker = [math.exp(-(k * k) / (2 * sigma * sigma)) for k in range(-rad, rad + 1)]
     tmp = [[sum(row[x + k - rad] * ker[k] for k in range(len(ker)) if 0 <= x + k - rad < nx)
@@ -8134,6 +8160,8 @@ table.history tr.match-row:hover { background: var(--card-hover); }
   overflow-x: auto;
   text-overflow: clip;
 }
+/* The club page's own title shows the whole name (11/23: "Ball Touch..."). */
+h1 .club-name { display: inline; max-width: none; white-space: normal; overflow: visible; overflow-wrap: anywhere; }
 .row .vs-team {
   display: inline-block;
   max-width: 180px;
@@ -10047,6 +10075,13 @@ table.history th .rl-icon,
 .fm-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .fm-scope { color: var(--text-faint); font-weight: 500; text-transform: none; letter-spacing: 0; margin-left: 6px; }
 .fm-seg { flex-wrap: wrap; }
+/* Phones: the six map kinds as an even 3 x 2 grid, not a 4 + 2 wrap (11/23). */
+@media (max-width: 600px) {
+  .fm-seg { display: grid; grid-template-columns: repeat(3, 1fr); width: 100%; }
+  .fm-seg button { border-bottom: 1px solid var(--border); }
+  .fm-seg button:nth-child(3n) { border-right: 0; }
+  .fm-seg button:nth-last-child(-n+3) { border-bottom: 0; }
+}
 .fm-note { display: flex; justify-content: space-between; gap: 6px 16px; flex-wrap: wrap; color: var(--text-dim); font-size: 12.5px; margin: 10px 0 16px; }
 .fm-nts { color: var(--text-faint); font-size: 11.5px; }
 .fm-thirds { display: grid; grid-template-columns: repeat(3, 1fr); margin: 6px 4.55% 0; font-size: 11px; color: var(--text-faint); text-align: center; }
@@ -10088,6 +10123,8 @@ table.history th .rl-icon,
 .fm-pass line { stroke: var(--fm-dot); stroke-opacity: 0.5; stroke-linecap: round; }
 .fm-pass polygon { fill: var(--fm-dot); fill-opacity: 0.75; }
 .fm-pass:hover line { stroke-opacity: 1; }
+.fm-pass-dense line { stroke-opacity: 0.2; }
+.fm-pass-dense polygon { fill-opacity: 0.3; }
 .fm-foot { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
 .fm-count { font-size: 12px; font-weight: 700; color: var(--text); }
 .fm-legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 11.5px; color: var(--text-dim); }

@@ -122,15 +122,20 @@ def _arrowhead(x1, y1, x2, y2, size=9.0) -> str:
 
 def arrows_svg(segs: list) -> str:
     """Pass arrows: from (sx, sy) to (ex, ey)."""
-    w = 2.2 if len(segs) <= 60 else (1.6 if len(segs) <= 200 else 1.2)
+    n = len(segs)
+    w = 2.2 if n <= 60 else (1.6 if n <= 200 else 1.2)
+    head = 9.0 if n <= 200 else 6.0
+    # Hundreds of career passes at full strength read as one solid tangle
+    # (11/23); dense maps draw each arrow faint so the busy lanes show.
+    cls = "fm-pass" if n <= 200 else "fm-pass fm-pass-dense"
     out = []
     for s in segs:
         tip = html.escape(s.get("tip") or "")
         out.append(
-            f'<g class="fm-pass"><title>{tip}</title>'
+            f'<g class="{cls}"><title>{tip}</title>'
             f'<line x1="{s["sx"]:.1f}" y1="{s["sy"]:.1f}" x2="{s["ex"]:.1f}" y2="{s["ey"]:.1f}" '
             f'stroke-width="{w}"/>'
-            f'<polygon points="{_arrowhead(s["sx"], s["sy"], s["ex"], s["ey"])}"/></g>')
+            f'<polygon points="{_arrowhead(s["sx"], s["sy"], s["ex"], s["ey"], head)}"/></g>')
     return "".join(out)
 
 
